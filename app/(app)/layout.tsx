@@ -21,7 +21,7 @@ export default async function AppLayout({
 
       <div className="flex-1 flex flex-col min-w-0">
         <Topbar
-          email={profile.email}
+          phone={profile.phone}
           fullName={profile.full_name}
           role={profile.role}
         />

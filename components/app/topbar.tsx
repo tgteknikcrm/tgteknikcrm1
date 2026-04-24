@@ -15,17 +15,19 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Menu, LogOut, User as UserIcon } from "lucide-react";
 import { Sidebar } from "./sidebar";
 import { signOut } from "@/app/(auth)/login/actions";
+import { formatPhoneForDisplay } from "@/lib/phone";
 
 interface TopbarProps {
-  email: string;
+  phone: string | null;
   fullName: string | null;
   role: "admin" | "operator";
 }
 
-export function Topbar({ email, fullName, role }: TopbarProps) {
+export function Topbar({ phone, fullName, role }: TopbarProps) {
   const [open, setOpen] = useState(false);
   const isAdmin = role === "admin";
-  const display = fullName || email;
+  const phoneDisplay = formatPhoneForDisplay(phone);
+  const display = fullName || phoneDisplay;
   const initials = display
     .split(" ")
     .map((s) => s[0])
@@ -67,7 +69,7 @@ export function Topbar({ email, fullName, role }: TopbarProps) {
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>
               <div className="text-sm font-medium truncate">{display}</div>
-              <div className="text-xs text-muted-foreground truncate">{email}</div>
+              <div className="text-xs text-muted-foreground truncate">{phoneDisplay}</div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled>

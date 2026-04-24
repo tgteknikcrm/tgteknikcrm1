@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/app/page-header";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -12,7 +11,10 @@ import {
 } from "@/components/ui/table";
 import { createClient, getProfile } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/supabase/types";
+import { formatPhoneForDisplay } from "@/lib/phone";
 import { RoleSelect } from "./role-select";
+import { CreateUserDialog } from "./create-user-dialog";
+import { ActiveToggle, DeleteUserButton } from "./user-row-actions";
 
 export const metadata = { title: "Ayarlar" };
 
@@ -24,7 +26,10 @@ export default async function SettingsPage() {
   let users: Profile[] = [];
   try {
     const supabase = await createClient();
-    const { data } = await supabase.from("profiles").select("*").order("created_at", { ascending: false });
+    const { data } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("created_at", { ascending: false });
     users = data ?? [];
   } catch {
     /* empty */
@@ -32,41 +37,67 @@ export default async function SettingsPage() {
 
   return (
     <>
-      <PageHeader title="Ayarlar" description="Kullanıcılar ve sistem ayarları (sadece yönetici)" />
+      <PageHeader
+        title="Ayarlar"
+        description="Kullanıcı yönetimi ve sistem bilgileri (sadece yönetici)"
+      />
 
       <Card>
-        <CardHeader>
-          <CardTitle>Kullanıcılar</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Kullanıcılar</CardTitle>
+            <CardDescription>Toplam {users.length} kullanıcı</CardDescription>
+          </div>
+          <CreateUserDialog />
         </CardHeader>
         <CardContent className="p-0">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Ad Soyad</TableHead>
-                <TableHead>E-posta</TableHead>
+                <TableHead>Telefon</TableHead>
                 <TableHead>Rol</TableHead>
                 <TableHead>Durum</TableHead>
                 <TableHead>Kayıt</TableHead>
+                <TableHead className="w-12"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {users.map((u) => (
-                <TableRow key={u.id}>
-                  <TableCell className="font-medium">{u.full_name || "—"}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{u.email}</TableCell>
-                  <TableCell>
-                    <RoleSelect userId={u.id} role={u.role} disabled={u.id === me.id} />
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={u.active ? "default" : "secondary"}>
-                      {u.active ? "Aktif" : "Pasif"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {new Date(u.created_at).toLocaleDateString("tr-TR")}
+              {users.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-muted-foreground py-6">
+                    Kullanıcı yok.
                   </TableCell>
                 </TableRow>
-              ))}
+              )}
+              {users.map((u) => {
+                const isSelf = u.id === me.id;
+                return (
+                  <TableRow key={u.id}>
+                    <TableCell className="font-medium">
+                      {u.full_name || "—"}
+                      {isSelf && (
+                        <span className="ml-2 text-xs text-muted-foreground">(sen)</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-mono text-sm text-muted-foreground">
+                      {formatPhoneForDisplay(u.phone)}
+                    </TableCell>
+                    <TableCell>
+                      <RoleSelect userId={u.id} role={u.role} disabled={isSelf} />
+                    </TableCell>
+                    <TableCell>
+                      <ActiveToggle userId={u.id} active={u.active} disabled={isSelf} />
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {new Date(u.created_at).toLocaleDateString("tr-TR")}
+                    </TableCell>
+                    <TableCell>
+                      <DeleteUserButton userId={u.id} disabled={isSelf} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </CardContent>
@@ -84,7 +115,11 @@ export default async function SettingsPage() {
             </span>
           </div>
           <div>
-            Admin e-posta: <span className="font-mono text-foreground">tgteknikcrm@outlook.com</span>
+            Giriş: <span className="font-mono text-foreground">telefon + parola</span>
+          </div>
+          <div>
+            Yönetici telefon:{" "}
+            <span className="font-mono text-foreground">+90 542 646 90 70</span>
           </div>
         </CardContent>
       </Card>

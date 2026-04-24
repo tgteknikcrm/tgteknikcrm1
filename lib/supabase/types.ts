@@ -7,7 +7,7 @@ export type ToolCondition = "yeni" | "iyi" | "kullanilabilir" | "degistirilmeli"
 
 export interface Profile {
   id: string;
-  email: string;
+  email: string | null;
   full_name: string | null;
   role: UserRole;
   phone: string | null;

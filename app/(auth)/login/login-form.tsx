@@ -60,13 +60,14 @@ export function LoginForm({ next }: { next: string }) {
           <TabsContent value="signin">
             <form action={handleSignIn} className="space-y-4 mt-4">
               <div className="space-y-2">
-                <Label htmlFor="email">E-posta</Label>
+                <Label htmlFor="phone">Telefon Numarası</Label>
                 <Input
-                  id="email"
-                  name="email"
-                  type="email"
-                  placeholder="ornek@firma.com"
-                  autoComplete="email"
+                  id="phone"
+                  name="phone"
+                  type="tel"
+                  placeholder="0542 646 90 70"
+                  autoComplete="tel"
+                  inputMode="tel"
                   required
                 />
               </div>
@@ -94,8 +95,16 @@ export function LoginForm({ next }: { next: string }) {
                 <Input id="su-name" name="full_name" required />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="su-email">E-posta</Label>
-                <Input id="su-email" name="email" type="email" required />
+                <Label htmlFor="su-phone">Telefon Numarası</Label>
+                <Input
+                  id="su-phone"
+                  name="phone"
+                  type="tel"
+                  placeholder="0542 646 90 70"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  required
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="su-password">Parola (min 8)</Label>
@@ -112,8 +121,8 @@ export function LoginForm({ next }: { next: string }) {
                 Kayıt Ol
               </Button>
               <p className="text-xs text-muted-foreground text-center">
-                Yeni kayıtlar varsayılan olarak <b>operatör</b> rolünde açılır. Admin (
-                <code>tgteknikcrm@outlook.com</code>) otomatik admin olur.
+                Yeni kayıtlar varsayılan olarak <b>operatör</b> rolünde açılır.
+                Yöneticiniz gerekirse rolünüzü değiştirir.
               </p>
             </form>
           </TabsContent>
