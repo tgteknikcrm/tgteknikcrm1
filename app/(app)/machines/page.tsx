@@ -11,6 +11,8 @@ import {
 import { Factory, ArrowRight, Plus } from "lucide-react";
 import Link from "next/link";
 import { MachineDialog } from "./machine-dialog";
+import { DeleteButton } from "../operators/delete-button";
+import { deleteMachine } from "./actions";
 
 export const metadata = { title: "Makineler" };
 
@@ -85,6 +87,13 @@ export default async function MachinesPage() {
                         Düzenle
                       </Button>
                     }
+                  />
+                  <DeleteButton
+                    action={async () => {
+                      "use server";
+                      return deleteMachine(m.id);
+                    }}
+                    confirmText={`'${m.name}' makinesi silinsin mi? Bu işleme bağlı üretim kayıtları varsa engellenebilir.`}
                   />
                 </div>
               </CardContent>

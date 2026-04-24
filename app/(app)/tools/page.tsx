@@ -11,13 +11,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
-import { TOOL_CONDITION_LABEL, type Tool } from "@/lib/supabase/types";
-import { Plus, Wrench, AlertTriangle } from "lucide-react";
+import {
+  TOOL_CONDITION_LABEL,
+  type Tool,
+  type Supplier,
+} from "@/lib/supabase/types";
+import { Plus, Wrench, AlertTriangle, Truck, ShoppingCart } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { SearchInput } from "@/components/app/search-input";
 import { ToolDialog } from "./tool-dialog";
 import { DeleteButton } from "../operators/delete-button";
 import { deleteTool } from "./actions";
+import { SupplierDialog } from "../suppliers/supplier-dialog";
+import { OrderDialog } from "../orders/order-dialog";
 
 export const metadata = { title: "Takım Listesi" };
 
@@ -28,6 +34,7 @@ export default async function ToolsPage({
 }) {
   const { q } = await searchParams;
   let tools: Tool[] = [];
+  let suppliers: Pick<Supplier, "id" | "name">[] = [];
 
   try {
     const supabase = await createClient();
@@ -37,8 +44,12 @@ export default async function ToolsPage({
         `name.ilike.%${q}%,code.ilike.%${q}%,type.ilike.%${q}%,location.ilike.%${q}%`,
       );
     }
-    const { data } = await query;
-    tools = data ?? [];
+    const [toolsRes, suppliersRes] = await Promise.all([
+      query,
+      supabase.from("suppliers").select("id, name").eq("active", true).order("name"),
+    ]);
+    tools = toolsRes.data ?? [];
+    suppliers = suppliersRes.data ?? [];
   } catch {
     /* not configured */
   }
@@ -51,6 +62,22 @@ export default async function ToolsPage({
         actions={
           <>
             <SearchInput placeholder="Takım ara..." />
+            <SupplierDialog
+              trigger={
+                <Button variant="outline">
+                  <Truck className="size-4" /> Tedarikçi Ekle
+                </Button>
+              }
+            />
+            <OrderDialog
+              suppliers={suppliers}
+              defaultCategory="takim"
+              trigger={
+                <Button variant="outline">
+                  <ShoppingCart className="size-4" /> Sipariş Oluştur
+                </Button>
+              }
+            />
             <ToolDialog
               trigger={
                 <Button>
