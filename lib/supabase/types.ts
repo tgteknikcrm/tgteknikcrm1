@@ -121,9 +121,36 @@ export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {
 
 export const MACHINE_STATUS_COLOR: Record<MachineStatus, string> = {
   aktif: "bg-emerald-500",
-  durus: "bg-amber-500",
-  bakim: "bg-blue-500",
+  durus: "bg-zinc-400",
+  bakim: "bg-amber-500",
   ariza: "bg-red-500",
+};
+
+// Card border + badge tint per status — used by dashboard machine cards.
+export const MACHINE_STATUS_TONE: Record<
+  MachineStatus,
+  { border: string; badge: string; dot: string }
+> = {
+  aktif: {
+    border: "border-l-emerald-500",
+    badge: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+    dot: "bg-emerald-500",
+  },
+  durus: {
+    border: "border-l-zinc-400",
+    badge: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300 border-zinc-500/30",
+    dot: "bg-zinc-400",
+  },
+  bakim: {
+    border: "border-l-amber-500",
+    badge: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+    dot: "bg-amber-500",
+  },
+  ariza: {
+    border: "border-l-red-500",
+    badge: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
+    dot: "bg-red-500",
+  },
 };
 
 export const SHIFT_LABEL: Record<Shift, string> = {

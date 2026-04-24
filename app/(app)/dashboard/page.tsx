@@ -9,32 +9,51 @@ import {
   Users,
   TrendingUp,
   AlertCircle,
+  User as UserIcon,
+  Clock,
 } from "lucide-react";
-import { MACHINE_STATUS_COLOR, MACHINE_STATUS_LABEL, SHIFT_LABEL } from "@/lib/supabase/types";
+import {
+  MACHINE_STATUS_LABEL,
+  MACHINE_STATUS_TONE,
+  SHIFT_LABEL,
+} from "@/lib/supabase/types";
 import type { Machine, ProductionEntry } from "@/lib/supabase/types";
-import { formatDate } from "@/lib/utils";
+import { formatDate, cn } from "@/lib/utils";
 import Link from "next/link";
 
 export const metadata = { title: "Dashboard" };
+
+type MachineCard = {
+  machine: Machine;
+  job: { id: string; job_no: string | null; part_name: string; quantity: number; customer: string } | null;
+  totalProduced: number;
+  operatorName: string | null;
+  startTime: string | null;
+  endTime: string | null;
+};
+
+type EntryRow = {
+  machine_id: string;
+  job_id: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  job: { id: string; job_no: string | null; part_name: string; quantity: number; customer: string } | null;
+  operator: { full_name: string } | null;
+};
 
 async function getDashboardData() {
   try {
     const supabase = await createClient();
 
     const today = new Date().toISOString().slice(0, 10);
-    const weekAgo = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
 
-    const [machinesRes, todayRes, weekRes, openJobsRes, toolsLowRes, operatorsRes] =
+    const [machinesRes, todayRes, openJobsRes, toolsLowRes, operatorsRes, todayEntriesRes] =
       await Promise.all([
         supabase.from("machines").select("*").order("name"),
         supabase
           .from("production_entries")
           .select("produced_qty, scrap_qty, downtime_minutes")
           .eq("entry_date", today),
-        supabase
-          .from("production_entries")
-          .select("entry_date, produced_qty")
-          .gte("entry_date", weekAgo),
         supabase
           .from("jobs")
           .select("id", { count: "exact", head: true })
@@ -44,44 +63,87 @@ async function getDashboardData() {
           .select("id, name, quantity, min_quantity")
           .order("quantity"),
         supabase.from("operators").select("id", { count: "exact", head: true }).eq("active", true),
+        supabase
+          .from("production_entries")
+          .select(
+            `machine_id, job_id, start_time, end_time,
+             job:jobs(id, job_no, part_name, quantity, customer),
+             operator:operators(full_name)`,
+          )
+          .eq("entry_date", today)
+          .order("created_at", { ascending: false }),
       ]);
 
     const machines: Machine[] = machinesRes.data ?? [];
-    const todayEntries = (todayRes.data ?? []) as Pick<ProductionEntry, "produced_qty" | "scrap_qty" | "downtime_minutes">[];
+    const todayEntries = (todayRes.data ?? []) as Pick<
+      ProductionEntry,
+      "produced_qty" | "scrap_qty" | "downtime_minutes"
+    >[];
     const todayProduced = todayEntries.reduce((s, e) => s + (e.produced_qty ?? 0), 0);
     const todayScrap = todayEntries.reduce((s, e) => s + (e.scrap_qty ?? 0), 0);
     const todayDowntime = todayEntries.reduce((s, e) => s + (e.downtime_minutes ?? 0), 0);
 
-    const weekByDate = new Map<string, number>();
-    for (const row of (weekRes.data ?? []) as { entry_date: string; produced_qty: number }[]) {
-      weekByDate.set(row.entry_date, (weekByDate.get(row.entry_date) ?? 0) + row.produced_qty);
+    // Latest entry per machine (with a job attached) — drives the machine cards
+    const entries = (todayEntriesRes.data ?? []) as unknown as EntryRow[];
+    const latestByMachine = new Map<string, EntryRow>();
+    for (const e of entries) {
+      if (!latestByMachine.has(e.machine_id) && e.job) {
+        latestByMachine.set(e.machine_id, e);
+      }
     }
+
+    // Total produced per active job (across all dates)
+    const activeJobIds = Array.from(latestByMachine.values())
+      .map((e) => e.job_id)
+      .filter((v): v is string => Boolean(v));
+    const totalsByJob = new Map<string, number>();
+    if (activeJobIds.length > 0) {
+      const { data: allEntries } = await supabase
+        .from("production_entries")
+        .select("job_id, produced_qty")
+        .in("job_id", activeJobIds);
+      for (const e of (allEntries ?? []) as { job_id: string | null; produced_qty: number }[]) {
+        if (e.job_id) {
+          totalsByJob.set(e.job_id, (totalsByJob.get(e.job_id) ?? 0) + (e.produced_qty ?? 0));
+        }
+      }
+    }
+
+    const machineCards: MachineCard[] = machines.map((m) => {
+      const e = latestByMachine.get(m.id);
+      return {
+        machine: m,
+        job: e?.job ?? null,
+        totalProduced: e?.job ? totalsByJob.get(e.job.id) ?? 0 : 0,
+        operatorName: e?.operator?.full_name ?? null,
+        startTime: e?.start_time ?? null,
+        endTime: e?.end_time ?? null,
+      };
+    });
 
     const toolsLow = (toolsLowRes.data ?? []).filter(
       (t) => (t.quantity ?? 0) <= (t.min_quantity ?? 0),
     );
 
     return {
-      machines,
+      machineCards,
       todayProduced,
       todayScrap,
       todayDowntime,
       openJobs: openJobsRes.count ?? 0,
       activeOperators: operatorsRes.count ?? 0,
       toolsLow,
-      weekByDate,
       configured: true,
     };
   } catch {
     return {
-      machines: [],
+      machineCards: [] as MachineCard[],
       todayProduced: 0,
       todayScrap: 0,
       todayDowntime: 0,
       openJobs: 0,
       activeOperators: 0,
-      toolsLow: [],
-      weekByDate: new Map<string, number>(),
+      toolsLow: [] as { id: string; name: string; quantity: number; min_quantity: number }[],
       configured: false,
     };
   }
@@ -152,11 +214,7 @@ export default async function DashboardPage() {
           value={data.openJobs}
           hint="beklemede + üretimde"
         />
-        <StatCard
-          icon={Users}
-          label="Aktif Operatör"
-          value={data.activeOperators}
-        />
+        <StatCard icon={Users} label="Aktif Operatör" value={data.activeOperators} />
         <StatCard
           icon={AlertCircle}
           label="Eksik Takım"
@@ -166,41 +224,16 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-4 mt-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Factory className="size-4" /> Makine Durumu
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {data.machines.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Henüz makine yok. Seed verisi çalışmadı mı?
-              </p>
-            ) : (
-              data.machines.map((m) => (
-                <Link
-                  key={m.id}
-                  href={`/machines/${m.id}`}
-                  className="flex items-center justify-between p-3 rounded-md border hover:bg-accent transition"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className={`size-2.5 rounded-full ${MACHINE_STATUS_COLOR[m.status]}`} />
-                    <div>
-                      <div className="font-medium">{m.name}</div>
-                      {m.model && (
-                        <div className="text-xs text-muted-foreground">{m.model}</div>
-                      )}
-                    </div>
-                  </div>
-                  <Badge variant="outline">{MACHINE_STATUS_LABEL[m.status]}</Badge>
-                </Link>
-              ))
-            )}
-          </CardContent>
-        </Card>
+      <h2 className="mt-8 mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
+        <Factory className="size-4" /> Makineler
+      </h2>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        {data.machineCards.map((c) => (
+          <MachineStatusCard key={c.machine.id} card={c} />
+        ))}
+      </div>
 
+      <div className="grid lg:grid-cols-2 gap-4 mt-8">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -229,34 +262,123 @@ export default async function DashboardPage() {
             )}
           </CardContent>
         </Card>
-      </div>
 
-      <Card className="mt-6">
-        <CardHeader>
-          <CardTitle>Bugünkü Vardiya Özeti</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <div className="text-2xl font-semibold">{data.todayProduced}</div>
-              <div className="text-xs text-muted-foreground">Üretim (adet)</div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Bugünkü Vardiya Özeti</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <div className="text-2xl font-semibold">{data.todayProduced}</div>
+                <div className="text-xs text-muted-foreground">Üretim (adet)</div>
+              </div>
+              <div>
+                <div className="text-2xl font-semibold text-amber-600">{data.todayScrap}</div>
+                <div className="text-xs text-muted-foreground">Fire / Hurda</div>
+              </div>
+              <div>
+                <div className="text-2xl font-semibold">{data.todayDowntime}</div>
+                <div className="text-xs text-muted-foreground">Duruş (dk)</div>
+              </div>
             </div>
-            <div>
-              <div className="text-2xl font-semibold text-amber-600">{data.todayScrap}</div>
-              <div className="text-xs text-muted-foreground">Fire / Hurda</div>
+            <div className="mt-6 text-xs text-muted-foreground text-center">
+              Vardiyalar: {Object.values(SHIFT_LABEL).join(" · ")}
             </div>
-            <div>
-              <div className="text-2xl font-semibold">{data.todayDowntime}</div>
-              <div className="text-xs text-muted-foreground">Duruş (dk)</div>
-            </div>
-          </div>
-          <div className="mt-6 text-xs text-muted-foreground text-center">
-            Vardiyalar: {Object.values(SHIFT_LABEL).join(" · ")}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
     </>
   );
+}
+
+function MachineStatusCard({ card }: { card: MachineCard }) {
+  const { machine: m, job, totalProduced, operatorName, startTime, endTime } = card;
+  const tone = MACHINE_STATUS_TONE[m.status];
+  const pct = job && job.quantity > 0 ? Math.min(100, Math.round((totalProduced / job.quantity) * 100)) : 0;
+
+  return (
+    <Link href={`/machines/${m.id}`} className="block">
+      <Card className={cn("border-l-4 hover:shadow-md transition-shadow", tone.border)}>
+        <CardHeader className="pb-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <CardTitle className="text-base truncate">{m.name}</CardTitle>
+              <p className="text-xs text-muted-foreground truncate">{m.model || "—"}</p>
+            </div>
+            <Badge className={cn("border", tone.badge)} variant="outline">
+              <span className={cn("size-1.5 rounded-full mr-1.5", tone.dot)} />
+              {MACHINE_STATUS_LABEL[m.status]}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 pt-0">
+          {job ? (
+            <>
+              <div>
+                <div className="flex items-baseline justify-between">
+                  <span className="text-xs text-muted-foreground">Üretilen</span>
+                  <span className="text-xs font-medium tabular-nums">%{pct}</span>
+                </div>
+                <div className="text-xl font-semibold font-mono tabular-nums mt-0.5">
+                  {totalProduced}
+                  <span className="text-muted-foreground font-normal"> / {job.quantity}</span>
+                </div>
+                <div className="text-xs text-muted-foreground truncate mt-0.5">
+                  {job.part_name}
+                  {job.job_no && <span className="ml-1.5 opacity-60">#{job.job_no}</span>}
+                </div>
+                <div className="mt-2 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn("h-full rounded-full transition-all", tone.dot)}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs pt-1">
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3 text-muted-foreground" />
+                  <div>
+                    <div className="text-muted-foreground">Başlama</div>
+                    <div className="font-mono">{formatTime(startTime)}</div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Clock className="size-3 text-muted-foreground" />
+                  <div>
+                    <div className="text-muted-foreground">Bitiş</div>
+                    <div className="font-mono">{formatTime(endTime)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1 border-t text-sm">
+                <UserIcon className="size-3.5 text-muted-foreground" />
+                <span className="truncate">{operatorName || "—"}</span>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground italic py-4">
+              {m.status === "ariza"
+                ? "Arızalı — üretim yok"
+                : m.status === "bakim"
+                ? "Bakımda — üretim yok"
+                : m.status === "durus"
+                ? "Duruşta"
+                : "Bugün üretim atanmamış"}
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    </Link>
+  );
+}
+
+function formatTime(t: string | null): string {
+  if (!t) return "—";
+  // Postgres time comes as "HH:MM:SS" — keep just HH:MM
+  return t.slice(0, 5);
 }
 
 function StatCard({
@@ -280,14 +402,16 @@ function StatCard({
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
               {label}
             </div>
-            <div className={`text-2xl font-semibold mt-1 ${tone === "warn" ? "text-amber-600" : ""}`}>
+            <div
+              className={`text-2xl font-semibold mt-1 ${tone === "warn" ? "text-amber-600" : ""}`}
+            >
               {value}
             </div>
-            {hint && (
-              <div className="text-xs text-muted-foreground mt-1">{hint}</div>
-            )}
+            {hint && <div className="text-xs text-muted-foreground mt-1">{hint}</div>}
           </div>
-          <Icon className={`size-5 ${tone === "warn" ? "text-amber-600" : "text-muted-foreground"}`} />
+          <Icon
+            className={`size-5 ${tone === "warn" ? "text-amber-600" : "text-muted-foreground"}`}
+          />
         </div>
       </CardContent>
     </Card>
