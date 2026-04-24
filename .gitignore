@@ -37,6 +37,9 @@ yarn-error.log*
 # claude local overrides (ignored so permissions don't leak if repo is shared)
 .claude/settings.local.json
 
+# Supabase MCP config (contains personal access token)
+.mcp.json
+
 # vercel
 .vercel
 
