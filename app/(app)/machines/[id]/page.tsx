@@ -40,6 +40,7 @@ import {
   Hash,
 } from "lucide-react";
 import { MachineDialog } from "../machine-dialog";
+import { ShiftAssignments } from "../shift-assignments";
 import { cn, formatDate } from "@/lib/utils";
 
 type EntryWithJoins = ProductionEntry & {
@@ -93,7 +94,7 @@ export default async function MachineDetailPage({
   if (machineRes.error || !machineRes.data) notFound();
   const machine = machineRes.data as Machine;
 
-  const [entriesRes, weekRes, todayStatsRes, jobsRes] = await Promise.all([
+  const [entriesRes, weekRes, todayStatsRes, jobsRes, assignmentsRes, operatorsRes] = await Promise.all([
     supabase
       .from("production_entries")
       .select(
@@ -120,6 +121,15 @@ export default async function MachineDetailPage({
       .eq("machine_id", id)
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("machine_shift_assignments")
+      .select(`*, operator:operators(id, full_name, employee_no, phone)`)
+      .eq("machine_id", id),
+    supabase
+      .from("operators")
+      .select("id, full_name, employee_no, phone, shift, active")
+      .eq("active", true)
+      .order("full_name"),
   ]);
 
   const entries = (entriesRes.data ?? []) as EntryWithJoins[];
@@ -135,6 +145,30 @@ export default async function MachineDetailPage({
     downtime_minutes: number;
   }>;
   const jobs = (jobsRes.data ?? []) as JobRow[];
+  const assignments = (assignmentsRes.data ?? []) as Array<{
+    id: string;
+    machine_id: string;
+    shift: Shift;
+    operator_id: string;
+    notes: string | null;
+    assigned_by: string | null;
+    created_at: string;
+    updated_at: string;
+    operator: {
+      id: string;
+      full_name: string;
+      employee_no: string | null;
+      phone: string | null;
+    } | null;
+  }>;
+  const operators = (operatorsRes.data ?? []) as Array<{
+    id: string;
+    full_name: string;
+    employee_no: string | null;
+    phone: string | null;
+    shift: Shift | null;
+    active: boolean;
+  }>;
 
   // Current active production — most recent entry today with a linked job
   const currentEntry = entries.find(
@@ -354,6 +388,22 @@ export default async function MachineDetailPage({
           ) : (
             <EmptyCurrentJob status={machine.status} />
           )}
+        </CardContent>
+      </Card>
+
+      {/* Shift assignments */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <UserIcon className="size-4" /> Vardiya Operatör Atamaları
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ShiftAssignments
+            machineId={machine.id}
+            assignments={assignments}
+            operators={operators}
+          />
         </CardContent>
       </Card>
 

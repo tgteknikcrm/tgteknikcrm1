@@ -58,6 +58,26 @@ export interface Operator {
   updated_at: string;
 }
 
+export interface MachineShiftAssignment {
+  id: string;
+  machine_id: string;
+  shift: Shift;
+  operator_id: string;
+  notes: string | null;
+  assigned_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Turkish manufacturing shift windows:
+//   sabah  08:00–16:00  · aksam  16:00–24:00  · gece   00:00–08:00
+export function getCurrentShift(now = new Date()): Shift {
+  const h = now.getHours();
+  if (h >= 8 && h < 16) return "sabah";
+  if (h >= 16) return "aksam";
+  return "gece";
+}
+
 export interface Tool {
   id: string;
   code: string | null;
