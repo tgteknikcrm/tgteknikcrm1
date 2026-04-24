@@ -1,5 +1,4 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/app/page-header";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -9,37 +8,26 @@ import {
   Users,
   TrendingUp,
   AlertCircle,
-  Clock,
-  AlertTriangle,
-  PauseCircle,
-  Coffee,
 } from "lucide-react";
-import {
-  MACHINE_STATUS_LABEL,
-  MACHINE_STATUS_TONE,
-  SHIFT_LABEL,
-} from "@/lib/supabase/types";
+import { SHIFT_LABEL } from "@/lib/supabase/types";
 import type { Machine, ProductionEntry } from "@/lib/supabase/types";
-import { formatDate, cn } from "@/lib/utils";
-import Link from "next/link";
+import { formatDate } from "@/lib/utils";
+import { MachinesGrid, type MachineCardData } from "./machines-grid";
 
 export const metadata = { title: "Dashboard" };
-
-type MachineCard = {
-  machine: Machine;
-  job: { id: string; job_no: string | null; part_name: string; quantity: number; customer: string } | null;
-  totalProduced: number;
-  operatorName: string | null;
-  startTime: string | null;
-  endTime: string | null;
-};
 
 type EntryRow = {
   machine_id: string;
   job_id: string | null;
   start_time: string | null;
   end_time: string | null;
-  job: { id: string; job_no: string | null; part_name: string; quantity: number; customer: string } | null;
+  job: {
+    id: string;
+    job_no: string | null;
+    part_name: string;
+    quantity: number;
+    customer: string;
+  } | null;
   operator: { full_name: string } | null;
 };
 
@@ -85,7 +73,6 @@ async function getDashboardData() {
     const todayScrap = todayEntries.reduce((s, e) => s + (e.scrap_qty ?? 0), 0);
     const todayDowntime = todayEntries.reduce((s, e) => s + (e.downtime_minutes ?? 0), 0);
 
-    // Latest entry per machine (with a job attached) — drives the machine cards
     const entries = (todayEntriesRes.data ?? []) as unknown as EntryRow[];
     const latestByMachine = new Map<string, EntryRow>();
     for (const e of entries) {
@@ -94,7 +81,6 @@ async function getDashboardData() {
       }
     }
 
-    // Total produced per active job (across all dates)
     const activeJobIds = Array.from(latestByMachine.values())
       .map((e) => e.job_id)
       .filter((v): v is string => Boolean(v));
@@ -111,7 +97,7 @@ async function getDashboardData() {
       }
     }
 
-    const machineCards: MachineCard[] = machines.map((m) => {
+    const machineCards: MachineCardData[] = machines.map((m) => {
       const e = latestByMachine.get(m.id);
       return {
         machine: m,
@@ -139,7 +125,7 @@ async function getDashboardData() {
     };
   } catch {
     return {
-      machineCards: [] as MachineCard[],
+      machineCards: [] as MachineCardData[],
       todayProduced: 0,
       todayScrap: 0,
       todayDowntime: 0,
@@ -226,14 +212,7 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <h2 className="mt-8 mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
-        <Factory className="size-4" /> Makineler
-      </h2>
-      <div className="grid auto-rows-fr grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {data.machineCards.map((c) => (
-          <MachineStatusCard key={c.machine.id} card={c} />
-        ))}
-      </div>
+      <MachinesGrid cards={data.machineCards} />
 
       <div className="grid lg:grid-cols-2 gap-4 mt-8">
         <Card>
@@ -292,190 +271,6 @@ export default async function DashboardPage() {
       </div>
     </>
   );
-}
-
-function MachineStatusCard({ card }: { card: MachineCard }) {
-  const { machine: m, job, totalProduced, operatorName, startTime, endTime } = card;
-  const tone = MACHINE_STATUS_TONE[m.status];
-  const pct = job && job.quantity > 0 ? Math.min(100, Math.round((totalProduced / job.quantity) * 100)) : 0;
-  const initials = operatorName
-    ? operatorName.split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase()
-    : "?";
-
-  return (
-    <Link href={`/machines/${m.id}`} className="block h-full group">
-      <Card
-        className={cn(
-          "relative h-full flex flex-col overflow-hidden gap-0 py-0",
-          "transition-all duration-200 ease-out",
-          "hover:shadow-lg hover:-translate-y-0.5",
-          "bg-gradient-to-b from-card to-muted/20",
-        )}
-      >
-        {/* Top accent strip */}
-        <div className={cn("h-1 w-full", tone.dot)} />
-
-        <CardHeader className="pt-5 pb-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <CardTitle className="text-base font-bold tracking-tight truncate">
-                {m.name}
-              </CardTitle>
-              <p className="text-[11px] text-muted-foreground truncate font-mono mt-0.5">
-                {m.model || "—"}
-              </p>
-            </div>
-            <Badge
-              variant="outline"
-              className={cn("border gap-1.5 font-medium", tone.badge)}
-            >
-              <span
-                className={cn(
-                  "size-1.5 rounded-full",
-                  tone.dot,
-                  m.status === "aktif" && "animate-pulse",
-                )}
-              />
-              {MACHINE_STATUS_LABEL[m.status]}
-            </Badge>
-          </div>
-        </CardHeader>
-
-        <CardContent className="flex-1 flex flex-col pt-0 pb-5">
-          {job ? (
-            <div className="flex-1 flex flex-col justify-between gap-4">
-              {/* Production progress */}
-              <div>
-                <div className="flex items-baseline justify-between mb-1.5">
-                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    Üretim
-                  </span>
-                  <span className="text-xs font-bold tabular-nums text-foreground">
-                    %{pct}
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold font-mono tabular-nums leading-none">
-                    {totalProduced}
-                  </span>
-                  <span className="text-sm text-muted-foreground tabular-nums">
-                    / {job.quantity}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
-                  <span className="truncate">{job.part_name}</span>
-                  {job.job_no && (
-                    <span className="opacity-60 font-mono shrink-0">
-                      #{job.job_no}
-                    </span>
-                  )}
-                </div>
-                <div className="mt-3 h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className={cn(
-                      "h-full rounded-full transition-all duration-500 ease-out",
-                      tone.dot,
-                    )}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                {/* Time row */}
-                <div className="grid grid-cols-2 gap-3 text-xs">
-                  <div className="flex items-center gap-2">
-                    <div className="size-7 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
-                      <Clock className="size-3.5 text-muted-foreground" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
-                        Başlama
-                      </div>
-                      <div className="font-mono font-semibold tabular-nums text-sm leading-tight">
-                        {formatTime(startTime)}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="size-7 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
-                      <Clock className="size-3.5 text-muted-foreground" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
-                        Bitiş
-                      </div>
-                      <div className="font-mono font-semibold tabular-nums text-sm leading-tight">
-                        {formatTime(endTime)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Operator */}
-                <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-2.5">
-                  <div
-                    className={cn(
-                      "size-8 rounded-full flex items-center justify-center text-[11px] font-bold border shrink-0",
-                      tone.badge,
-                    )}
-                  >
-                    {initials}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
-                      Operatör
-                    </div>
-                    <div className="text-sm font-semibold truncate leading-tight">
-                      {operatorName || "—"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <EmptyMachineState status={m.status} />
-          )}
-        </CardContent>
-      </Card>
-    </Link>
-  );
-}
-
-function EmptyMachineState({ status }: { status: Machine["status"] }) {
-  const tone = MACHINE_STATUS_TONE[status];
-  const cfg =
-    status === "ariza"
-      ? { icon: AlertTriangle, title: "Arızalı", note: "Tezgah devre dışı" }
-      : status === "bakim"
-      ? { icon: Wrench, title: "Bakımda", note: "Planlı bakım" }
-      : status === "durus"
-      ? { icon: PauseCircle, title: "Duruşta", note: "Üretim durdu" }
-      : { icon: Coffee, title: "Boşta", note: "İş atanmamış" };
-  const Icon = cfg.icon;
-
-  return (
-    <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 py-4">
-      <div
-        className={cn(
-          "size-14 rounded-2xl flex items-center justify-center border",
-          tone.badge,
-        )}
-      >
-        <Icon className="size-6" />
-      </div>
-      <div>
-        <p className="text-sm font-semibold">{cfg.title}</p>
-        <p className="text-xs text-muted-foreground mt-0.5">{cfg.note}</p>
-      </div>
-    </div>
-  );
-}
-
-function formatTime(t: string | null): string {
-  if (!t) return "—";
-  // Postgres time comes as "HH:MM:SS" — keep just HH:MM
-  return t.slice(0, 5);
 }
 
 function StatCard({
