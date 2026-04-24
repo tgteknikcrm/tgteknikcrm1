@@ -1,145 +1,183 @@
 # TG Teknik — Üretim Takip Sistemi
 
-**Proje sahibi:** TG Teknik (imalat atölyesi) · Admin e-posta: `tgteknikcrm@outlook.com`
+**Proje sahibi:** TG Teknik (imalat atölyesi) · Admin girişi: telefon `+90 542 646 90 70`
 **Proje dili:** Türkçe (UI), kod İngilizce
 **İletişim:** Samimi Türkçe ton (kullanıcı "dostum" diye hitap ediyor). Her küçük adımda yes/no sorma — akışı kes, tek onay al, bitir.
+**Git:** `https://github.com/tgteknikcrm/tgteknikcrm1` (main branch, push aktif)
 
 ---
 
 ## Ne Yapar Bu Uygulama?
 
-TG Teknik atölyesi için **web tabanlı PWA** — masaüstünden ve mobilden açılabilen üretim takip sistemi.
+TG Teknik atölyesi için **web tabanlı PWA** — masaüstünden ve mobilden açılabilen üretim + satın alma + teknik resim takip sistemi.
 
-**Atölye:** 4 CNC tezgah — **Fanuc, Tekna-1, Tekna-2, BWX**.
+**Atölye:** 5 CNC tezgah — Fanuc, Tekna-1, Tekna-2, BWX, Akat.
 
 **Ana işlevler:**
-1. **Dashboard** — günlük üretim özeti, makine durumu, eksik takım uyarısı
+1. **Dashboard** — KPI'lar + makine kartları (renkli durum: yeşil aktif / sarı bakım / kırmızı arıza) + göster/gizle modu + eksik takım + vardiya özeti
 2. **Üretim Formları** — günlük vardiya bazlı üretim kayıtları (ana iş akışı)
-3. **İşler/Siparişler** — müşteri, parça, adet, teslim tarihi, makine+operatör atama
-4. **Makineler** — 4 makinenin durumu + geçmiş üretim
-5. **Operatörler** — CRUD, vardiya ataması
-6. **Takım Listesi** — takım envanteri (kod, ölçü, stok, durum) + arama
-7. **Teknik Resimler** — PDF/görsel upload, Supabase Storage
-8. **Raporlar** — tarih aralığı filtresi, makine bazlı özet, **Excel export**
-9. **Ayarlar** (admin) — kullanıcı rol yönetimi
-10. **PWA** — "Ana Ekrana Ekle" ile mobilde native gibi çalışır
+3. **İşler** (müşteri siparişleri) — müşteri, parça, adet, teslim tarihi, makine+operatör atama
+4. **Siparişler** (satın alma) — tedarikçilere verilen siparişler, hızlı kategori preset'leri
+5. **Tedarikçiler** — tedarikçi firma yönetimi
+6. **Makineler** — kart grid (güncel vardiyanın operatörü avatar'la) + detay sayfa (profesyonel dashboard: aktif iş, ilerleme, vardiya atamaları, 7g trend, takımlar, iş geçmişi)
+7. **Operatörler** — CRUD, vardiya ataması
+8. **Takım Listesi** — takım envanteri + arama + Tedarikçi/Sipariş kısa yolları
+9. **Teknik Resimler** — PDF + görsel upload, **Fabric.js annotation editor** (sadece görseller), PDF export, WhatsApp paylaşım
+10. **Raporlar** — tarih aralığı filtresi, makine bazlı özet, Excel export
+11. **Ayarlar** (admin) — kullanıcı rol yönetimi, yeni kullanıcı ekle, aktif/pasif, sil
+12. **Global Arama** — sağ altta sabit Arama FAB (⌘K / Ctrl+K / "/") — 7 kaynakta paralel arama
+13. **PWA** — "Ana Ekrana Ekle" ile mobilde native gibi
 
 ---
 
-## Teknoloji Yığını (Tech Stack)
+## Teknoloji Yığını
 
 | Katman | Teknoloji |
 |---|---|
 | Framework | **Next.js 16.2.4** (App Router, TypeScript, **Turbopack**) |
-| UI | **Tailwind CSS v4** (`@theme inline` syntax) + **shadcn/ui "new-york"** |
+| UI | **Tailwind CSS v4** (`@theme inline`) + **shadcn/ui "new-york"** |
 | Database | **Supabase** (PostgreSQL + RLS + Storage + Auth) |
 | Client | `@supabase/supabase-js` + `@supabase/ssr` |
 | Forms | react-hook-form + zod |
 | Icons | lucide-react |
-| Charts | recharts (şu an minimal kullanım) |
+| Charts | inline SVG/div bars (recharts kuruluydu, şu an kullanılmıyor) |
 | Excel | xlsx (client-side dynamic import) |
+| **Annotation** | **fabric** v6 (canvas-based editor) |
+| **PDF Export** | **jspdf** (lazy loaded) |
 | Toast | sonner |
 | PWA | Next.js built-in (app/manifest.ts + app/icon.tsx) |
-| Deployment | GitHub → **Vercel** (otomatik deploy) |
+| Deployment | GitHub → **Vercel** (henüz deploy edilmedi) |
 
-### ⚠️ Önemli Next.js 16 Özellikleri
+### ⚠️ Next.js 16 Özellikleri
 
-- **Turbopack varsayılan** — webpack kullanan eklentiler (`@ducanh2912/next-pwa` gibi) çatışır
+- **Turbopack varsayılan** — webpack eklentileri (ör. `@ducanh2912/next-pwa`) çatışır
 - **`middleware.ts` deprecated** → **`proxy.ts`** kullanıyoruz (fonksiyon adı: `proxy`)
 - `cookies()`, `params`, `searchParams` hepsi **Promise** — `await` gerekir
 - `next/og` built-in → dinamik PWA ikonları için `app/icon.tsx` kullanıyoruz
 
 ---
 
-## Klasör Yapısı
+## Klasör Yapısı (güncel)
 
 ```
 tgteknikcrm/
 ├── app/
 │   ├── (auth)/
-│   │   ├── layout.tsx          → ortalanmış auth layout
+│   │   ├── layout.tsx
 │   │   └── login/
-│   │       ├── page.tsx        → LoginForm sayfası
-│   │       ├── login-form.tsx  → client form (Tabs: Giriş/Kayıt)
-│   │       └── actions.ts      → signIn, signUp, signOut (server actions)
+│   │       ├── page.tsx
+│   │       ├── login-form.tsx       → telefon + parola tabs (kayıt / giriş)
+│   │       └── actions.ts           → signIn/signUp/signOut (virtual-email auth)
 │   ├── (app)/
-│   │   ├── layout.tsx          → sidebar + topbar (auth gerektirir)
-│   │   ├── dashboard/page.tsx  → KPI'lar + makine durumu + eksik takım
+│   │   ├── layout.tsx               → sidebar + mobile-nav + <SearchFab/>
+│   │   ├── dashboard/
+│   │   │   ├── page.tsx             → KPI, MachinesGrid, eksik takım, vardiya özeti
+│   │   │   └── machines-grid.tsx    → client, göster/gizle modu, localStorage
 │   │   ├── machines/
-│   │   │   ├── page.tsx
-│   │   │   ├── [id]/page.tsx   → detay + son 30 üretim
-│   │   │   ├── machine-dialog.tsx (client)
+│   │   │   ├── page.tsx             → kart grid, güncel vardiyadaki operatör
+│   │   │   ├── [id]/page.tsx        → profesyonel detay sayfası
+│   │   │   ├── machine-dialog.tsx
+│   │   │   ├── shift-assignments.tsx → vardiya operatör atama UI (client)
+│   │   │   ├── assignments-actions.ts → assignOperator / clearAssignment
 │   │   │   └── actions.ts
 │   │   ├── operators/
 │   │   │   ├── page.tsx
 │   │   │   ├── operator-dialog.tsx
-│   │   │   ├── delete-button.tsx → generic silme butonu
+│   │   │   ├── delete-button.tsx    → GENERIC, diğer modüller de import eder
 │   │   │   └── actions.ts
-│   │   ├── tools/ (takım listesi, arama destekli)
-│   │   ├── jobs/ (iş/siparişler, status filtresi)
-│   │   ├── production/ (günlük üretim formları — ana modül)
-│   │   ├── drawings/
+│   │   ├── tools/
+│   │   │   ├── page.tsx             → header: + Yeni Takım + Tedarikçi Ekle + Sipariş Oluştur
+│   │   │   ├── tool-dialog.tsx
+│   │   │   └── actions.ts
+│   │   ├── suppliers/
 │   │   │   ├── page.tsx
+│   │   │   ├── supplier-dialog.tsx
+│   │   │   └── actions.ts
+│   │   ├── orders/
+│   │   │   ├── page.tsx             → sipariş listesi + Yeni Sipariş
+│   │   │   ├── [id]/page.tsx        → detay + Düzenle
+│   │   │   ├── order-dialog.tsx     → hızlı kategori preset'leri
+│   │   │   └── actions.ts           → saveOrder, deleteOrder, updateOrderStatus
+│   │   ├── jobs/                    → müşteri işleri (dokunulmadı)
+│   │   ├── production/              → günlük vardiya formu (dokunulmadı)
+│   │   ├── drawings/
+│   │   │   ├── page.tsx             → tür kolonu (PDF/Görsel/Dosya), annotation badge
 │   │   │   ├── upload-dialog.tsx
-│   │   │   ├── drawing-actions.tsx  (View, Download, Delete butonları)
-│   │   │   └── actions.ts      → uploadDrawing, deleteDrawing, getSignedUrl
+│   │   │   ├── drawing-actions.tsx  → Download, Delete
+│   │   │   ├── viewer-dialog.tsx    → PDF iframe / Görsel Fabric read-only
+│   │   │   ├── editor-dialog.tsx    → görsel annotation editor
+│   │   │   ├── annotation-editor.tsx → Fabric.js toolbar + canvas
+│   │   │   └── actions.ts           → upload, delete, saveAnnotations, clearAnnotations
 │   │   ├── reports/
-│   │   │   ├── page.tsx        → tarih filtresi + 3 kart özet + tablo
-│   │   │   └── export-button.tsx  → xlsx client-side export
-│   │   └── settings/           → admin only (RLS hem DB hem UI)
-│   ├── layout.tsx              → root (font, toaster, viewport, theme)
-│   ├── page.tsx                → redirect('/dashboard')
-│   ├── manifest.ts             → PWA manifest (dinamik)
-│   ├── icon.tsx                → 512x512 PWA icon (ImageResponse)
-│   ├── apple-icon.tsx          → 180x180 iOS icon
-│   └── globals.css             → Tailwind v4 tema değişkenleri + shadcn
+│   │   │   ├── page.tsx
+│   │   │   └── export-button.tsx    → xlsx
+│   │   └── settings/                → admin kullanıcı yönetimi
+│   │       ├── page.tsx
+│   │       ├── actions.ts           → updateUserRole, toggleUserActive, createUser, deleteUser
+│   │       ├── role-select.tsx
+│   │       ├── create-user-dialog.tsx
+│   │       └── user-row-actions.tsx
+│   ├── layout.tsx
+│   ├── page.tsx                     → redirect('/dashboard')
+│   ├── manifest.ts
+│   ├── icon.tsx                     → 512x512
+│   ├── apple-icon.tsx               → 180x180
+│   └── globals.css
 ├── components/
-│   ├── ui/                     → shadcn bileşenleri (Button, Card, Table, Dialog, Sheet, Select, Textarea, Form, Tabs, Badge, Avatar, Checkbox, Dropdown, Separator, Skeleton, Sonner, Input, Label)
+│   ├── ui/                          → shadcn bileşenleri
 │   └── app/
-│       ├── sidebar.tsx         → nav (masaüstü + mobil Sheet)
-│       ├── topbar.tsx          → kullanıcı menüsü + mobil hamburger
-│       ├── nav-config.ts       → nav item listesi (icon + href)
-│       ├── page-header.tsx     → ortak sayfa başlığı
-│       ├── empty-state.tsx     → boş liste görseli
-│       └── search-input.tsx    → debounced URL query param search
+│       ├── sidebar.tsx              → nav + profil bölümü (avatar + telefon + çıkış)
+│       ├── mobile-nav.tsx           → mobilde slim sticky bar + hamburger sheet
+│       ├── search-fab.tsx           → sağ alt command palette (⌘K)
+│       ├── nav-config.ts            → 11 nav item (Ayarlar admin-only)
+│       ├── page-header.tsx
+│       ├── empty-state.tsx
+│       └── search-input.tsx         → debounced URL query search (tools sayfası)
 ├── lib/
 │   ├── supabase/
-│   │   ├── client.ts           → browser (createBrowserClient)
-│   │   ├── server.ts           → server (cookies(), getUser, getProfile, requireUser)
-│   │   ├── middleware.ts       → updateSession (proxy'de çağrılır)
-│   │   └── types.ts            → Profile, Machine, Operator, Tool, Job, ProductionEntry, Drawing + label maps
-│   └── utils.ts                → cn(), formatDate(), formatDateTime()
-├── supabase/
-│   └── migrations/
-│       └── 0001_init.sql       → TÜM şema + RLS + seed (4 makine) + storage bucket
-├── public/                     → statik varlıklar (henüz manuel ikon yok — dinamik)
-├── proxy.ts                    → Next.js 16 proxy (eski middleware.ts)
-├── next.config.ts              → bodySizeLimit: 25mb (teknik resim upload)
-├── components.json             → shadcn config (new-york, slate, @/lib/utils)
-├── tsconfig.json               → strict, paths: @/* → ./*
-├── .env.local                  → gerçek Supabase credentials (gitignore)
-├── .env.example                → şablon (git'e girer)
-└── CLAUDE.md                   → bu dosya
+│   │   ├── client.ts                → browser createBrowserClient
+│   │   ├── server.ts                → server (cookies, getUser, getProfile)
+│   │   ├── middleware.ts            → updateSession (proxy'de çağrılır)
+│   │   ├── admin.ts                 → service_role client (auth.admin API)
+│   │   └── types.ts                 → tüm interface'ler + label haritaları +
+│   │                                  MACHINE_STATUS_TONE + getCurrentShift()
+│   ├── phone.ts                     → normalizePhone, phoneToVirtualEmail,
+│   │                                  formatPhoneForDisplay
+│   ├── drawings-export.ts           → canvasToPng, downloadCanvasAsPdf,
+│   │                                  tryShareFile, whatsappLinkForUrl
+│   └── utils.ts                     → cn, formatDate, formatDateTime
+├── scripts/
+│   └── seed-admin.mjs               → ilk admin bootstrap (idempotent)
+├── supabase/migrations/             → 0001 … 0007
+├── proxy.ts
+├── next.config.ts                   → bodySizeLimit 25mb
+├── .env.local                       → Supabase creds + NEXT_PUBLIC_ADMIN_PHONE
+├── .env.example
+└── CLAUDE.md                        → bu dosya
 ```
 
 ---
 
-## Veritabanı Şeması
+## Veritabanı Şeması (tüm migration'lar uygulandı)
 
-### Tablolar (public schema)
+### Mevcut tablolar
 
 | Tablo | Ana alanlar |
 |---|---|
-| `profiles` | id (auth.users FK), email, full_name, **role** (admin/operator), active |
-| `machines` | name (unique), type (Fanuc/Tekna/BWX/Diger), status (aktif/durus/bakim/ariza), model, serial_no, location |
-| `operators` | full_name, employee_no, phone, shift (sabah/aksam/gece), active |
-| `tools` | code, name, type, size, material, location, quantity, min_quantity, condition (yeni/iyi/kullanilabilir/degistirilmeli), supplier, price |
-| `jobs` | job_no, customer, part_name, part_no, quantity, machine_id, operator_id, status (beklemede/uretimde/tamamlandi/iptal), priority, start_date, due_date |
-| `production_entries` | entry_date, shift, machine_id, operator_id, job_id, start_time, end_time, **produced_qty**, **scrap_qty**, **downtime_minutes**, notes |
-| `drawings` | job_id, title, **file_path** (storage), file_type, file_size, revision |
+| `profiles` | id (auth.users FK), **email nullable**, full_name, **phone** (admin tespit için), role, active |
+| `machines` | name unique, type, status (aktif/durus/bakim/ariza), model, serial_no, location |
+| `operators` | full_name, employee_no, phone, shift, active |
+| `tools` | code, name, type, size, location, quantity, min_quantity, condition, supplier, price |
+| `jobs` | job_no, customer, part_name, part_no, quantity, machine_id, operator_id, status, priority, start_date, due_date |
+| `production_entries` | entry_date, shift, machine_id, operator_id, job_id, start/end_time, produced_qty, scrap_qty, downtime_minutes |
+| `drawings` | job_id, title, file_path (storage), file_type, **annotations** (jsonb), **annotated_at**, **annotated_by** |
 | `job_tools` | many-to-many (job_id, tool_id, quantity_used) |
+| **`suppliers`** | name, contact_person, phone, email, address, notes, active |
+| **`purchase_orders`** | order_no (SO-YYYY-NNNN auto), supplier_id, status, order_date, expected_date, notes, created_by |
+| **`purchase_order_items`** | order_id, **category** (po_item_category enum), description, tool_id?, quantity, unit, unit_price |
+| **`machine_shift_assignments`** | machine_id + shift UNIQUE, operator_id, notes, assigned_by |
 
-### Enums
+### Enum'lar
 
 - `user_role`: admin | operator
 - `machine_type`: Fanuc | Tekna | BWX | Diger
@@ -147,87 +185,136 @@ tgteknikcrm/
 - `shift`: sabah | aksam | gece
 - `job_status`: beklemede | uretimde | tamamlandi | iptal
 - `tool_condition`: yeni | iyi | kullanilabilir | degistirilmeli
+- **`po_status`**: taslak | siparis_verildi | yolda | teslim_alindi | iptal
+- **`po_item_category`**: takim | eldiven | kece | yag | kesici | asindirici | bakim_malzemesi | diger
 
-### RLS (Row Level Security)
+### RLS
 
-- `is_admin()` helper fonksiyonu: kullanıcı role='admin' mi?
-- Profiles: kendi kaydını oku/yaz veya admin her şeyi yapar
-- Diğer tablolar: authenticated kullanıcı read + insert + update, admin delete
+- `is_admin()` helper (security definer, search_path pinned)
+- **Tüm policy'ler `(select auth.uid())` sarmalamalı** (InitPlan optimizasyonu — 0003 migration)
+- Profiles: self veya admin okur/yazar
+- Diğer tablolar: authenticated CRUD, admin silme
 - Storage `drawings` bucket: authenticated read/upload/update, admin delete
-- Trigger `on_auth_user_created`: yeni kayıtta profil oluşturur. E-posta `tgteknikcrm@outlook.com` → otomatik admin.
+- Trigger `on_auth_user_created`: yeni kayıtta profil oluşturur. Telefon `+905426469070` → otomatik admin.
 
 ### Storage
 
-- Bucket: **`drawings`** (private)
+- Bucket: **`drawings`** (private) · signed URL 10 dk
 - Path: `${user_id}/${timestamp}_${sanitized_filename}`
-- Maks dosya: Supabase free tier'da 50MB/dosya, 1GB toplam (next.config'de serverActions bodyLimit 25MB)
-- Erişim: `createSignedUrl(path, 600)` → 10 dakikalık signed URL
+
+---
+
+## Migration'lar ve workflow
+
+| # | Dosya | Özet |
+|---|---|---|
+| 0001 | init.sql | şema + RLS + seed + trigger (SQL Editor elle) |
+| 0002 | security_fixes.sql | v_daily_production `security_invoker=true` + touch_updated_at search_path |
+| 0003 | performance_fixes.sql | RLS initplan optimizasyonu + `profiles_admin_all FOR ALL` split + 8 FK index |
+| 0004 | phone_auth.sql | profiles.email nullable + trigger phone okuyor + admin telefon kontrolü |
+| 0005 | suppliers_and_purchase_orders.sql | 3 yeni tablo + 2 enum + RLS |
+| 0006 | drawing_annotations.sql | drawings.annotations jsonb + annotated_at/by |
+| 0007 | machine_shift_assignments.sql | machine↔operator vardiya tablosu |
+
+**Workflow:** Yeni migration:
+1. `supabase/migrations/00NN_name.sql` dosyasına yaz
+2. Supabase MCP `apply_migration` tool'uyla uygula (hem DB'ye işler hem migrations tablosuna kayıt düşer)
+3. Commit et
+
+---
+
+## Auth Sistemi
+
+**Telefon + parola** — Supabase native phone auth SMS provider gerektirdiği için **virtual-email pattern** kullanılıyor:
+
+1. Kullanıcı telefon girer (ör. `0542 646 90 70`, `+90 542 646 90 70`, `05426469070` — hepsi kabul)
+2. `normalizePhone()` → `+905426469070` (E.164)
+3. `phoneToVirtualEmail()` → `905426469070@tgteknik.local`
+4. Supabase email/password auth — SMS gerekmez
+5. Gerçek telefon `auth.users.raw_user_meta_data.phone` ve `profiles.phone`'da
+6. `handle_new_user()` trigger: telefon `+905426469070` ise otomatik admin
+
+Admin API (service_role) ile kullanıcı oluşturma/silme: `lib/supabase/admin.ts` · `settings/actions.ts`
+
+---
+
+## Ana Özellikler
+
+### Dashboard makine kartları (göster/gizle modu)
+- `app/(app)/dashboard/machines-grid.tsx` (client) — tercih localStorage: `tg.dashboard.hiddenMachines`
+- Başlık sağında **Göster / Gizle** tuşu → düzenleme modu
+- Düzenleme modunda her kartın sağ üstünde göz ikonu → kart gizle/göster
+- Accent strip üstte, pulse animasyonu aktif makinede
+- Empty states: arıza/bakım/duruş/boşta için farklı ikon+metin
+
+### Annotation Editor (Fabric.js)
+- `app/(app)/drawings/annotation-editor.tsx`
+- Toolbar: Seç, Yazı, Kare, Daire, Ok, Çiz (free draw), Numara (1,2,3...), Harf (A,B,C...)
+- Renk paleti (7 hazır + özel color picker) · kalınlık slider 1-20 · font (5 seçenek) + boyut
+- Undo/Redo (50 adım) · Delete/Backspace ile seçileni sil · Esc seçimi iptal · Tümünü temizle
+- Annotations `drawings.annotations` jsonb'de; **orijinal dosya değişmiyor**
+- Yalnızca görseller — PDF'ler annotation'sız (iframe ile native render)
+- Export: PNG / PDF (annotation'lı) / Orijinal PDF (annotationsız) / WhatsApp (Web Share API + wa.me fallback)
+
+### Vardiya Operatör Ataması
+- Tablo: `machine_shift_assignments` (UNIQUE machine_id+shift)
+- UI: makine detay sayfasında 3 vardiya satırı (sabah 🌅, akşam 🌆, gece 🌙)
+- Şu anki vardiya primary ring + "şu an" etiketi
+- `getCurrentShift()` helper: 08-16 sabah / 16-24 akşam / 00-08 gece
+- Makine listesi kartlarında: avatar + ad + "Sabah vardiyası · şu an"
+
+### Global Arama FAB
+- `components/app/search-fab.tsx` — sağ alt `bottom-[50px] right-[50px]`
+- Kısayollar: ⌘K / Ctrl+K / "/"
+- 7 kaynakta paralel ilike arama: machines, operators, tools, jobs, purchase_orders, suppliers, drawings
+- 200ms debounce · gruplandırılmış sonuçlar · tıklayınca ilgili sayfa
 
 ---
 
 ## Kurulum / Deploy
 
-### 1. Supabase Proje Açma
-
-1. https://app.supabase.com → **New Project**
-2. İsim: `tgteknikcrm`, parola gir, bölge `Europe (Frankfurt)` öner
-3. Proje açıldıktan sonra **Settings → API**:
-   - `Project URL` → `NEXT_PUBLIC_SUPABASE_URL`
-   - `anon` key → `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `service_role` key → `SUPABASE_SERVICE_ROLE_KEY` (GİZLİ)
-
-### 2. Migration Çalıştırma
-
-Supabase **SQL Editor** → "New query" → `supabase/migrations/0001_init.sql` içeriğini yapıştır → **Run**.
-
-Bu komutla:
-- Tüm tablolar oluşur
-- RLS policy'leri aktif olur
-- 4 makine seed edilir (Fanuc, Tekna 1, Tekna 2, BWX)
-- `drawings` storage bucket'ı oluşur
-- `on_auth_user_created` trigger kurulur
-
-### 3. Local Geliştirme
+### 1. Local Geliştirme
 
 ```bash
-# .env.local dosyasını düzenle (Supabase anahtarlarını yaz)
 npm install
-npm run dev
-# http://localhost:3000
+npm run dev       # http://localhost:3000
 ```
 
-İlk kayıt `tgteknikcrm@outlook.com` e-postası ile yapılırsa otomatik admin olur.
+`.env.local` zaten dolu (gerçek Supabase creds + admin phone).
 
-### 4. GitHub + Vercel Deploy
+### 2. İlk admin
+- Script: `node scripts/seed-admin.mjs` (idempotent, zaten çalıştırıldı)
+- Veya: login ekranında `0542 646 90 70` + `80148014` ile giriş
 
-1. GitHub'da **private** repo aç: `tgteknikcrm`
-2. Local:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial: TG Teknik Üretim Takip"
-   git remote add origin git@github.com:USER/tgteknikcrm.git
-   git push -u origin main
-   ```
-3. https://vercel.com → **New Project** → GitHub repo'yu import et
-4. Vercel **Environment Variables**:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-5. **Deploy** — birkaç dk sonra `https://tgteknikcrm.vercel.app` canlı
-6. Sonraki `git push`'larda Vercel otomatik yeni versiyon yayınlar
+### 3. Vercel Deploy (bekliyor)
+- GitHub repo: `tgteknikcrm/tgteknikcrm1` (main push'lu)
+- Vercel'de import + env vars:
+  - `NEXT_PUBLIC_SUPABASE_URL`
+  - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+  - `NEXT_PUBLIC_ADMIN_PHONE`
+- Supabase Dashboard → Auth → URL Configuration → Vercel URL'i Redirect URL'e ekle
+
+### Komutlar
+
+```bash
+npm run dev         # dev server (Turbopack)
+npm run build       # production build
+npm run start       # production server
+npm run typecheck   # TypeScript kontrolü
+npm run lint        # ESLint
+```
 
 ---
 
-## Geliştirme Notları
+## Geliştirme Pattern'leri
 
-### Yeni modül eklemek için pattern
-
+### Yeni modül ekleme
 1. `app/(app)/X/` klasörü aç
 2. `actions.ts` — server actions (`"use server"`)
 3. `X-dialog.tsx` — client dialog (oluşturma/düzenleme)
 4. `page.tsx` — Server Component, Supabase'den veri çeker, try/catch
-5. Nav'a eklemek için `components/app/nav-config.ts` güncelle
+5. `components/app/nav-config.ts`'e nav item ekle
 
 ### Server Action + Client Component pattern
 
@@ -242,47 +329,57 @@ Silme butonu gibi client component'lar için inline server action şablonu:
 />
 ```
 
+`DeleteButton` `app/(app)/operators/delete-button.tsx` — generic, diğer modüller buradan import eder.
+
 ### Supabase client kullanımı
 
 - **Server Component:** `const supabase = await createClient()` (lib/supabase/server)
 - **Client Component:** `const supabase = createClient()` (lib/supabase/client)
 - **Server Action:** `const supabase = await createClient()` — cookies otomatik
+- **Admin API (service_role):** `const admin = createAdminClient()` (lib/supabase/admin) — `auth.admin.createUser` gibi işlemler için
 
 ### Auth koruması
 
 - `proxy.ts` — tüm routeları guardlar, `/login`'a yönlendirir
 - `(app)/layout.tsx` — ayrıca `getProfile()` çağırır, yoksa redirect
-- Admin-only: `if (profile.role !== "admin") redirect("/dashboard")`
-
-### Çalıştırma komutları
-
-```bash
-npm run dev         # dev server (Turbopack)
-npm run build       # production build
-npm run start       # production server
-npm run typecheck   # TypeScript kontrolü
-npm run lint        # ESLint
-```
+- Admin-only: `if (profile.role !== "admin") redirect("/dashboard")` (settings sayfasında)
 
 ---
 
-## Bilinen Durumlar / TODO
+## Advisor durumu
 
-- [ ] **Supabase gerçek creds** kullanıcı tarafından girilecek → `.env.local`'de placeholder şu an
-- [ ] Dashboard'da recharts ile haftalık üretim grafiği eklenebilir (şu an sadece KPI'lar)
-- [ ] Bildirim sistemi (stok azalınca, iş gecikince)
-- [ ] İş detay sayfası (production_entries ilişkili liste + drawings)
-- [ ] Offline mod (service worker) — şu an sadece installable, offline yok
-- [ ] Dark mode toggle (sistem teması zaten destekleniyor)
-- [ ] Vercel Analytics entegrasyonu
-- [ ] Test suite (vitest + playwright önerilir)
+- **Security (son)**: 1 WARN — `leaked_password_protection` (dashboard'dan açılır, MCP'den ayarlanamaz)
+- **Performance (son)**: sadece `unused_index` INFO'ları (veri az/yok, beklenen)
+
+---
+
+## Son commit
+
+**`0f972ef` — Makine ↔ Operatör vardiya ataması**
+
+Önceki commit'lerin özeti için `git log --oneline` ya da memory'deki `project_tgteknikcrm.md`.
+
+---
+
+## Bekleyen / Geliştirilebilir
+
+- [ ] Vercel deploy (kullanıcı yapacak)
+- [ ] Supabase Dashboard → Leaked Password Protection açma
+- [ ] Tools sayfasında bir takıma tıklayıp → direkt o takım için sipariş oluşturma akışı (şu an defaultCategory=takim ile boş dialog açılıyor)
+- [ ] Dashboard makine kartları henüz `machine_shift_assignments`'tan okumuyor — production_entries'teki operatöre bakıyor. İstenirse shift assignment da gösterilebilir
+- [ ] PDF annotation (pdf.js) — user istemişti ama öncelik vermedi
+- [ ] Dashboard "Eksik Takım" ve "Vardiya Özeti" kartları modern redesign'a çekilmedi
+- [ ] Dark mode toggle (sistem teması destekleniyor ama manuel toggle yok)
+- [ ] Test suite (vitest + playwright)
 
 ---
 
 ## Kullanıcı Bilgileri (hafıza)
 
-- Kullanıcı bir **imalat işletmesi** işletiyor, Türkçe iletişim kuruyor
-- "Dostum" diye hitap eder, samimi ton ister
+- **Dostum** diye hitap eder, samimi ton ister
 - Sürekli yes/no onayından rahatsız olur — bir kere onay, akış bitene kadar durma
+- "Detaylı düşün planla yap" modunda iş verir — büyük feature'ları bir seferde isteyebilir
 - GitHub + Vercel + Supabase hesapları `tgteknikcrm@outlook.com` e-postası altında
-- İzinler `.claude/settings.local.json`'da kurulu (acceptEdits default, geniş Bash allow list, PowerShell ile elle oluşturuldu 2026-04-24)
+- Uygulamaya telefon `+90 542 646 90 70` + parola `80148014` ile giriyor
+- İzinler `.claude/settings.local.json`'da kurulu (acceptEdits default, geniş Bash allow list)
+- Supabase MCP bağlı — apply_migration / execute_sql / get_advisors kullanılıyor
