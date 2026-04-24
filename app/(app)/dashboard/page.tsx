@@ -9,8 +9,10 @@ import {
   Users,
   TrendingUp,
   AlertCircle,
-  User as UserIcon,
   Clock,
+  AlertTriangle,
+  PauseCircle,
+  Coffee,
 } from "lucide-react";
 import {
   MACHINE_STATUS_LABEL,
@@ -227,7 +229,7 @@ export default async function DashboardPage() {
       <h2 className="mt-8 mb-3 text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
         <Factory className="size-4" /> Makineler
       </h2>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div className="grid auto-rows-fr grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {data.machineCards.map((c) => (
           <MachineStatusCard key={c.machine.id} card={c} />
         ))}
@@ -296,82 +298,177 @@ function MachineStatusCard({ card }: { card: MachineCard }) {
   const { machine: m, job, totalProduced, operatorName, startTime, endTime } = card;
   const tone = MACHINE_STATUS_TONE[m.status];
   const pct = job && job.quantity > 0 ? Math.min(100, Math.round((totalProduced / job.quantity) * 100)) : 0;
+  const initials = operatorName
+    ? operatorName.split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase()
+    : "?";
 
   return (
-    <Link href={`/machines/${m.id}`} className="block">
-      <Card className={cn("border-l-4 hover:shadow-md transition-shadow", tone.border)}>
-        <CardHeader className="pb-3">
+    <Link href={`/machines/${m.id}`} className="block h-full group">
+      <Card
+        className={cn(
+          "relative h-full flex flex-col overflow-hidden gap-0 py-0",
+          "transition-all duration-200 ease-out",
+          "hover:shadow-lg hover:-translate-y-0.5",
+          "bg-gradient-to-b from-card to-muted/20",
+        )}
+      >
+        {/* Top accent strip */}
+        <div className={cn("h-1 w-full", tone.dot)} />
+
+        <CardHeader className="pt-5 pb-3">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <CardTitle className="text-base truncate">{m.name}</CardTitle>
-              <p className="text-xs text-muted-foreground truncate">{m.model || "—"}</p>
+              <CardTitle className="text-base font-bold tracking-tight truncate">
+                {m.name}
+              </CardTitle>
+              <p className="text-[11px] text-muted-foreground truncate font-mono mt-0.5">
+                {m.model || "—"}
+              </p>
             </div>
-            <Badge className={cn("border", tone.badge)} variant="outline">
-              <span className={cn("size-1.5 rounded-full mr-1.5", tone.dot)} />
+            <Badge
+              variant="outline"
+              className={cn("border gap-1.5 font-medium", tone.badge)}
+            >
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  tone.dot,
+                  m.status === "aktif" && "animate-pulse",
+                )}
+              />
               {MACHINE_STATUS_LABEL[m.status]}
             </Badge>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3 pt-0">
+
+        <CardContent className="flex-1 flex flex-col pt-0 pb-5">
           {job ? (
-            <>
+            <div className="flex-1 flex flex-col justify-between gap-4">
+              {/* Production progress */}
               <div>
-                <div className="flex items-baseline justify-between">
-                  <span className="text-xs text-muted-foreground">Üretilen</span>
-                  <span className="text-xs font-medium tabular-nums">%{pct}</span>
+                <div className="flex items-baseline justify-between mb-1.5">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    Üretim
+                  </span>
+                  <span className="text-xs font-bold tabular-nums text-foreground">
+                    %{pct}
+                  </span>
                 </div>
-                <div className="text-xl font-semibold font-mono tabular-nums mt-0.5">
-                  {totalProduced}
-                  <span className="text-muted-foreground font-normal"> / {job.quantity}</span>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-3xl font-bold font-mono tabular-nums leading-none">
+                    {totalProduced}
+                  </span>
+                  <span className="text-sm text-muted-foreground tabular-nums">
+                    / {job.quantity}
+                  </span>
                 </div>
-                <div className="text-xs text-muted-foreground truncate mt-0.5">
-                  {job.part_name}
-                  {job.job_no && <span className="ml-1.5 opacity-60">#{job.job_no}</span>}
+                <div className="flex items-center gap-2 mt-1.5 text-xs text-muted-foreground">
+                  <span className="truncate">{job.part_name}</span>
+                  {job.job_no && (
+                    <span className="opacity-60 font-mono shrink-0">
+                      #{job.job_no}
+                    </span>
+                  )}
                 </div>
-                <div className="mt-2 h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                <div className="mt-3 h-1.5 w-full rounded-full bg-muted overflow-hidden">
                   <div
-                    className={cn("h-full rounded-full transition-all", tone.dot)}
+                    className={cn(
+                      "h-full rounded-full transition-all duration-500 ease-out",
+                      tone.dot,
+                    )}
                     style={{ width: `${pct}%` }}
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                <div className="flex items-center gap-1.5">
-                  <Clock className="size-3 text-muted-foreground" />
-                  <div>
-                    <div className="text-muted-foreground">Başlama</div>
-                    <div className="font-mono">{formatTime(startTime)}</div>
+              <div>
+                {/* Time row */}
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="size-7 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
+                      <Clock className="size-3.5 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                        Başlama
+                      </div>
+                      <div className="font-mono font-semibold tabular-nums text-sm leading-tight">
+                        {formatTime(startTime)}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="size-7 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
+                      <Clock className="size-3.5 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                        Bitiş
+                      </div>
+                      <div className="font-mono font-semibold tabular-nums text-sm leading-tight">
+                        {formatTime(endTime)}
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <Clock className="size-3 text-muted-foreground" />
-                  <div>
-                    <div className="text-muted-foreground">Bitiş</div>
-                    <div className="font-mono">{formatTime(endTime)}</div>
-                  </div>
-                </div>
-              </div>
 
-              <div className="flex items-center gap-2 pt-1 border-t text-sm">
-                <UserIcon className="size-3.5 text-muted-foreground" />
-                <span className="truncate">{operatorName || "—"}</span>
+                {/* Operator */}
+                <div className="mt-4 pt-4 border-t border-border/60 flex items-center gap-2.5">
+                  <div
+                    className={cn(
+                      "size-8 rounded-full flex items-center justify-center text-[11px] font-bold border shrink-0",
+                      tone.badge,
+                    )}
+                  >
+                    {initials}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider">
+                      Operatör
+                    </div>
+                    <div className="text-sm font-semibold truncate leading-tight">
+                      {operatorName || "—"}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </>
+            </div>
           ) : (
-            <p className="text-sm text-muted-foreground italic py-4">
-              {m.status === "ariza"
-                ? "Arızalı — üretim yok"
-                : m.status === "bakim"
-                ? "Bakımda — üretim yok"
-                : m.status === "durus"
-                ? "Duruşta"
-                : "Bugün üretim atanmamış"}
-            </p>
+            <EmptyMachineState status={m.status} />
           )}
         </CardContent>
       </Card>
     </Link>
+  );
+}
+
+function EmptyMachineState({ status }: { status: Machine["status"] }) {
+  const tone = MACHINE_STATUS_TONE[status];
+  const cfg =
+    status === "ariza"
+      ? { icon: AlertTriangle, title: "Arızalı", note: "Tezgah devre dışı" }
+      : status === "bakim"
+      ? { icon: Wrench, title: "Bakımda", note: "Planlı bakım" }
+      : status === "durus"
+      ? { icon: PauseCircle, title: "Duruşta", note: "Üretim durdu" }
+      : { icon: Coffee, title: "Boşta", note: "İş atanmamış" };
+  const Icon = cfg.icon;
+
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 py-4">
+      <div
+        className={cn(
+          "size-14 rounded-2xl flex items-center justify-center border",
+          tone.badge,
+        )}
+      >
+        <Icon className="size-6" />
+      </div>
+      <div>
+        <p className="text-sm font-semibold">{cfg.title}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{cfg.note}</p>
+      </div>
+    </div>
   );
 }
 
