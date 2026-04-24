@@ -124,7 +124,20 @@ export interface Drawing {
   revision: string | null;
   notes: string | null;
   uploaded_by: string | null;
+  annotations: unknown | null;
+  annotated_at: string | null;
+  annotated_by: string | null;
   created_at: string;
+}
+
+export function isPdfDrawing(d: Pick<Drawing, "file_type" | "file_path">): boolean {
+  if (d.file_type === "application/pdf") return true;
+  return d.file_path.toLowerCase().endsWith(".pdf");
+}
+
+export function isImageDrawing(d: Pick<Drawing, "file_type" | "file_path">): boolean {
+  if (d.file_type?.startsWith("image/")) return true;
+  return /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(d.file_path);
 }
 
 export const MACHINE_STATUS_LABEL: Record<MachineStatus, string> = {

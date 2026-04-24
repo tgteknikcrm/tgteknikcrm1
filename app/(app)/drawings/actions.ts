@@ -64,3 +64,35 @@ export async function getSignedUrl(path: string) {
   if (error) return { error: error.message };
   return { url: data.signedUrl };
 }
+
+// Persist Fabric.js canvas state JSON. Original storage file is untouched.
+export async function saveAnnotations(drawingId: string, annotations: unknown) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Giriş yapılmamış" };
+
+  const { error } = await supabase
+    .from("drawings")
+    .update({
+      annotations,
+      annotated_at: new Date().toISOString(),
+      annotated_by: user.id,
+    })
+    .eq("id", drawingId);
+  if (error) return { error: error.message };
+  revalidatePath("/drawings");
+  return { success: true };
+}
+
+export async function clearAnnotations(drawingId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("drawings")
+    .update({ annotations: null, annotated_at: null, annotated_by: null })
+    .eq("id", drawingId);
+  if (error) return { error: error.message };
+  revalidatePath("/drawings");
+  return { success: true };
+}

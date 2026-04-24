@@ -10,11 +10,18 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { createClient } from "@/lib/supabase/server";
-import type { Drawing, Job } from "@/lib/supabase/types";
-import { FileImage } from "lucide-react";
+import {
+  isImageDrawing,
+  isPdfDrawing,
+  type Drawing,
+  type Job,
+} from "@/lib/supabase/types";
+import { FileImage, FileText, Image as ImageIcon, FileQuestion } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { UploadDialog } from "./upload-dialog";
-import { ViewButton, DownloadButton, DeleteDrawingButton } from "./drawing-actions";
+import { DownloadButton, DeleteDrawingButton } from "./drawing-actions";
+import { ViewerDialog } from "./viewer-dialog";
+import { EditorDialog } from "./editor-dialog";
 import { formatDateTime } from "@/lib/utils";
 
 export const metadata = { title: "Teknik Resimler" };
@@ -79,6 +86,7 @@ export default async function DrawingsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Tür</TableHead>
                   <TableHead>Başlık</TableHead>
                   <TableHead>İş</TableHead>
                   <TableHead>Dosya</TableHead>
@@ -89,27 +97,62 @@ export default async function DrawingsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {drawings.map((d) => (
-                  <TableRow key={d.id}>
-                    <TableCell className="font-medium">{d.title}</TableCell>
-                    <TableCell className="text-sm max-w-xs truncate">{d.job_label || "—"}</TableCell>
-                    <TableCell className="font-mono text-xs">{fileNameFromPath(d.file_path)}</TableCell>
-                    <TableCell>
-                      {d.revision ? <Badge variant="outline">{d.revision}</Badge> : "—"}
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{formatSize(d.file_size)}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDateTime(d.created_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex gap-0.5 justify-end">
-                        <ViewButton path={d.file_path} />
-                        <DownloadButton path={d.file_path} fileName={fileNameFromPath(d.file_path)} />
-                        <DeleteDrawingButton id={d.id} path={d.file_path} title={d.title} />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {drawings.map((d) => {
+                  const pdf = isPdfDrawing(d);
+                  const img = isImageDrawing(d);
+                  const TypeIcon = pdf ? FileText : img ? ImageIcon : FileQuestion;
+                  return (
+                    <TableRow key={d.id}>
+                      <TableCell>
+                        <span
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground"
+                          title={pdf ? "PDF" : img ? "Görsel" : "Diğer"}
+                        >
+                          <TypeIcon className="size-4" />
+                          {pdf ? "PDF" : img ? "Görsel" : "Dosya"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {d.title}
+                        {d.annotations != null && (
+                          <Badge variant="outline" className="ml-2 text-[10px] gap-1">
+                            ✏️ Düzenli
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm max-w-xs truncate">
+                        {d.job_label || "—"}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {fileNameFromPath(d.file_path)}
+                      </TableCell>
+                      <TableCell>
+                        {d.revision ? <Badge variant="outline">{d.revision}</Badge> : "—"}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatSize(d.file_size)}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatDateTime(d.created_at)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex gap-0.5 justify-end">
+                          <ViewerDialog drawing={d} />
+                          {img && <EditorDialog drawing={d} />}
+                          <DownloadButton
+                            path={d.file_path}
+                            fileName={fileNameFromPath(d.file_path)}
+                          />
+                          <DeleteDrawingButton
+                            id={d.id}
+                            path={d.file_path}
+                            title={d.title}
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
