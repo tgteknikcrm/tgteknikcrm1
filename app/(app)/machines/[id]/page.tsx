@@ -405,8 +405,12 @@ export default async function MachineDetailPage({
         }))}
       />
 
-      {/* KPI STRIP — 4 tiles in one elegant row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      {/* TWO-COLUMN: machine detail (LEFT, compact) + timeline (RIGHT, main feed) */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
+        <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
+
+      {/* KPI STRIP — 2x2 in narrow left column */}
+      <div className="grid grid-cols-2 gap-3">
         <KpiTile
           icon={TrendingUp}
           label="Bugün Üretilen"
@@ -442,7 +446,7 @@ export default async function MachineDetailPage({
       {/* CURRENTLY PRODUCING — full-width visual hero */}
       <Card
         className={cn(
-          "mb-6 overflow-hidden gap-0 py-0",
+          "overflow-hidden gap-0 py-0",
           currentJob && "ring-1 ring-emerald-500/20",
         )}
       >
@@ -574,7 +578,7 @@ export default async function MachineDetailPage({
 
       {/* QUALITY CONTROL — only when there's a current job */}
       {currentJob && currentJobQc && (
-        <Card className="mb-6">
+        <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
               <ClipboardCheck className="size-4 text-muted-foreground" />
@@ -665,9 +669,9 @@ export default async function MachineDetailPage({
         </Card>
       )}
 
-      {/* TREND CHART + TOOLS */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <Card className="lg:col-span-2">
+      {/* TREND CHART + TOOLS — stacked vertically inside narrow column */}
+      <div className="space-y-4">
+        <Card>
           <CardHeader>
             <CardTitle className="text-sm flex items-center gap-2">
               <TrendingUp className="size-4 text-muted-foreground" />
@@ -786,7 +790,7 @@ export default async function MachineDetailPage({
       </div>
 
       {/* MACHINE INFO + NOTES */}
-      <Card className="mb-6">
+      <Card>
         <CardHeader>
           <CardTitle className="text-sm">Makine Bilgileri</CardTitle>
         </CardHeader>
@@ -812,145 +816,19 @@ export default async function MachineDetailPage({
         </CardContent>
       </Card>
 
-      {/* TIMELINE — manuel entries + production + reviews + activity */}
-      <MachineTimeline
-        machineId={machine.id}
-        items={timeline.items}
-        comments={commentsRecord}
-        currentUserId={profile?.id ?? null}
-        isAdmin={profile?.role === "admin"}
-      />
+        </div>
+        {/* RIGHT COLUMN — main timeline feed */}
+        <div className="lg:col-span-7">
+          <MachineTimeline
+            machineId={machine.id}
+            items={timeline.items}
+            comments={commentsRecord}
+            currentUserId={profile?.id ?? null}
+            isAdmin={profile?.role === "admin"}
+          />
+        </div>
+      </div>
 
-      {/* HISTORY TABS — saves vertical space */}
-      <Tabs defaultValue="jobs">
-        <TabsList>
-          <TabsTrigger value="jobs">
-            <Package className="size-4" /> İş Geçmişi ({jobs.length})
-          </TabsTrigger>
-          <TabsTrigger value="entries">
-            <History className="size-4" /> Üretim Kayıtları ({entries.length})
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="jobs">
-          <Card>
-            <CardContent className="p-0">
-              {jobs.length === 0 ? (
-                <div className="p-12 text-center">
-                  <ListChecks className="size-10 mx-auto text-muted-foreground/30 mb-3" />
-                  <p className="text-sm font-medium">İş atanmamış</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Bu makineye henüz bir iş atanmadı.
-                  </p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>İş No</TableHead>
-                      <TableHead>Müşteri / Parça</TableHead>
-                      <TableHead className="text-right">Adet</TableHead>
-                      <TableHead>Durum</TableHead>
-                      <TableHead>Teslim</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {jobs.map((j) => (
-                      <TableRow key={j.id} className="hover:bg-muted/40">
-                        <TableCell className="font-mono text-xs">
-                          {j.job_no || "—"}
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-medium">{j.part_name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {j.customer}
-                            {j.part_no && ` · ${j.part_no}`}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-mono">
-                          {j.quantity}
-                        </TableCell>
-                        <TableCell>
-                          <JobStatusBadge status={j.status} />
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {j.due_date ? formatDate(j.due_date) : "—"}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="entries">
-          <Card>
-            <CardContent className="p-0">
-              {entries.length === 0 ? (
-                <div className="p-12 text-center">
-                  <History className="size-10 mx-auto text-muted-foreground/30 mb-3" />
-                  <p className="text-sm font-medium">Üretim kaydı yok</p>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Bu makine için henüz üretim girilmemiş.
-                  </p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tarih</TableHead>
-                      <TableHead>Vardiya</TableHead>
-                      <TableHead>Operatör</TableHead>
-                      <TableHead>İş / Parça</TableHead>
-                      <TableHead className="text-right">Üretim</TableHead>
-                      <TableHead className="text-right">Fire</TableHead>
-                      <TableHead className="text-right">Duruş (dk)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {entries.map((e) => (
-                      <TableRow key={e.id} className="hover:bg-muted/40">
-                        <TableCell className="text-sm tabular-nums">
-                          {formatDate(e.entry_date)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="font-normal">
-                            {SHIFT_LABEL[e.shift]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{e.operators?.full_name || "—"}</TableCell>
-                        <TableCell>
-                          {e.jobs ? (
-                            <div className="text-sm">
-                              <div className="font-medium">{e.jobs.part_name}</div>
-                              <div className="text-xs text-muted-foreground font-mono">
-                                {e.jobs.job_no || "—"}
-                              </div>
-                            </div>
-                          ) : (
-                            "—"
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right font-mono tabular-nums font-semibold">
-                          {e.produced_qty}
-                        </TableCell>
-                        <TableCell className="text-right font-mono tabular-nums text-amber-600">
-                          {e.scrap_qty || ""}
-                        </TableCell>
-                        <TableCell className="text-right font-mono tabular-nums text-muted-foreground">
-                          {e.downtime_minutes || ""}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
     </>
   );
 }
