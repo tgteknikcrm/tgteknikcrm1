@@ -512,6 +512,70 @@ export interface ActivityEvent {
 }
 
 // ============================================================
+// Machine Timeline (per-machine social feed)
+// ============================================================
+export type TimelineEntryKind =
+  | "manuel"
+  | "bakim"
+  | "temizlik"
+  | "ariza"
+  | "duzeltme"
+  | "parca_degisimi"
+  | "sayim"
+  | "gozlem";
+
+export const TIMELINE_KIND_LABEL: Record<TimelineEntryKind, string> = {
+  manuel: "Manuel Not",
+  bakim: "Bakım",
+  temizlik: "Temizlik",
+  ariza: "Arıza",
+  duzeltme: "Düzeltme",
+  parca_degisimi: "Parça Değişimi",
+  sayim: "Sayım",
+  gozlem: "Gözlem",
+};
+
+export interface MachineTimelineEntry {
+  id: string;
+  machine_id: string;
+  author_id: string | null;
+  author_name: string | null;
+  kind: TimelineEntryKind;
+  title: string | null;
+  body: string | null;
+  photo_paths: string[];
+  duration_minutes: number | null;
+  happened_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TimelineComment {
+  id: string;
+  entry_id: string;
+  author_id: string | null;
+  author_name: string | null;
+  body: string;
+  created_at: string;
+}
+
+export interface TimelineReaction {
+  id: string;
+  entry_id: string;
+  author_id: string;
+  kind: "like" | "dislike";
+  created_at: string;
+}
+
+// Public storage URL for a timeline photo path.
+export function timelinePhotoUrl(path: string): string | null {
+  if (!path) return null;
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!base) return null;
+  return `${base}/storage/v1/object/public/timeline-photos/${path}`;
+}
+
+// ============================================================
 // Quality Reviews (sign-off trail)
 // ============================================================
 export type QcReviewerRole = "operator" | "kontrolor" | "onaylayan";

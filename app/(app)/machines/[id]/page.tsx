@@ -60,6 +60,9 @@ import {
 import { MachineDialog } from "../machine-dialog";
 import { StatusButton } from "../status-button";
 import { LiveTelemetry } from "./live-telemetry";
+import { MachineTimeline } from "./timeline";
+import { getMachineTimeline } from "./timeline-data";
+import { getProfile } from "@/lib/supabase/server";
 import { cn, formatDate } from "@/lib/utils";
 
 type EntryWithJoins = ProductionEntry & {
@@ -112,6 +115,22 @@ export default async function MachineDetailPage({
     .single();
   if (machineRes.error || !machineRes.data) notFound();
   const machine = machineRes.data as Machine;
+
+  const profile = await getProfile();
+  const timeline = await getMachineTimeline(supabase, id);
+  const commentsObj: Record<string, ReturnType<typeof Array.from> extends infer T ? T : never> = {};
+  // Convert Map → plain object for client component prop
+  const commentsRecord: Record<string, Array<{
+    id: string;
+    body: string;
+    author_id: string | null;
+    author_name: string | null;
+    created_at: string;
+  }>> = {};
+  for (const [k, v] of timeline.comments.entries()) {
+    commentsRecord[k] = v;
+  }
+  void commentsObj;
 
   const [entriesRes, weekRes, todayStatsRes, jobsRes] = await Promise.all([
     supabase
@@ -792,6 +811,15 @@ export default async function MachineDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* TIMELINE — manuel entries + production + reviews + activity */}
+      <MachineTimeline
+        machineId={machine.id}
+        items={timeline.items}
+        comments={commentsRecord}
+        currentUserId={profile?.id ?? null}
+        isAdmin={profile?.role === "admin"}
+      />
 
       {/* HISTORY TABS — saves vertical space */}
       <Tabs defaultValue="jobs">
