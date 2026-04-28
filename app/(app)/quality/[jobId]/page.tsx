@@ -21,8 +21,10 @@ import { createClient } from "@/lib/supabase/server";
 import {
   formatToleranceBand,
   formatToleranceRange,
+  isImageDrawing,
   QC_CHARACTERISTIC_EMOJI,
   QC_CHARACTERISTIC_LABEL,
+  type Drawing,
   type Job,
   type QualitySpec,
   type QualityMeasurement,
@@ -36,6 +38,7 @@ import {
   AlertCircle,
   ClipboardCheck,
   FileDown,
+  ImageIcon,
 } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { SpecDialog } from "../spec-dialog";
@@ -43,6 +46,7 @@ import { MeasurementDialog } from "../measurement-dialog";
 import { BulkMeasurementDialog } from "../bulk-measurement-dialog";
 import { ReviewDialog } from "../review-dialog";
 import { ResultBadge } from "../result-badge";
+import { QcImageBoard } from "../image-board";
 import { DeleteButton } from "../../operators/delete-button";
 import { deleteSpec, deleteMeasurement, deleteQualityReview } from "../actions";
 import { formatDateTime } from "@/lib/utils";
@@ -75,7 +79,7 @@ export default async function QualityJobPage({
 
   const supabase = await createClient();
 
-  const [jobRes, specsRes, measRes, reviewsRes] = await Promise.all([
+  const [jobRes, specsRes, measRes, reviewsRes, drawingsRes] = await Promise.all([
     supabase
       .from("jobs")
       .select("id, job_no, customer, part_name, part_no, quantity, status")
@@ -101,7 +105,31 @@ export default async function QualityJobPage({
       .select(`*, reviewer:profiles!quality_reviews_reviewer_id_fkey(full_name)`)
       .eq("job_id", jobId)
       .order("reviewed_at", { ascending: false }),
+    supabase
+      .from("drawings")
+      .select("id, title, revision, file_path, file_type")
+      .eq("job_id", jobId)
+      .order("created_at", { ascending: false }),
   ]);
+
+  // Build signed URLs for image drawings only — the QC image board overlay
+  // doesn't currently work over PDFs (would need pdf.js). Filter accordingly.
+  type DrawingShape = Pick<Drawing, "id" | "title" | "revision" | "file_path" | "file_type">;
+  const allDrawings = (drawingsRes.data ?? []) as DrawingShape[];
+  const imageDrawings = allDrawings.filter((d) => isImageDrawing(d));
+  const drawingsForBoard = await Promise.all(
+    imageDrawings.map(async (d) => {
+      const { data } = await supabase.storage
+        .from("drawings")
+        .createSignedUrl(d.file_path, 60 * 30); // 30 dk
+      return {
+        id: d.id,
+        title: d.title,
+        revision: d.revision,
+        signedUrl: data?.signedUrl ?? "",
+      };
+    }),
+  );
 
   if (jobRes.error || !jobRes.data) notFound();
   const job = jobRes.data as Pick<
@@ -292,8 +320,11 @@ export default async function QualityJobPage({
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue="specs">
+      <Tabs defaultValue={drawingsForBoard.length > 0 ? "image" : "specs"}>
         <TabsList>
+          <TabsTrigger value="image">
+            <ImageIcon className="size-4" /> Resim Üzerinden
+          </TabsTrigger>
           <TabsTrigger value="specs">
             <Ruler className="size-4" /> Spec'ler ({specs.length})
           </TabsTrigger>
@@ -301,6 +332,15 @@ export default async function QualityJobPage({
             <Gauge className="size-4" /> Ölçümler ({totalMeas})
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="image">
+          <QcImageBoard
+            jobId={jobId}
+            drawings={drawingsForBoard.filter((d) => d.signedUrl)}
+            specs={specs}
+            measurements={measurements}
+          />
+        </TabsContent>
 
         <TabsContent value="specs">
           <Card>

@@ -37,9 +37,16 @@ import { cn } from "@/lib/utils";
 
 interface Props {
   jobId: string;
-  trigger: React.ReactNode;
+  trigger?: React.ReactNode;
   spec?: QualitySpec;
   defaultBubbleNo?: number;
+  // Pre-link to a drawing + position (used by the visual image board flow)
+  defaultDrawingId?: string;
+  defaultBubbleX?: number;
+  defaultBubbleY?: number;
+  // Controlled-open support so the image board can drive this dialog
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const TYPES: QcCharacteristicType[] = [
@@ -51,8 +58,24 @@ const TYPES: QcCharacteristicType[] = [
   "diger",
 ];
 
-export function SpecDialog({ jobId, trigger, spec, defaultBubbleNo }: Props) {
-  const [open, setOpen] = useState(false);
+export function SpecDialog({
+  jobId,
+  trigger,
+  spec,
+  defaultBubbleNo,
+  defaultDrawingId,
+  defaultBubbleX,
+  defaultBubbleY,
+  open: controlledOpen,
+  onOpenChange,
+}: Props) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (!isControlled) setInternalOpen(v);
+    onOpenChange?.(v);
+  };
   const [pending, startTransition] = useTransition();
 
   const [bubbleNo, setBubbleNo] = useState<string>(
@@ -115,6 +138,9 @@ export function SpecDialog({ jobId, trigger, spec, defaultBubbleNo }: Props) {
       unit,
       measurement_tool: tool,
       is_critical: critical,
+      drawing_id: spec?.drawing_id ?? defaultDrawingId ?? null,
+      bubble_x: spec?.bubble_x ?? defaultBubbleX ?? null,
+      bubble_y: spec?.bubble_y ?? defaultBubbleY ?? null,
       notes,
     };
 
@@ -130,7 +156,7 @@ export function SpecDialog({ jobId, trigger, spec, defaultBubbleNo }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
+      {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>

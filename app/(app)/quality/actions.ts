@@ -22,6 +22,8 @@ export interface SaveSpecInput {
   measurement_tool?: string | null;
   is_critical: boolean;
   drawing_id?: string | null;
+  bubble_x?: number | null;
+  bubble_y?: number | null;
   notes?: string | null;
 }
 
@@ -55,6 +57,14 @@ export async function saveSpec(input: SaveSpecInput) {
     measurement_tool: input.measurement_tool?.trim() || null,
     is_critical: !!input.is_critical,
     drawing_id: input.drawing_id || null,
+    bubble_x:
+      input.bubble_x === null || input.bubble_x === undefined
+        ? null
+        : Number(input.bubble_x),
+    bubble_y:
+      input.bubble_y === null || input.bubble_y === undefined
+        ? null
+        : Number(input.bubble_y),
     notes: input.notes?.trim() || null,
   };
 

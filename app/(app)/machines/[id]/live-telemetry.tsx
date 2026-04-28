@@ -204,8 +204,9 @@ function nextTelemetry(
 
   if (status === "ariza" && alarms.length === 0) alarms.push("servo");
 
-  // Random new alarm only when alarm-mode toggle is ON
-  if (alarmModeOn && status === "aktif" && Math.random() < 0.08) {
+  // Random new alarm only when alarm-mode toggle is ON.
+  // 35% per 2s tick = roughly one new alarm every 5-6 seconds when ON.
+  if (alarmModeOn && status === "aktif" && Math.random() < 0.35) {
     const def = ALARM_DEFS[Math.floor(Math.random() * ALARM_DEFS.length)];
     if (!alarms.includes(def.type)) alarms.push(def.type);
   }

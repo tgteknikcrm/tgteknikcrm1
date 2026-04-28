@@ -340,6 +340,9 @@ export interface QualitySpec {
   measurement_tool: string | null;
   is_critical: boolean;
   drawing_id: string | null;
+  // Normalized coords (0..1) on the linked drawing — survives resize.
+  bubble_x: number | null;
+  bubble_y: number | null;
   notes: string | null;
   created_by: string | null;
   created_at: string;
@@ -469,6 +472,13 @@ export function formatToleranceRange(
 export function formatToleranceBand(tolPlus: number, tolMinus: number): string {
   if (tolPlus === tolMinus) return `±${tolPlus}`;
   return `+${tolPlus} / −${tolMinus}`;
+}
+
+// Deviation as % of nominal, signed. Used in measurement bar UX:
+//   nominal=12, measured=11.89 → -0.92%
+export function deviationPct(measured: number, nominal: number): number {
+  if (!nominal) return 0;
+  return ((measured - nominal) / nominal) * 100;
 }
 
 // ============================================================
