@@ -1,12 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Google_Sans } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { ServiceWorkerRegister } from "@/components/app/sw-register";
 import "./globals.css";
 
-const inter = Inter({
-  subsets: ["latin"],
+// Google Sans — site genelinde tek tip, modern Material 3 dili.
+// Not: 'latin-ext' Türkçe karakterler için, normal/medium/bold ağırlıkları
+// arayüz için yeterli.
+const googleSans = Google_Sans({
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500", "700"],
   variable: "--font-sans",
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -53,7 +58,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="tr" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans antialiased min-h-screen bg-background text-foreground`}>
+      <body className={`${googleSans.variable} font-sans antialiased min-h-screen bg-background text-foreground`}>
         {children}
         <Toaster position="top-right" richColors />
         <ServiceWorkerRegister />

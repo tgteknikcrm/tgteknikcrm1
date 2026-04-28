@@ -58,6 +58,7 @@ import {
   type QcResult,
 } from "@/lib/supabase/types";
 import { MachineDialog } from "../machine-dialog";
+import { StatusButton } from "../status-button";
 import { LiveTelemetry } from "./live-telemetry";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -357,7 +358,8 @@ export default async function MachineDetailPage({
               </div>
             </div>
           </div>
-          <div className="flex gap-2 sm:flex-col lg:flex-row">
+          <div className="flex gap-2 flex-wrap">
+            <StatusButton machineId={machine.id} current={machine.status} />
             <MachineDialog
               machine={machine}
               trigger={<Button variant="outline">Düzenle</Button>}

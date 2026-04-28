@@ -36,6 +36,8 @@ import {
   Thermometer,
   Maximize2,
   Cpu,
+  Bell,
+  BellOff,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -193,6 +195,7 @@ function nextTelemetry(
   prev: Telemetry,
   status: MachineStatus,
   toolHints: Props["toolHints"],
+  alarmModeOn: boolean,
 ): Telemetry {
   let alarms = [...prev.alarms];
 
@@ -201,8 +204,8 @@ function nextTelemetry(
 
   if (status === "ariza" && alarms.length === 0) alarms.push("servo");
 
-  // Random new alarm if active
-  if (status === "aktif" && Math.random() < 0.08) {
+  // Random new alarm only when alarm-mode toggle is ON
+  if (alarmModeOn && status === "aktif" && Math.random() < 0.08) {
     const def = ALARM_DEFS[Math.floor(Math.random() * ALARM_DEFS.length)];
     if (!alarms.includes(def.type)) alarms.push(def.type);
   }
@@ -274,12 +277,17 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
   }));
 
   const [programOpen, setProgramOpen] = useState(false);
+  const [alarmMode, setAlarmMode] = useState(false);
+  const alarmModeRef = useRef(alarmMode);
+  alarmModeRef.current = alarmMode;
   const previousAlarmsRef = useRef<AlarmType[]>([]);
 
   useEffect(() => {
-    setTelem((prev) => nextTelemetry(prev, status, toolHints));
+    setTelem((prev) => nextTelemetry(prev, status, toolHints, alarmModeRef.current));
     const id = setInterval(() => {
-      setTelem((prev) => nextTelemetry(prev, status, toolHints));
+      setTelem((prev) =>
+        nextTelemetry(prev, status, toolHints, alarmModeRef.current),
+      );
     }, 2000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -363,7 +371,23 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setAlarmMode((v) => !v)}
+              className={cn(
+                "h-7 gap-1.5 text-[11px] font-semibold border-2",
+                alarmMode
+                  ? "bg-red-500/10 text-red-700 border-red-500/40 hover:bg-red-500/20"
+                  : "bg-muted/40 text-muted-foreground border-border",
+              )}
+              title="Mock alarm üretimini aç/kapat"
+            >
+              {alarmMode ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}
+              Mock Alarm: {alarmMode ? "AÇIK" : "KAPALI"}
+            </Button>
             <Badge
               variant="outline"
               className="font-bold text-[10px] tracking-wider gap-1 bg-amber-500/10 text-amber-700 border-amber-500/40"

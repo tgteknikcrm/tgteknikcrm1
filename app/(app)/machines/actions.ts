@@ -43,3 +43,16 @@ export async function deleteMachine(id: string) {
   revalidatePath("/machines");
   return { success: true };
 }
+
+export async function updateMachineStatus(id: string, status: MachineStatus) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("machines")
+    .update({ status })
+    .eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/machines");
+  revalidatePath(`/machines/${id}`);
+  revalidatePath("/dashboard");
+  return { success: true };
+}
