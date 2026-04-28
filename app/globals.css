@@ -124,3 +124,26 @@
     font-feature-settings: "rlig" 1, "calt" 1;
   }
 }
+
+/* Print: hide chrome (sidebar, FAB, mobile nav) for clean PDFs of reports.
+   The report page itself uses `print:` utilities to slim down further. */
+@media print {
+  aside,
+  [data-slot="dialog-overlay"],
+  .print\:hidden {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  /* Avoid breaking table rows */
+  tr,
+  td,
+  th {
+    page-break-inside: avoid;
+  }
+}

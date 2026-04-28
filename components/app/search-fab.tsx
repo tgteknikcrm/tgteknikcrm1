@@ -22,6 +22,7 @@ import {
   ShoppingCart,
   Truck,
   Image as ImageIcon,
+  ClipboardCheck,
   type LucideIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -63,7 +64,7 @@ export function SearchFab() {
     const supabase = createClient();
     const like = `%${term}%`;
 
-    const [machines, operators, tools, jobs, orders, suppliers, drawings] =
+    const [machines, operators, tools, jobs, orders, suppliers, drawings, qcSpecs] =
       await Promise.all([
         supabase
           .from("machines")
@@ -108,9 +109,21 @@ export function SearchFab() {
           .select("id, title, revision, file_type")
           .or(`title.ilike.${like},revision.ilike.${like}`)
           .limit(5),
+        supabase
+          .from("quality_specs")
+          .select("id, bubble_no, description, job_id, jobs(part_name, customer)")
+          .or(`description.ilike.${like}`)
+          .limit(5),
       ]);
 
     type OrderItem = { id: string; order_no: string | null; supplier: { name: string } | null };
+    type QcSpecItem = {
+      id: string;
+      bubble_no: number | null;
+      description: string;
+      job_id: string;
+      jobs: { part_name: string; customer: string } | null;
+    };
 
     const next: Group[] = [
       {
@@ -188,6 +201,22 @@ export function SearchFab() {
           title: d.title,
           subtitle: [d.revision, d.file_type].filter(Boolean).join(" · ") || undefined,
           href: `/drawings`,
+        })),
+      },
+      {
+        key: "qc",
+        label: "Kalite Spec'leri",
+        icon: ClipboardCheck,
+        items: (qcSpecs.data as unknown as QcSpecItem[] | null ?? []).map((s) => ({
+          id: s.id,
+          title:
+            s.bubble_no !== null
+              ? `#${s.bubble_no} · ${s.description}`
+              : s.description,
+          subtitle:
+            [s.jobs?.part_name, s.jobs?.customer].filter(Boolean).join(" · ") ||
+            undefined,
+          href: `/quality/${s.job_id}`,
         })),
       },
     ].filter((g) => g.items.length > 0);

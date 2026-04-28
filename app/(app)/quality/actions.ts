@@ -1,0 +1,235 @@
+"use server";
+
+import { createClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+import {
+  calculateQcResult,
+  type QcCharacteristicType,
+} from "@/lib/supabase/types";
+
+export interface SaveSpecInput {
+  id?: string;
+  job_id: string;
+  bubble_no?: number | null;
+  characteristic_type: QcCharacteristicType;
+  description: string;
+  nominal_value: number;
+  tolerance_plus: number;
+  tolerance_minus: number;
+  unit: string;
+  measurement_tool?: string | null;
+  is_critical: boolean;
+  drawing_id?: string | null;
+  notes?: string | null;
+}
+
+export async function saveSpec(input: SaveSpecInput) {
+  const supabase = await createClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id ?? null;
+
+  if (!input.description?.trim()) {
+    return { error: "Açıklama zorunlu." };
+  }
+  if (!Number.isFinite(input.nominal_value)) {
+    return { error: "Nominal değer geçersiz." };
+  }
+  if (input.tolerance_plus < 0 || input.tolerance_minus < 0) {
+    return { error: "Tolerans değerleri negatif olamaz." };
+  }
+
+  const payload = {
+    job_id: input.job_id,
+    bubble_no:
+      input.bubble_no === null || input.bubble_no === undefined
+        ? null
+        : Number(input.bubble_no),
+    characteristic_type: input.characteristic_type,
+    description: input.description.trim(),
+    nominal_value: Number(input.nominal_value),
+    tolerance_plus: Number(input.tolerance_plus),
+    tolerance_minus: Number(input.tolerance_minus),
+    unit: input.unit?.trim() || "mm",
+    measurement_tool: input.measurement_tool?.trim() || null,
+    is_critical: !!input.is_critical,
+    drawing_id: input.drawing_id || null,
+    notes: input.notes?.trim() || null,
+  };
+
+  if (input.id) {
+    const { error } = await supabase
+      .from("quality_specs")
+      .update(payload)
+      .eq("id", input.id);
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await supabase
+      .from("quality_specs")
+      .insert({ ...payload, created_by: userId });
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/quality");
+  revalidatePath(`/quality/${input.job_id}`);
+  return { success: true };
+}
+
+export async function deleteSpec(id: string, jobId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("quality_specs").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/quality");
+  revalidatePath(`/quality/${jobId}`);
+  return { success: true };
+}
+
+export interface SaveMeasurementInput {
+  id?: string;
+  spec_id: string;
+  job_id: string;
+  part_serial?: string | null;
+  measured_value: number;
+  measurement_tool?: string | null;
+  notes?: string | null;
+}
+
+export async function saveMeasurement(input: SaveMeasurementInput) {
+  const supabase = await createClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id ?? null;
+
+  if (!Number.isFinite(input.measured_value)) {
+    return { error: "Ölçülen değer geçersiz." };
+  }
+
+  // Fetch spec to compute result server-side (don't trust client)
+  const specRes = await supabase
+    .from("quality_specs")
+    .select("nominal_value, tolerance_plus, tolerance_minus")
+    .eq("id", input.spec_id)
+    .single();
+  if (specRes.error || !specRes.data) {
+    return { error: "Spec bulunamadı." };
+  }
+  const result = calculateQcResult(
+    Number(input.measured_value),
+    Number(specRes.data.nominal_value),
+    Number(specRes.data.tolerance_plus),
+    Number(specRes.data.tolerance_minus),
+  );
+
+  const payload = {
+    spec_id: input.spec_id,
+    job_id: input.job_id,
+    part_serial: input.part_serial?.trim() || null,
+    measured_value: Number(input.measured_value),
+    result,
+    measurement_tool: input.measurement_tool?.trim() || null,
+    notes: input.notes?.trim() || null,
+  };
+
+  if (input.id) {
+    const { error } = await supabase
+      .from("quality_measurements")
+      .update(payload)
+      .eq("id", input.id);
+    if (error) return { error: error.message };
+  } else {
+    const { error } = await supabase
+      .from("quality_measurements")
+      .insert({ ...payload, measured_by: userId });
+    if (error) return { error: error.message };
+  }
+
+  revalidatePath("/quality");
+  revalidatePath(`/quality/${input.job_id}`);
+  return { success: true, result };
+}
+
+export interface BulkMeasurementInput {
+  job_id: string;
+  part_serial?: string | null;
+  entries: Array<{
+    spec_id: string;
+    measured_value: number;
+    measurement_tool?: string | null;
+    notes?: string | null;
+  }>;
+}
+
+export async function saveBulkMeasurements(input: BulkMeasurementInput) {
+  const supabase = await createClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const userId = userData.user?.id ?? null;
+
+  if (input.entries.length === 0) {
+    return { error: "Ölçüm yok." };
+  }
+
+  // Fetch all specs in one query for tolerance calculation
+  const specIds = input.entries.map((e) => e.spec_id);
+  const specsRes = await supabase
+    .from("quality_specs")
+    .select("id, nominal_value, tolerance_plus, tolerance_minus")
+    .in("id", specIds);
+  if (specsRes.error || !specsRes.data) {
+    return { error: specsRes.error?.message || "Spec'ler okunamadı." };
+  }
+
+  const specMap = new Map(
+    specsRes.data.map((s) => [
+      s.id as string,
+      {
+        nominal: Number(s.nominal_value),
+        plus: Number(s.tolerance_plus),
+        minus: Number(s.tolerance_minus),
+      },
+    ]),
+  );
+
+  const rows = input.entries
+    .filter((e) => Number.isFinite(e.measured_value))
+    .map((e) => {
+      const s = specMap.get(e.spec_id);
+      if (!s) return null;
+      return {
+        spec_id: e.spec_id,
+        job_id: input.job_id,
+        part_serial: input.part_serial?.trim() || null,
+        measured_value: Number(e.measured_value),
+        result: calculateQcResult(
+          Number(e.measured_value),
+          s.nominal,
+          s.plus,
+          s.minus,
+        ),
+        measurement_tool: e.measurement_tool?.trim() || null,
+        notes: e.notes?.trim() || null,
+        measured_by: userId,
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
+
+  if (rows.length === 0) {
+    return { error: "Geçerli ölçüm yok." };
+  }
+
+  const { error } = await supabase.from("quality_measurements").insert(rows);
+  if (error) return { error: error.message };
+
+  revalidatePath("/quality");
+  revalidatePath(`/quality/${input.job_id}`);
+  return { success: true, count: rows.length };
+}
+
+export async function deleteMeasurement(id: string, jobId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quality_measurements")
+    .delete()
+    .eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath("/quality");
+  revalidatePath(`/quality/${jobId}`);
+  return { success: true };
+}

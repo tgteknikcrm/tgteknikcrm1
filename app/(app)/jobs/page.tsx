@@ -18,7 +18,7 @@ import {
   type Machine,
   type Operator,
 } from "@/lib/supabase/types";
-import { Plus, FileText } from "lucide-react";
+import { Plus, FileText, ClipboardCheck } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/app/empty-state";
 import { SearchInput } from "@/components/app/search-input";
@@ -156,6 +156,11 @@ export default async function JobsPage({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">
+                        <Button asChild variant="ghost" size="sm" title="Kalite Kontrol">
+                          <Link href={`/quality/${j.id}`}>
+                            <ClipboardCheck className="size-4" /> Kalite
+                          </Link>
+                        </Button>
                         <JobDialog
                           job={j}
                           machines={machines}

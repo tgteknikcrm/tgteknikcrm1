@@ -303,3 +303,160 @@ export const PO_ITEM_PRESETS: ReadonlyArray<{
   { category: "bakim_malzemesi", defaultUnit: "adet", emoji: "🧰" },
   { category: "diger", defaultUnit: "adet", emoji: "📦" },
 ];
+
+// ============================================================
+// Quality Control
+// ============================================================
+export type QcCharacteristicType =
+  | "boyut"
+  | "gdt"
+  | "yuzey"
+  | "sertlik"
+  | "agirlik"
+  | "diger";
+
+export type QcResult = "ok" | "sinirda" | "nok";
+
+export interface QualitySpec {
+  id: string;
+  job_id: string;
+  bubble_no: number | null;
+  characteristic_type: QcCharacteristicType;
+  description: string;
+  nominal_value: number;
+  tolerance_plus: number;
+  tolerance_minus: number;
+  unit: string;
+  measurement_tool: string | null;
+  is_critical: boolean;
+  drawing_id: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QualityMeasurement {
+  id: string;
+  spec_id: string;
+  job_id: string;
+  part_serial: string | null;
+  measured_value: number;
+  result: QcResult;
+  measurement_tool: string | null;
+  measured_by: string | null;
+  measured_at: string;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface QualitySummary {
+  job_id: string;
+  job_no: string | null;
+  customer: string;
+  part_name: string;
+  part_no: string | null;
+  planned_quantity: number;
+  job_status: JobStatus;
+  spec_count: number;
+  critical_spec_count: number;
+  measurement_count: number;
+  ok_count: number;
+  sinirda_count: number;
+  nok_count: number;
+  last_measured_at: string | null;
+}
+
+export const QC_CHARACTERISTIC_LABEL: Record<QcCharacteristicType, string> = {
+  boyut: "Boyut",
+  gdt: "Geometrik Tolerans",
+  yuzey: "Yüzey",
+  sertlik: "Sertlik",
+  agirlik: "Ağırlık",
+  diger: "Diğer",
+};
+
+export const QC_CHARACTERISTIC_EMOJI: Record<QcCharacteristicType, string> = {
+  boyut: "📏",
+  gdt: "📐",
+  yuzey: "✨",
+  sertlik: "🪨",
+  agirlik: "⚖️",
+  diger: "🔖",
+};
+
+export const QC_RESULT_LABEL: Record<QcResult, string> = {
+  ok: "OK",
+  sinirda: "Sınırda",
+  nok: "NOK",
+};
+
+export const QC_RESULT_TONE: Record<QcResult, string> = {
+  ok: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+  sinirda: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+  nok: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
+};
+
+// Common measurement tool presets used in CNC shops
+export const QC_TOOL_PRESETS: readonly string[] = [
+  "Kumpas",
+  "Dijital Kumpas",
+  "Mikrometre",
+  "Dijital Mikrometre",
+  "Mastar",
+  "Komparatör",
+  "Pasametre",
+  "Yükseklik Mastarı",
+  "Gönye",
+  "CMM",
+  "Pürüzlülük Cihazı",
+  "Sertlik Cihazı",
+];
+
+// Common tolerance presets (ISO 2768 fine/medium and shop-friendly values)
+export const QC_TOLERANCE_PRESETS: readonly { label: string; value: number }[] = [
+  { label: "±0.005", value: 0.005 },
+  { label: "±0.01", value: 0.01 },
+  { label: "±0.02", value: 0.02 },
+  { label: "±0.05", value: 0.05 },
+  { label: "±0.1", value: 0.1 },
+  { label: "±0.2", value: 0.2 },
+  { label: "±0.5", value: 0.5 },
+];
+
+// Evaluate a measured value against a spec.
+//   ok       — strictly within (nominal - tolMinus, nominal + tolPlus)
+//   sinirda  — within band but consumed >80% of either side (warning)
+//   nok      — out of band
+export function calculateQcResult(
+  measured: number,
+  nominal: number,
+  tolPlus: number,
+  tolMinus: number,
+): QcResult {
+  const dev = measured - nominal;
+  const upper = tolPlus;
+  const lower = -tolMinus;
+  if (dev > upper || dev < lower) return "nok";
+  // Consumed % of the relevant side
+  const consumed =
+    dev >= 0 ? (upper > 0 ? dev / upper : 0) : lower < 0 ? dev / lower : 0;
+  if (consumed >= 0.8) return "sinirda";
+  return "ok";
+}
+
+export function formatToleranceRange(
+  nominal: number,
+  tolPlus: number,
+  tolMinus: number,
+  unit: string,
+): string {
+  const min = nominal - tolMinus;
+  const max = nominal + tolPlus;
+  return `${min.toFixed(3)} – ${max.toFixed(3)} ${unit}`;
+}
+
+export function formatToleranceBand(tolPlus: number, tolMinus: number): string {
+  if (tolPlus === tolMinus) return `±${tolPlus}`;
+  return `+${tolPlus} / −${tolMinus}`;
+}

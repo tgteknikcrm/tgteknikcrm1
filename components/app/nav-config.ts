@@ -4,6 +4,7 @@ import {
   Users,
   Wrench,
   ClipboardList,
+  ClipboardCheck,
   FileText,
   Image as ImageIcon,
   BarChart3,
@@ -30,6 +31,7 @@ export const navItems: NavItem[] = [
   { href: "/operators", label: "Operatörler", icon: Users },
   { href: "/tools", label: "Takım Listesi", icon: Wrench },
   { href: "/drawings", label: "Teknik Resimler", icon: ImageIcon },
+  { href: "/quality", label: "Kalite Kontrol", icon: ClipboardCheck },
   { href: "/reports", label: "Raporlar", icon: BarChart3 },
   { href: "/settings", label: "Ayarlar", icon: Settings, adminOnly: true },
 ];
