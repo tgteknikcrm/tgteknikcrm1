@@ -1,6 +1,9 @@
 // Server-side aggregator: combines manual timeline entries, production
 // entries, quality reviews and machine-related activity events into a
-// single chronological feed for one machine.
+// single chronological feed.
+//
+// Pass a machineId to scope to one machine, or omit to fetch across ALL
+// machines (used by /timeline).
 
 import type { createClient as serverClientFn } from "@/lib/supabase/server";
 
@@ -9,7 +12,7 @@ export type TimelineSource = "manual" | "production" | "review" | "activity";
 export interface TimelineItem {
   id: string;
   source: TimelineSource;
-  kind: string; // sub-type, drives icon/color
+  kind: string;
   at: string;
   actor_id: string | null;
   actor_name: string | null;
@@ -17,7 +20,8 @@ export interface TimelineItem {
   body: string | null;
   photos: string[];
   meta: Record<string, unknown> | null;
-  // For manual entries: id used by reaction/comment endpoints + counts
+  machine_id: string | null;
+  machine_name: string | null;
   manual_entry_id?: string;
   likes?: number;
   dislikes?: number;
@@ -25,44 +29,52 @@ export interface TimelineItem {
   comment_count?: number;
 }
 
+export interface TimelineCommentRow {
+  id: string;
+  body: string;
+  author_id: string | null;
+  author_name: string | null;
+  created_at: string;
+}
+
 type SupaServerClient = Awaited<ReturnType<typeof serverClientFn>>;
 
 export async function getMachineTimeline(
   supabase: SupaServerClient,
-  machineId: string,
+  machineId: string | null,
 ): Promise<{
   items: TimelineItem[];
-  comments: Map<string, Array<{
-    id: string;
-    body: string;
-    author_id: string | null;
-    author_name: string | null;
-    created_at: string;
-  }>>;
+  comments: Map<string, TimelineCommentRow[]>;
 }> {
-  const items: TimelineItem[] = [];
-  const commentsByEntry = new Map<string, Array<{
-    id: string;
-    body: string;
-    author_id: string | null;
-    author_name: string | null;
-    created_at: string;
-  }>>();
+  // Build a global machine map (id → name) — used for both modes
+  const { data: machinesAll } = await supabase
+    .from("machines")
+    .select("id, name");
+  const machineMap = new Map<string, string>(
+    ((machinesAll ?? []) as Array<{ id: string; name: string }>).map((m) => [
+      m.id,
+      m.name,
+    ]),
+  );
 
-  // ── Manual entries (with reactions + comment counts) ──
+  const items: TimelineItem[] = [];
+  const commentsByEntry = new Map<string, TimelineCommentRow[]>();
+
+  // ── Manual entries ──
+  let manualQ = supabase
+    .from("machine_timeline_entries")
+    .select("*")
+    .order("happened_at", { ascending: false })
+    .limit(machineId ? 200 : 300);
+  if (machineId) manualQ = manualQ.eq("machine_id", machineId);
+
   const [{ data: manual }, { data: { user } }] = await Promise.all([
-    supabase
-      .from("machine_timeline_entries")
-      .select("*")
-      .eq("machine_id", machineId)
-      .order("happened_at", { ascending: false })
-      .limit(200),
+    manualQ,
     supabase.auth.getUser(),
   ]);
 
   const manualIds = (manual ?? []).map((m) => m.id as string);
 
-  // Reactions + comments fetched in parallel
   const [reactionsRes, commentsRes] = manualIds.length
     ? await Promise.all([
         supabase
@@ -77,7 +89,6 @@ export async function getMachineTimeline(
       ])
     : [{ data: [] }, { data: [] }];
 
-  // Aggregate reactions per entry
   const reactionAgg = new Map<
     string,
     { likes: number; dislikes: number; userKind: "like" | "dislike" | null }
@@ -96,7 +107,6 @@ export async function getMachineTimeline(
     reactionAgg.set(r.entry_id, cur);
   }
 
-  // Comments grouped per entry
   for (const c of commentsRes.data ?? []) {
     const arr = commentsByEntry.get(c.entry_id) ?? [];
     arr.push({
@@ -122,6 +132,8 @@ export async function getMachineTimeline(
       body: m.body,
       photos: (m.photo_paths ?? []) as string[],
       meta: { duration_minutes: m.duration_minutes },
+      machine_id: m.machine_id,
+      machine_name: machineMap.get(m.machine_id) ?? null,
       manual_entry_id: m.id,
       likes: agg.likes,
       dislikes: agg.dislikes,
@@ -131,20 +143,23 @@ export async function getMachineTimeline(
   }
 
   // ── Production entries ──
-  const { data: prod } = await supabase
+  let prodQ = supabase
     .from("production_entries")
     .select(
-      `id, entry_date, shift, produced_qty, scrap_qty, downtime_minutes,
-       start_time, end_time, notes, operators(full_name),
+      `id, machine_id, entry_date, shift, produced_qty, scrap_qty,
+       downtime_minutes, start_time, end_time, notes,
+       operators(full_name),
        jobs(id, job_no, customer, part_name, part_no)`,
     )
-    .eq("machine_id", machineId)
     .order("entry_date", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(machineId ? 200 : 300);
+  if (machineId) prodQ = prodQ.eq("machine_id", machineId);
+  const { data: prod } = await prodQ;
 
   type ProdRow = {
     id: string;
+    machine_id: string;
     entry_date: string;
     shift: string;
     produced_qty: number;
@@ -188,19 +203,18 @@ export async function getMachineTimeline(
         downtime: p.downtime_minutes,
         job_id: p.jobs?.id,
       },
+      machine_id: p.machine_id,
+      machine_name: machineMap.get(p.machine_id) ?? null,
     });
   }
 
-  // ── Quality reviews for jobs assigned to this machine ──
-  const { data: jobIdsRes } = await supabase
-    .from("jobs")
-    .select("id, part_name")
-    .eq("machine_id", machineId);
-  const jobMap = new Map(
-    ((jobIdsRes ?? []) as Array<{ id: string; part_name: string }>).map((j) => [
-      j.id,
-      j.part_name,
-    ]),
+  // ── Quality reviews ──
+  let jobsQ = supabase.from("jobs").select("id, machine_id, part_name");
+  if (machineId) jobsQ = jobsQ.eq("machine_id", machineId);
+  const { data: jobsList } = await jobsQ;
+  type JobRowLite = { id: string; machine_id: string | null; part_name: string };
+  const jobMap = new Map<string, JobRowLite>(
+    ((jobsList ?? []) as JobRowLite[]).map((j) => [j.id, j]),
   );
   const jobIds = Array.from(jobMap.keys());
 
@@ -213,7 +227,7 @@ export async function getMachineTimeline(
       )
       .in("job_id", jobIds)
       .order("reviewed_at", { ascending: false })
-      .limit(100);
+      .limit(machineId ? 100 : 200);
 
     type RevRow = {
       id: string;
@@ -226,6 +240,8 @@ export async function getMachineTimeline(
     };
 
     for (const r of (reviews ?? []) as unknown as RevRow[]) {
+      const job = jobMap.get(r.job_id);
+      const mid = job?.machine_id ?? null;
       items.push({
         id: `review-${r.id}`,
         source: "review",
@@ -233,7 +249,7 @@ export async function getMachineTimeline(
         at: r.reviewed_at,
         actor_id: null,
         actor_name: r.reviewer?.full_name ?? null,
-        title: `${jobMap.get(r.job_id) ?? "—"} — ${r.reviewer_role} onayı`,
+        title: `${job?.part_name ?? "—"} — ${r.reviewer_role} onayı`,
         body: r.notes,
         photos: [],
         meta: {
@@ -241,30 +257,35 @@ export async function getMachineTimeline(
           reviewer_role: r.reviewer_role,
           job_id: r.job_id,
         },
+        machine_id: mid,
+        machine_name: mid ? (machineMap.get(mid) ?? null) : null,
       });
     }
   }
 
-  // ── Machine-related activity events (status changes, deletes, shift assigns) ──
-  const { data: activity } = await supabase
+  // ── Machine-related activity events ──
+  let actQ = supabase
     .from("activity_events")
     .select("*")
     .eq("entity_type", "machine")
-    .eq("entity_id", machineId)
     .order("created_at", { ascending: false })
-    .limit(100);
+    .limit(machineId ? 100 : 300);
+  if (machineId) actQ = actQ.eq("entity_id", machineId);
+  const { data: activity } = await actQ;
 
   type ActRow = {
     id: string;
     event_type: string;
     actor_id: string | null;
     actor_name: string | null;
+    entity_id: string | null;
     entity_label: string | null;
     metadata: Record<string, unknown> | null;
     created_at: string;
   };
 
   for (const e of (activity ?? []) as ActRow[]) {
+    const mid = e.entity_id;
     items.push({
       id: `activity-${e.id}`,
       source: "activity",
@@ -276,10 +297,11 @@ export async function getMachineTimeline(
       body: null,
       photos: [],
       meta: e.metadata,
+      machine_id: mid,
+      machine_name: mid ? (machineMap.get(mid) ?? null) : null,
     });
   }
 
-  // Sort all merged by date desc
   items.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 
   return { items, comments: commentsByEntry };

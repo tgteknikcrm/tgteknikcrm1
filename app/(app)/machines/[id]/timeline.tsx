@@ -142,11 +142,14 @@ function kindLabel(item: TimelineItem): string {
 }
 
 interface Props {
-  machineId: string;
+  /** machine to scope to. null = global feed across all machines. */
+  machineId: string | null;
   items: TimelineItem[];
   comments: Record<string, CommentRow[]>;
   currentUserId: string | null;
   isAdmin: boolean;
+  /** Provided in global mode for composer machine selector + filter chip. */
+  machines?: { id: string; name: string }[];
 }
 
 export function MachineTimeline({
@@ -155,16 +158,25 @@ export function MachineTimeline({
   comments,
   currentUserId,
   isAdmin,
+  machines = [],
 }: Props) {
   const [range, setRange] = useState<RangeKey>("week");
   const [composerOpen, setComposerOpen] = useState(false);
+  const [machineFilter, setMachineFilter] = useState<string>("all");
+  const isGlobal = machineId === null;
 
   const filtered = useMemo(() => {
     const r = RANGES.find((x) => x.key === range)!;
-    if (!r.ms) return items;
-    const cutoff = Date.now() - r.ms;
-    return items.filter((it) => new Date(it.at).getTime() >= cutoff);
-  }, [items, range]);
+    let arr = items;
+    if (r.ms) {
+      const cutoff = Date.now() - r.ms;
+      arr = arr.filter((it) => new Date(it.at).getTime() >= cutoff);
+    }
+    if (isGlobal && machineFilter !== "all") {
+      arr = arr.filter((it) => it.machine_id === machineFilter);
+    }
+    return arr;
+  }, [items, range, machineFilter, isGlobal]);
 
   // Group by day for visual sectioning
   const byDay = useMemo(() => {
@@ -191,6 +203,21 @@ export function MachineTimeline({
           </Badge>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {isGlobal && machines.length > 0 && (
+            <Select value={machineFilter} onValueChange={setMachineFilter}>
+              <SelectTrigger className="h-7 w-auto min-w-[10rem] text-xs">
+                <SelectValue placeholder="Tüm Makineler" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tüm Makineler</SelectItem>
+                {machines.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           <div className="flex gap-1">
             {RANGES.map((r) => (
               <button
@@ -209,6 +236,7 @@ export function MachineTimeline({
           </div>
           <ComposerDialog
             machineId={machineId}
+            machines={machines}
             open={composerOpen}
             onOpenChange={setComposerOpen}
           />
@@ -227,9 +255,9 @@ export function MachineTimeline({
               dayKey={dayKey}
               items={dayItems}
               comments={comments}
-              machineId={machineId}
               currentUserId={currentUserId}
               isAdmin={isAdmin}
+              showMachineChip={isGlobal}
             />
           ))}
         </div>
@@ -242,16 +270,16 @@ function DaySection({
   dayKey,
   items,
   comments,
-  machineId,
   currentUserId,
   isAdmin,
+  showMachineChip,
 }: {
   dayKey: string;
   items: TimelineItem[];
   comments: Record<string, CommentRow[]>;
-  machineId: string;
   currentUserId: string | null;
   isAdmin: boolean;
+  showMachineChip: boolean;
 }) {
   const date = new Date(dayKey);
   const dayLabel = date.toLocaleDateString("tr-TR", {
@@ -284,9 +312,9 @@ function DaySection({
             key={it.id}
             item={it}
             comments={comments[it.manual_entry_id ?? ""] ?? []}
-            machineId={machineId}
             currentUserId={currentUserId}
             isAdmin={isAdmin}
+            showMachineChip={showMachineChip}
           />
         ))}
       </div>
@@ -297,16 +325,18 @@ function DaySection({
 function TimelineCard({
   item,
   comments,
-  machineId,
   currentUserId,
   isAdmin,
+  showMachineChip,
 }: {
   item: TimelineItem;
   comments: CommentRow[];
-  machineId: string;
   currentUserId: string | null;
   isAdmin: boolean;
+  showMachineChip: boolean;
 }) {
+  // Machine context for the actions that need it
+  const machineId = item.machine_id ?? "";
   const router = useRouter();
   const meta = kindIcon(item.kind);
   const Icon = meta.icon;
@@ -402,6 +432,15 @@ function TimelineCard({
               <Badge variant="outline" className="font-normal h-5 text-[10px]">
                 {kindLabel(item)}
               </Badge>
+              {showMachineChip && item.machine_id && item.machine_name && (
+                <Link
+                  href={`/machines/${item.machine_id}`}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded border bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30 text-[10px] font-medium hover:bg-blue-500/20"
+                >
+                  <Factory className="size-2.5" />
+                  {item.machine_name}
+                </Link>
+              )}
               <span className="text-[10px] text-muted-foreground tabular-nums">
                 {formatDateTime(item.at)}
               </span>
@@ -621,10 +660,12 @@ const KINDS: TimelineEntryKind[] = [
 
 function ComposerDialog({
   machineId,
+  machines,
   open,
   onOpenChange,
 }: {
-  machineId: string;
+  machineId: string | null;
+  machines: { id: string; name: string }[];
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
@@ -633,10 +674,15 @@ function ComposerDialog({
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [duration, setDuration] = useState("");
-  const [photos, setPhotos] = useState<string[]>([]); // storage paths
+  const [photos, setPhotos] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [pending, startSave] = useTransition();
+  const [pickedMachine, setPickedMachine] = useState<string>("");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // The machine we'll save under: prop in detail mode, picked in global mode
+  const effectiveMachine = machineId ?? pickedMachine;
+  const isGlobal = machineId === null;
 
   function reset() {
     setKind("manuel");
@@ -644,6 +690,7 @@ function ComposerDialog({
     setBody("");
     setDuration("");
     setPhotos([]);
+    setPickedMachine("");
   }
 
   async function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -659,6 +706,7 @@ function ComposerDialog({
         toast.error("Giriş yapılmamış");
         return;
       }
+      const folder = effectiveMachine || "global";
       const uploaded: string[] = [];
       for (const f of files) {
         if (!f.type.startsWith("image/")) {
@@ -670,7 +718,7 @@ function ComposerDialog({
           continue;
         }
         const safe = f.name.replace(/[^a-zA-Z0-9.\-_]/g, "_");
-        const path = `${user.id}/${machineId}/${Date.now()}_${safe}`;
+        const path = `${user.id}/${folder}/${Date.now()}_${safe}`;
         const { error } = await supabase.storage
           .from("timeline-photos")
           .upload(path, f, { contentType: f.type });
@@ -699,9 +747,13 @@ function ComposerDialog({
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!effectiveMachine) {
+      toast.error("Önce bir makine seç.");
+      return;
+    }
     startSave(async () => {
       const r = await createTimelineEntry({
-        machine_id: machineId,
+        machine_id: effectiveMachine,
         kind,
         title: title.trim() || undefined,
         body: body.trim() || undefined,
@@ -733,6 +785,23 @@ function ComposerDialog({
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-3">
+          {isGlobal && (
+            <div className="space-y-1.5">
+              <Label htmlFor="tl-machine">Makine *</Label>
+              <Select value={pickedMachine} onValueChange={setPickedMachine}>
+                <SelectTrigger id="tl-machine">
+                  <SelectValue placeholder="Makine seç" />
+                </SelectTrigger>
+                <SelectContent>
+                  {machines.map((m) => (
+                    <SelectItem key={m.id} value={m.id}>
+                      {m.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="tl-kind">Tip</Label>

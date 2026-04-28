@@ -12,6 +12,7 @@ import {
   ShoppingCart,
   Truck,
   Code2,
+  CalendarDays,
   type LucideIcon,
 } from "lucide-react";
 
@@ -24,6 +25,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/timeline", label: "Zaman Çizelgesi", icon: CalendarDays },
   { href: "/production", label: "Üretim Formları", icon: ClipboardList },
   { href: "/jobs", label: "İşler", icon: FileText },
   { href: "/orders", label: "Siparişler", icon: ShoppingCart },
