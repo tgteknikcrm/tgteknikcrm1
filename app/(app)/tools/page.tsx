@@ -13,10 +13,12 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import {
   TOOL_CONDITION_LABEL,
+  toolImagePublicUrl,
   type Tool,
   type Supplier,
 } from "@/lib/supabase/types";
 import { Plus, Wrench, AlertTriangle, Truck, ShoppingCart } from "lucide-react";
+import Image from "next/image";
 import { EmptyState } from "@/components/app/empty-state";
 import { SearchInput } from "@/components/app/search-input";
 import { ToolDialog } from "./tool-dialog";
@@ -101,6 +103,7 @@ export default async function ToolsPage({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-14"></TableHead>
                   <TableHead>Kod</TableHead>
                   <TableHead>İsim</TableHead>
                   <TableHead>Tip / Ölçü</TableHead>
@@ -113,8 +116,25 @@ export default async function ToolsPage({
               <TableBody>
                 {tools.map((t) => {
                   const low = t.quantity <= t.min_quantity;
+                  const imgUrl = toolImagePublicUrl(t.image_path);
                   return (
-                    <TableRow key={t.id}>
+                    <TableRow key={t.id} className="hover:bg-muted/40">
+                      <TableCell>
+                        <div className="size-10 rounded-md border bg-muted/40 overflow-hidden flex items-center justify-center shrink-0">
+                          {imgUrl ? (
+                            <Image
+                              src={imgUrl}
+                              alt={t.name}
+                              width={40}
+                              height={40}
+                              className="size-full object-cover"
+                              unoptimized
+                            />
+                          ) : (
+                            <Wrench className="size-4 text-muted-foreground/50" />
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell className="font-mono text-xs">{t.code || "—"}</TableCell>
                       <TableCell className="font-medium">{t.name}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">

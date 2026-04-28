@@ -22,12 +22,13 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { saveTool } from "./actions";
+import { ToolImageUpload } from "./image-upload";
 import {
   TOOL_CONDITION_LABEL,
   type Tool,
   type ToolCondition,
 } from "@/lib/supabase/types";
-import { Loader2 } from "lucide-react";
+import { Loader2, Camera } from "lucide-react";
 
 interface Props {
   tool?: Tool;
@@ -86,6 +87,21 @@ export function ToolDialog({ tool, trigger }: Props) {
         <DialogHeader>
           <DialogTitle>{tool ? "Takım Düzenle" : "Yeni Takım"}</DialogTitle>
         </DialogHeader>
+
+        {/* Image section — only for existing tools (server actions need an id) */}
+        <div className="space-y-1.5">
+          <Label className="flex items-center gap-1.5">
+            <Camera className="size-3.5" /> Resim
+          </Label>
+          {tool ? (
+            <ToolImageUpload toolId={tool.id} initialPath={tool.image_path} />
+          ) : (
+            <div className="rounded-lg border-2 border-dashed p-4 text-xs text-muted-foreground text-center">
+              Önce takımı kaydet, sonra düzenleyerek resim ekleyebilirsin.
+            </div>
+          )}
+        </div>
+
         <form onSubmit={onSubmit} className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">

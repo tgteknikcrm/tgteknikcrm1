@@ -92,8 +92,18 @@ export interface Tool {
   supplier: string | null;
   price: number | null;
   notes: string | null;
+  image_path: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// Public storage URL for a tool image. Bucket 'tool-images' is public, so
+// we can build the URL from the path without a signed-URL round-trip.
+export function toolImagePublicUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!base) return null;
+  return `${base}/storage/v1/object/public/tool-images/${path}`;
 }
 
 export interface Job {
