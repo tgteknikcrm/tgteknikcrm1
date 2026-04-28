@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { recordEvent } from "@/lib/activity";
 import type { ToolCondition } from "@/lib/supabase/types";
 
 export async function saveTool(input: {
@@ -50,6 +51,13 @@ export async function saveTool(input: {
       .select("id")
       .single();
     if (error) return { error: error.message };
+    await recordEvent({
+      type: "tool.created",
+      entity_type: "tool",
+      entity_id: data.id as string,
+      entity_label: input.name,
+      metadata: { code: input.code },
+    });
     revalidatePath("/tools");
     revalidatePath("/dashboard");
     return { success: true, id: data.id as string };
@@ -62,7 +70,7 @@ export async function deleteTool(id: string) {
   // Best-effort image cleanup before row delete.
   const { data: tool } = await supabase
     .from("tools")
-    .select("image_path")
+    .select("image_path, name")
     .eq("id", id)
     .single();
   if (tool?.image_path) {
@@ -71,6 +79,12 @@ export async function deleteTool(id: string) {
 
   const { error } = await supabase.from("tools").delete().eq("id", id);
   if (error) return { error: error.message };
+  await recordEvent({
+    type: "tool.deleted",
+    entity_type: "tool",
+    entity_id: id,
+    entity_label: tool?.name ?? null,
+  });
   revalidatePath("/tools");
   return { success: true };
 }
@@ -124,6 +138,18 @@ export async function setToolImage(toolId: string, formData: FormData) {
   if (existing?.image_path && existing.image_path !== path) {
     await supabase.storage.from("tool-images").remove([existing.image_path]);
   }
+
+  const { data: toolInfo } = await supabase
+    .from("tools")
+    .select("name")
+    .eq("id", toolId)
+    .single();
+  await recordEvent({
+    type: "tool.image_set",
+    entity_type: "tool",
+    entity_id: toolId,
+    entity_label: toolInfo?.name ?? null,
+  });
 
   revalidatePath("/tools");
   return { success: true, path };

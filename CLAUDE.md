@@ -238,6 +238,7 @@ tgteknikcrm/
 | 0010 | quality_reviews.sql | QC sign-off zinciri (operator/kontrolör/onaylayan + onaylandı/reddedildi/şartlı) |
 | 0011 | cad_programs.sql | CAD/CAM programları tablosu + private `cad-programs` storage bucket |
 | 0012 | qc_spec_bubble_coords.sql | quality_specs.bubble_x/bubble_y (0..1 normalize) — resim üzerinde balon konumlandırma |
+| 0013 | activity_events.sql | activity_events + activity_reads + activity_event_type enum (~32 değer) + measurement.nok fail-safe trigger + Realtime publication |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz

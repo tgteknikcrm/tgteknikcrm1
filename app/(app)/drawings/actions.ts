@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { recordEvent } from "@/lib/activity";
 
 export async function uploadDrawing(formData: FormData) {
   const supabase = await createClient();
@@ -28,20 +29,32 @@ export async function uploadDrawing(formData: FormData) {
     .upload(path, file, { contentType: file.type, upsert: false });
   if (upErr) return { error: "Dosya yüklenemedi: " + upErr.message };
 
-  const { error: insErr } = await supabase.from("drawings").insert({
-    job_id: jobId || null,
-    title,
-    file_path: path,
-    file_type: file.type,
-    file_size: file.size,
-    revision: revision || null,
-    notes: notes || null,
-    uploaded_by: user.id,
-  });
+  const { data: ins, error: insErr } = await supabase
+    .from("drawings")
+    .insert({
+      job_id: jobId || null,
+      title,
+      file_path: path,
+      file_type: file.type,
+      file_size: file.size,
+      revision: revision || null,
+      notes: notes || null,
+      uploaded_by: user.id,
+    })
+    .select("id")
+    .single();
   if (insErr) {
     await supabase.storage.from("drawings").remove([path]);
     return { error: insErr.message };
   }
+
+  await recordEvent({
+    type: "drawing.uploaded",
+    entity_type: "drawing",
+    entity_id: ins.id as string,
+    entity_label: title,
+    metadata: { revision: revision || null, file_type: file.type },
+  });
 
   revalidatePath("/drawings");
   return { success: true };
@@ -49,9 +62,20 @@ export async function uploadDrawing(formData: FormData) {
 
 export async function deleteDrawing(id: string, path: string) {
   const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("drawings")
+    .select("title")
+    .eq("id", id)
+    .single();
   const { error: delErr } = await supabase.from("drawings").delete().eq("id", id);
   if (delErr) return { error: delErr.message };
   await supabase.storage.from("drawings").remove([path]);
+  await recordEvent({
+    type: "drawing.deleted",
+    entity_type: "drawing",
+    entity_id: id,
+    entity_label: existing?.title ?? null,
+  });
   revalidatePath("/drawings");
   return { success: true };
 }
@@ -82,6 +106,19 @@ export async function saveAnnotations(drawingId: string, annotations: unknown) {
     })
     .eq("id", drawingId);
   if (error) return { error: error.message };
+
+  const { data: dInfo } = await supabase
+    .from("drawings")
+    .select("title")
+    .eq("id", drawingId)
+    .single();
+  await recordEvent({
+    type: "drawing.annotated",
+    entity_type: "drawing",
+    entity_id: drawingId,
+    entity_label: dInfo?.title ?? null,
+  });
+
   revalidatePath("/drawings");
   return { success: true };
 }

@@ -2,7 +2,8 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import type { JobStatus } from "@/lib/supabase/types";
+import { recordEvent } from "@/lib/activity";
+import { JOB_STATUS_LABEL, type JobStatus } from "@/lib/supabase/types";
 
 export async function saveJob(input: {
   id?: string;
@@ -41,11 +42,56 @@ export async function saveJob(input: {
     created_by: input.id ? undefined : user?.id,
   };
 
-  const { error } = input.id
-    ? await supabase.from("jobs").update(payload).eq("id", input.id)
-    : await supabase.from("jobs").insert(payload);
-
-  if (error) return { error: error.message };
+  if (input.id) {
+    const { data: existing } = await supabase
+      .from("jobs")
+      .select("status")
+      .eq("id", input.id)
+      .single();
+    const { error } = await supabase
+      .from("jobs")
+      .update(payload)
+      .eq("id", input.id);
+    if (error) return { error: error.message };
+    if (existing && existing.status !== input.status) {
+      await recordEvent({
+        type: "job.status_changed",
+        entity_type: "job",
+        entity_id: input.id,
+        entity_label: input.part_name,
+        metadata: {
+          from: existing.status,
+          to: input.status,
+          from_label: JOB_STATUS_LABEL[existing.status as JobStatus],
+          to_label: JOB_STATUS_LABEL[input.status],
+        },
+      });
+    } else {
+      await recordEvent({
+        type: "job.updated",
+        entity_type: "job",
+        entity_id: input.id,
+        entity_label: input.part_name,
+      });
+    }
+  } else {
+    const { data, error } = await supabase
+      .from("jobs")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (error) return { error: error.message };
+    await recordEvent({
+      type: "job.created",
+      entity_type: "job",
+      entity_id: data.id as string,
+      entity_label: input.part_name,
+      metadata: {
+        customer: input.customer,
+        quantity: input.quantity,
+      },
+    });
+  }
 
   revalidatePath("/jobs");
   revalidatePath("/dashboard");
@@ -54,8 +100,19 @@ export async function saveJob(input: {
 
 export async function deleteJob(id: string) {
   const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("jobs")
+    .select("part_name")
+    .eq("id", id)
+    .single();
   const { error } = await supabase.from("jobs").delete().eq("id", id);
   if (error) return { error: error.message };
+  await recordEvent({
+    type: "job.deleted",
+    entity_type: "job",
+    entity_id: id,
+    entity_label: existing?.part_name ?? null,
+  });
   revalidatePath("/jobs");
   return { success: true };
 }
@@ -92,6 +149,19 @@ export async function setJobTools(jobId: string, items: JobToolInput[]) {
     const ins = await supabase.from("job_tools").insert(rows);
     if (ins.error) return { error: ins.error.message };
   }
+
+  const { data: jobInfo } = await supabase
+    .from("jobs")
+    .select("part_name")
+    .eq("id", jobId)
+    .single();
+  await recordEvent({
+    type: "job.tools_assigned",
+    entity_type: "job",
+    entity_id: jobId,
+    entity_label: jobInfo?.part_name ?? null,
+    metadata: { count: items.length },
+  });
 
   revalidatePath("/jobs");
   revalidatePath("/machines");

@@ -24,8 +24,9 @@ import {
   Crosshair,
   Eye,
   EyeOff,
+  Trash2,
 } from "lucide-react";
-import { saveMeasurement } from "./actions";
+import { saveMeasurement, deleteSpec } from "./actions";
 import { SpecDialog } from "./spec-dialog";
 import { ResultBadge } from "./result-badge";
 import {
@@ -346,6 +347,21 @@ function MeasurementBar({
   const [partSerial, setPartSerial] = useState("");
   const [valueText, setValueText] = useState("");
   const [pending, startTransition] = useTransition();
+  const [deleting, startDelete] = useTransition();
+
+  function onDeleteSpec() {
+    const msg = `#${spec.bubble_no ?? "?"} '${spec.description}' bu balon resimden silinsin mi?\n\n(Bu spec ve tüm ölçümleri kalıcı olarak silinir.)`;
+    if (!confirm(msg)) return;
+    startDelete(async () => {
+      const r = await deleteSpec(spec.id, spec.job_id);
+      if (r.error) toast.error(r.error);
+      else {
+        toast.success("Balon silindi");
+        onClose();
+        onSaved();
+      }
+    });
+  }
 
   const num = Number(valueText);
   const hasVal = valueText !== "" && Number.isFinite(num);
@@ -433,15 +449,31 @@ function MeasurementBar({
             )}
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-          className="h-7 px-2"
-          title="Kapat"
-        >
-          <X className="size-4" />
-        </Button>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDeleteSpec}
+            disabled={deleting}
+            className="h-7 px-2 text-red-700 hover:text-red-700 hover:bg-red-500/10"
+            title="Balonu (spec) sil"
+          >
+            {deleting ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="h-7 px-2"
+            title="Kapat"
+          >
+            <X className="size-4" />
+          </Button>
+        </div>
       </div>
 
       {/* Input row */}

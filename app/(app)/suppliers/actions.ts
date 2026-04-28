@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { recordEvent } from "@/lib/activity";
 
 export async function saveSupplier(input: {
   id?: string;
@@ -31,6 +32,15 @@ export async function saveSupplier(input: {
     : await supabase.from("suppliers").insert(payload).select().single();
 
   if (error) return { error: error.message };
+
+  if (!input.id && data) {
+    await recordEvent({
+      type: "supplier.created",
+      entity_type: "supplier",
+      entity_id: data.id as string,
+      entity_label: payload.name,
+    });
+  }
 
   revalidatePath("/suppliers");
   revalidatePath("/orders");

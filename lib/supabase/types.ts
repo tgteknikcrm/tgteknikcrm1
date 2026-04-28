@@ -482,6 +482,36 @@ export function deviationPct(measured: number, nominal: number): number {
 }
 
 // ============================================================
+// Activity / Audit Feed
+// ============================================================
+export type ActivityEventType =
+  | "job.created" | "job.updated" | "job.deleted" | "job.status_changed" | "job.tools_assigned"
+  | "production.created"
+  | "spec.created" | "spec.deleted"
+  | "measurement.created" | "measurement.nok"
+  | "review.created"
+  | "tool.created" | "tool.deleted" | "tool.image_set"
+  | "operator.created" | "operator.updated" | "operator.deleted"
+  | "machine.created" | "machine.status_changed" | "machine.deleted" | "machine.shift_assigned"
+  | "drawing.uploaded" | "drawing.deleted" | "drawing.annotated"
+  | "order.created" | "order.status_changed" | "order.deleted"
+  | "supplier.created"
+  | "cad.uploaded" | "cad.deleted"
+  | "user.created" | "user.deleted" | "user.role_changed";
+
+export interface ActivityEvent {
+  id: string;
+  event_type: ActivityEventType;
+  actor_id: string | null;
+  actor_name: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  entity_label: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+// ============================================================
 // Quality Reviews (sign-off trail)
 // ============================================================
 export type QcReviewerRole = "operator" | "kontrolor" | "onaylayan";

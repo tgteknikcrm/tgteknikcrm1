@@ -4,6 +4,7 @@ import { createClient, getProfile } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizePhone, phoneToVirtualEmail } from "@/lib/phone";
 import { revalidatePath } from "next/cache";
+import { recordEvent } from "@/lib/activity";
 import type { UserRole } from "@/lib/supabase/types";
 
 async function requireAdmin() {
@@ -22,8 +23,21 @@ export async function updateUserRole(userId: string, role: UserRole) {
   }
 
   const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("full_name, phone")
+    .eq("id", userId)
+    .single();
   const { error } = await supabase.from("profiles").update({ role }).eq("id", userId);
   if (error) return { error: error.message };
+
+  await recordEvent({
+    type: "user.role_changed",
+    entity_type: "user",
+    entity_id: userId,
+    entity_label: existing?.full_name || existing?.phone || null,
+    metadata: { new_role: role },
+  });
 
   revalidatePath("/settings");
   return { success: true };
@@ -55,9 +69,23 @@ export async function deleteUser(userId: string) {
     return { error: "Kendi hesabını silemezsin." };
   }
 
+  const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("profiles")
+    .select("full_name, phone")
+    .eq("id", userId)
+    .single();
+
   const admin = createAdminClient();
   const { error } = await admin.auth.admin.deleteUser(userId);
   if (error) return { error: error.message };
+
+  await recordEvent({
+    type: "user.deleted",
+    entity_type: "user",
+    entity_id: userId,
+    entity_label: existing?.full_name || existing?.phone || null,
+  });
 
   // profiles row cascades via FK (auth.users on delete cascade).
   revalidatePath("/settings");
@@ -96,6 +124,16 @@ export async function createUser(formData: FormData) {
   if (data?.user && role !== "operator") {
     const supabase = await createClient();
     await supabase.from("profiles").update({ role }).eq("id", data.user.id);
+  }
+
+  if (data?.user) {
+    await recordEvent({
+      type: "user.created",
+      entity_type: "user",
+      entity_id: data.user.id,
+      entity_label: fullName,
+      metadata: { role },
+    });
   }
 
   revalidatePath("/settings");

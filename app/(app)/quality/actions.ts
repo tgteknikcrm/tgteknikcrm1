@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
+import { recordEvent } from "@/lib/activity";
 import {
   calculateQcResult,
   type QcCharacteristicType,
@@ -75,10 +76,24 @@ export async function saveSpec(input: SaveSpecInput) {
       .eq("id", input.id);
     if (error) return { error: error.message };
   } else {
-    const { error } = await supabase
+    const { data: ins, error } = await supabase
       .from("quality_specs")
-      .insert({ ...payload, created_by: userId });
+      .insert({ ...payload, created_by: userId })
+      .select("id")
+      .single();
     if (error) return { error: error.message };
+    await recordEvent({
+      type: "spec.created",
+      entity_type: "spec",
+      entity_id: ins.id as string,
+      entity_label: payload.description,
+      metadata: {
+        job_id: input.job_id,
+        bubble_no: payload.bubble_no,
+        nominal: payload.nominal_value,
+        unit: payload.unit,
+      },
+    });
   }
 
   revalidatePath("/quality");
@@ -88,8 +103,20 @@ export async function saveSpec(input: SaveSpecInput) {
 
 export async function deleteSpec(id: string, jobId: string) {
   const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("quality_specs")
+    .select("description, bubble_no")
+    .eq("id", id)
+    .single();
   const { error } = await supabase.from("quality_specs").delete().eq("id", id);
   if (error) return { error: error.message };
+  await recordEvent({
+    type: "spec.deleted",
+    entity_type: "spec",
+    entity_id: id,
+    entity_label: existing?.description ?? null,
+    metadata: { job_id: jobId, bubble_no: existing?.bubble_no },
+  });
   revalidatePath("/quality");
   revalidatePath(`/quality/${jobId}`);
   return { success: true };
@@ -147,10 +174,26 @@ export async function saveMeasurement(input: SaveMeasurementInput) {
       .eq("id", input.id);
     if (error) return { error: error.message };
   } else {
-    const { error } = await supabase
+    const { data: ins, error } = await supabase
       .from("quality_measurements")
-      .insert({ ...payload, measured_by: userId });
+      .insert({ ...payload, measured_by: userId })
+      .select("id")
+      .single();
     if (error) return { error: error.message };
+    // NOK gets its own fail-safe trigger event; here we always record the
+    // measurement.created event for the feed.
+    await recordEvent({
+      type: "measurement.created",
+      entity_type: "measurement",
+      entity_id: ins.id as string,
+      entity_label: payload.part_serial ?? "—",
+      metadata: {
+        job_id: input.job_id,
+        spec_id: input.spec_id,
+        measured: payload.measured_value,
+        result: payload.result,
+      },
+    });
   }
 
   revalidatePath("/quality");
@@ -229,6 +272,20 @@ export async function saveBulkMeasurements(input: BulkMeasurementInput) {
   const { error } = await supabase.from("quality_measurements").insert(rows);
   if (error) return { error: error.message };
 
+  await recordEvent({
+    type: "measurement.created",
+    entity_type: "measurement",
+    entity_label: input.part_serial?.trim() || "—",
+    metadata: {
+      job_id: input.job_id,
+      bulk: true,
+      count: rows.length,
+      ok: rows.filter((r) => r.result === "ok").length,
+      sinirda: rows.filter((r) => r.result === "sinirda").length,
+      nok: rows.filter((r) => r.result === "nok").length,
+    },
+  });
+
   revalidatePath("/quality");
   revalidatePath(`/quality/${input.job_id}`);
   return { success: true, count: rows.length };
@@ -261,14 +318,30 @@ export async function addQualityReview(input: {
   } = await supabase.auth.getUser();
   if (!user) return { error: "Giriş yapılmamış" };
 
-  const { error } = await supabase.from("quality_reviews").insert({
-    job_id: input.job_id,
-    reviewer_id: user.id,
-    reviewer_role: input.reviewer_role,
-    status: input.status,
-    notes: input.notes?.trim() || null,
-  });
+  const { data: ins, error } = await supabase
+    .from("quality_reviews")
+    .insert({
+      job_id: input.job_id,
+      reviewer_id: user.id,
+      reviewer_role: input.reviewer_role,
+      status: input.status,
+      notes: input.notes?.trim() || null,
+    })
+    .select("id")
+    .single();
   if (error) return { error: error.message };
+
+  await recordEvent({
+    type: "review.created",
+    entity_type: "review",
+    entity_id: ins.id as string,
+    entity_label: `${input.reviewer_role} · ${input.status}`,
+    metadata: {
+      job_id: input.job_id,
+      reviewer_role: input.reviewer_role,
+      status: input.status,
+    },
+  });
 
   revalidatePath("/quality");
   revalidatePath(`/quality/${input.job_id}`);

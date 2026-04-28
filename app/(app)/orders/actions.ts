@@ -2,7 +2,12 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
-import type { PoItemCategory, PoStatus } from "@/lib/supabase/types";
+import { recordEvent } from "@/lib/activity";
+import {
+  PO_STATUS_LABEL,
+  type PoItemCategory,
+  type PoStatus,
+} from "@/lib/supabase/types";
 
 export interface OrderItemInput {
   id?: string;
@@ -100,6 +105,16 @@ export async function saveOrder(input: SaveOrderInput) {
   const itemsRes = await supabase.from("purchase_order_items").insert(itemsPayload);
   if (itemsRes.error) return { error: itemsRes.error.message };
 
+  if (!input.id && orderId) {
+    await recordEvent({
+      type: "order.created",
+      entity_type: "order",
+      entity_id: orderId,
+      entity_label: headerPayload.order_no ?? null,
+      metadata: { items: input.items.length, status: input.status },
+    });
+  }
+
   revalidatePath("/orders");
   if (orderId) revalidatePath(`/orders/${orderId}`);
   return { success: true, id: orderId };
@@ -107,16 +122,44 @@ export async function saveOrder(input: SaveOrderInput) {
 
 export async function deleteOrder(id: string) {
   const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("purchase_orders")
+    .select("order_no")
+    .eq("id", id)
+    .single();
   const { error } = await supabase.from("purchase_orders").delete().eq("id", id);
   if (error) return { error: error.message };
+  await recordEvent({
+    type: "order.deleted",
+    entity_type: "order",
+    entity_id: id,
+    entity_label: existing?.order_no ?? null,
+  });
   revalidatePath("/orders");
   return { success: true };
 }
 
 export async function updateOrderStatus(id: string, status: PoStatus) {
   const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("purchase_orders")
+    .select("order_no, status")
+    .eq("id", id)
+    .single();
   const { error } = await supabase.from("purchase_orders").update({ status }).eq("id", id);
   if (error) return { error: error.message };
+  await recordEvent({
+    type: "order.status_changed",
+    entity_type: "order",
+    entity_id: id,
+    entity_label: existing?.order_no ?? null,
+    metadata: {
+      from: existing?.status,
+      to: status,
+      from_label: existing?.status ? PO_STATUS_LABEL[existing.status as PoStatus] : null,
+      to_label: PO_STATUS_LABEL[status],
+    },
+  });
   revalidatePath("/orders");
   revalidatePath(`/orders/${id}`);
   return { success: true };
