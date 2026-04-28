@@ -3,6 +3,7 @@ import { getProfile } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/app/sidebar";
 import { MobileNav } from "@/components/app/mobile-nav";
 import { SearchFab } from "@/components/app/search-fab";
+import { PwaInstallPrompt } from "@/components/app/pwa-install-prompt";
 
 export default async function AppLayout({
   children,
@@ -42,6 +43,7 @@ export default async function AppLayout({
       </div>
 
       <SearchFab />
+      <PwaInstallPrompt />
     </div>
   );
 }

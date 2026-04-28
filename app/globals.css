@@ -122,6 +122,36 @@
     background-color: var(--background);
     color: var(--foreground);
     font-feature-settings: "rlig" 1, "calt" 1;
+    /* Reduce flash of grey when tapping interactive elements on mobile */
+    -webkit-tap-highlight-color: transparent;
+    /* Smooth font on iOS / Android */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* Prevent overscroll bounce so the PWA feels app-like */
+    overscroll-behavior-y: none;
+  }
+  /* iOS Safari zooms in on focused inputs whose font-size < 16px.
+     Force inputs to ≥16px on small screens to suppress this. */
+  @media (max-width: 768px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px !important;
+    }
+  }
+  /* Notch / dynamic-island safe-area padding for the main content + sticky
+     bars. Layout already takes up min-h-screen; adding env(safe-area-inset)
+     ensures content isn't clipped behind the iOS home indicator etc. */
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Buttons / links inherit cursor: pointer; disable double-tap-zoom delay */
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
   }
 }
 

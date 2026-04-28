@@ -5,16 +5,33 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "TG Teknik Üretim Takip",
     short_name: "TG Teknik",
     description:
-      "TG Teknik imalat üretim takip sistemi — makine, operatör, takım ve üretim formları.",
+      "TG Teknik imalat üretim takip sistemi — makine, operatör, takım, kalite kontrol ve teknik resim yönetimi.",
     start_url: "/dashboard",
+    scope: "/",
     display: "standalone",
-    orientation: "portrait-primary",
+    // 'any' lets the OS rotate freely — important for tablet landscape +
+    // operators turning the device while measuring on the bench.
+    orientation: "any",
     background_color: "#0a0a0a",
     theme_color: "#0a0a0a",
     lang: "tr",
     dir: "ltr",
     categories: ["business", "productivity"],
     icons: [
+      // Maskable variants first — Android adaptive launcher uses these.
+      {
+        src: "/icon-maskable",
+        sizes: "512x512",
+        type: "image/png",
+        purpose: "maskable",
+      },
+      {
+        src: "/icon-maskable",
+        sizes: "192x192",
+        type: "image/png",
+        purpose: "maskable",
+      },
+      // Regular icons for browser tab + general use.
       {
         src: "/icon",
         sizes: "512x512",
@@ -36,14 +53,28 @@ export default function manifest(): MetadataRoute.Manifest {
     ],
     shortcuts: [
       {
-        name: "Üretim Formu Ekle",
+        name: "Üretim Formu",
         short_name: "Üretim",
+        description: "Günlük vardiya üretim kaydı",
         url: "/production",
       },
       {
         name: "Dashboard",
         short_name: "Özet",
+        description: "Makine durumu ve KPI'lar",
         url: "/dashboard",
+      },
+      {
+        name: "Kalite Kontrol",
+        short_name: "Kalite",
+        description: "Ölçü kayıtları",
+        url: "/quality",
+      },
+      {
+        name: "Teknik Resimler",
+        short_name: "Resim",
+        description: "PDF + görsel + annotation",
+        url: "/drawings",
       },
     ],
   };
