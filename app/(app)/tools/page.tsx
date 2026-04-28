@@ -128,7 +128,6 @@ export default async function ToolsPage({
                               width={40}
                               height={40}
                               className="size-full object-cover"
-                              unoptimized
                             />
                           ) : (
                             <Wrench className="size-4 text-muted-foreground/50" />
