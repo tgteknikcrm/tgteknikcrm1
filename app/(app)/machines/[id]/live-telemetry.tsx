@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,6 @@ import {
   Activity,
   Gauge,
   Wrench as WrenchIcon,
-  Cpu,
   Zap,
   Flame,
   Wifi,
@@ -36,6 +35,7 @@ import {
   Sparkle,
   Thermometer,
   Maximize2,
+  Cpu,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -49,7 +49,6 @@ interface Props {
 
 type LiveState = "running" | "idle" | "alarm" | "offline";
 
-// 15 alarm types — covers what a CNC operator typically sees on the panel.
 type AlarmType =
   | "yag"
   | "hava"
@@ -72,30 +71,30 @@ interface AlarmDef {
   icon: LucideIcon;
   label: string;
   code: string;
-  alertText: string; // toast message when raised
+  alertText: string;
 }
 
 const ALARM_DEFS: AlarmDef[] = [
-  { type: "yag",       icon: Droplet,     label: "Yağ",         code: "X1232", alertText: "MAKİNE DURDU — YAĞ SEVİYESİ DÜŞÜK" },
-  { type: "hava",      icon: Wind,        label: "Hava",        code: "X0501", alertText: "MAKİNE DURDU — HAVA BASINCI DÜŞÜK" },
-  { type: "kapi",      icon: DoorOpen,    label: "Kapı",        code: "M0010", alertText: "KAPI AÇIK — ÜRETİM DURDU" },
-  { type: "acil",      icon: OctagonX,    label: "Acil Stop",   code: "M0001", alertText: "ACİL STOP BASILDI" },
-  { type: "sogutma",   icon: Snowflake,   label: "Soğutma",     code: "X0701", alertText: "SOĞUTMA SIVISI DÜŞÜK" },
-  { type: "tabla",     icon: Lock,        label: "Tabla",       code: "M0020", alertText: "TABLA SABİTLENMEDİ" },
-  { type: "servo",     icon: Zap,         label: "Servo",       code: "AL400", alertText: "SERVO ALARM — EKSEN HATALI" },
-  { type: "eksen",     icon: Move3d,      label: "Eksen Limit", code: "AL510", alertText: "EKSEN SOFTWARE LİMİT AŞILDI" },
-  { type: "takim",     icon: WrenchIcon,  label: "Takım",       code: "X1500", alertText: "TAKIM KIRIK / TESPİT EDİLEMEDİ" },
-  { type: "magazin",   icon: RefreshCw,   label: "Magazin",     code: "X1601", alertText: "TAKIM DEĞİŞTİRİCİ HATA" },
-  { type: "cip",       icon: Sparkles,    label: "Çip",         code: "X0801", alertText: "ÇİP KONVEYÖRÜ TIKANDI" },
-  { type: "hidrolik",  icon: Droplets,    label: "Hidrolik",    code: "X1300", alertText: "HİDROLİK BASINÇ DÜŞÜK" },
-  { type: "park",      icon: Battery,     label: "Pil",         code: "AL999", alertText: "ENKODER PİLİ DÜŞÜK" },
-  { type: "lub",       icon: Sparkle,     label: "Yağlama",     code: "X1240", alertText: "OTOMATİK YAĞLAMA HATALI" },
-  { type: "sicaklik",  icon: Thermometer, label: "Sıcaklık",    code: "X1100", alertText: "SPİNDLE SICAKLIK YÜKSEK" },
+  { type: "yag",       icon: Droplet,     label: "Yağ",       code: "X1232", alertText: "MAKİNE DURDU — YAĞ SEVİYESİ DÜŞÜK" },
+  { type: "hava",      icon: Wind,        label: "Hava",      code: "X0501", alertText: "MAKİNE DURDU — HAVA BASINCI DÜŞÜK" },
+  { type: "kapi",      icon: DoorOpen,    label: "Kapı",      code: "M0010", alertText: "KAPI AÇIK — ÜRETİM DURDU" },
+  { type: "acil",      icon: OctagonX,    label: "Acil",      code: "M0001", alertText: "ACİL STOP BASILDI" },
+  { type: "sogutma",   icon: Snowflake,   label: "Soğutma",   code: "X0701", alertText: "SOĞUTMA SIVISI DÜŞÜK" },
+  { type: "tabla",     icon: Lock,        label: "Tabla",     code: "M0020", alertText: "TABLA SABİTLENMEDİ" },
+  { type: "servo",     icon: Zap,         label: "Servo",     code: "AL400", alertText: "SERVO ALARM — EKSEN HATALI" },
+  { type: "eksen",     icon: Move3d,      label: "Eksen",     code: "AL510", alertText: "EKSEN SOFTWARE LİMİT AŞILDI" },
+  { type: "takim",     icon: WrenchIcon,  label: "Takım",     code: "X1500", alertText: "TAKIM KIRIK / TESPİT EDİLEMEDİ" },
+  { type: "magazin",   icon: RefreshCw,   label: "Magazin",   code: "X1601", alertText: "TAKIM DEĞİŞTİRİCİ HATA" },
+  { type: "cip",       icon: Sparkles,    label: "Çip",       code: "X0801", alertText: "ÇİP KONVEYÖRÜ TIKANDI" },
+  { type: "hidrolik",  icon: Droplets,    label: "Hidrolik",  code: "X1300", alertText: "HİDROLİK BASINÇ DÜŞÜK" },
+  { type: "park",      icon: Battery,     label: "Pil",       code: "AL999", alertText: "ENKODER PİLİ DÜŞÜK" },
+  { type: "lub",       icon: Sparkle,     label: "Yağlama",   code: "X1240", alertText: "OTOMATİK YAĞLAMA HATALI" },
+  { type: "sicaklik",  icon: Thermometer, label: "Sıcaklık",  code: "X1100", alertText: "SPİNDLE SICAKLIK YÜKSEK" },
 ];
 
 const ALARM_BY_TYPE = new Map(ALARM_DEFS.map((a) => [a.type, a]));
 
-interface ActiveAlarm {
+interface AlarmEvent {
   type: AlarmType;
   raisedAt: number;
 }
@@ -105,14 +104,13 @@ interface Telemetry {
   spindleRpm: number;
   spindleLoadPct: number;
   feedOverride: number;
-  programIndex: number; // index into PROGRAM array
+  programIndex: number;
   activeTool: string;
   alarms: AlarmType[];
-  alarmHistory: ActiveAlarm[]; // most recent first
+  alarmHistory: AlarmEvent[];
   lastHeartbeatMs: number;
 }
 
-// Sample G-code — realistic-ish sequence that operators recognise.
 const PROGRAM: string[] = [
   "%",
   "O0042 (TG-MIL-50 FINISH)",
@@ -185,10 +183,10 @@ const PROGRAM: string[] = [
 ];
 
 function pickRandomTool(toolHints: Props["toolHints"]): string {
-  if (!toolHints || toolHints.length === 0) return "T1 — (boş)";
+  if (!toolHints || toolHints.length === 0) return "T1";
   const t = toolHints[Math.floor(Math.random() * toolHints.length)];
   const num = Math.floor(Math.random() * 24) + 1;
-  return `T${num} — ${t.name}${t.size ? ` (${t.size})` : ""}`;
+  return `T${num} · ${t.name}${t.size ? ` ${t.size}` : ""}`;
 }
 
 function nextTelemetry(
@@ -196,24 +194,19 @@ function nextTelemetry(
   status: MachineStatus,
   toolHints: Props["toolHints"],
 ): Telemetry {
-  // Active alarms drive state — any alarm halts the spindle in real life.
   let alarms = [...prev.alarms];
 
-  // Random small probability of clearing an existing alarm (operator handled it)
+  // Random clear (operator handled it)
   alarms = alarms.filter(() => Math.random() > 0.2);
 
-  // If machine is in 'ariza' status, keep at least one alarm raised
-  if (status === "ariza" && alarms.length === 0) {
-    alarms.push("servo");
-  }
+  if (status === "ariza" && alarms.length === 0) alarms.push("servo");
 
-  // Random small chance of new alarm if running
-  if (status === "aktif" && Math.random() < 0.1) {
+  // Random new alarm if active
+  if (status === "aktif" && Math.random() < 0.08) {
     const def = ALARM_DEFS[Math.floor(Math.random() * ALARM_DEFS.length)];
     if (!alarms.includes(def.type)) alarms.push(def.type);
   }
 
-  // Determine state
   const state: LiveState =
     alarms.length > 0
       ? "alarm"
@@ -226,7 +219,10 @@ function nextTelemetry(
       : "idle";
 
   const targetRpm = state === "running" ? 12000 + Math.floor(Math.random() * 6000) : 0;
-  const spindleRpm = Math.max(0, Math.round(prev.spindleRpm + (targetRpm - prev.spindleRpm) * 0.4));
+  const spindleRpm = Math.max(
+    0,
+    Math.round(prev.spindleRpm + (targetRpm - prev.spindleRpm) * 0.4),
+  );
 
   const spindleLoadPct =
     state === "running"
@@ -238,18 +234,18 @@ function nextTelemetry(
       ? Math.max(80, Math.min(120, prev.feedOverride + (Math.random() * 6 - 3)))
       : 100;
 
-  // Program advances only when running
   let programIndex = prev.programIndex;
-  if (state === "running") {
-    programIndex = (programIndex + 1) % PROGRAM.length;
-  }
+  if (state === "running") programIndex = (programIndex + 1) % PROGRAM.length;
 
-  // Update history with newly raised alarms
+  // Tool only changes on M06 lines or rare random — feel realistic
+  const onToolChangeLine = state === "running" && PROGRAM[programIndex]?.includes("M06");
+  const activeTool = onToolChangeLine ? pickRandomTool(toolHints) : prev.activeTool;
+
   const newlyRaised = alarms.filter((a) => !prev.alarms.includes(a));
   const history = [
     ...newlyRaised.map((type) => ({ type, raisedAt: Date.now() })),
     ...prev.alarmHistory,
-  ].slice(0, 20);
+  ].slice(0, 30);
 
   return {
     state,
@@ -257,7 +253,7 @@ function nextTelemetry(
     spindleLoadPct: Math.round(spindleLoadPct),
     feedOverride: Math.round(feedOverride),
     programIndex,
-    activeTool: pickRandomTool(toolHints),
+    activeTool,
     alarms,
     alarmHistory: history,
     lastHeartbeatMs: Date.now(),
@@ -271,7 +267,7 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
     spindleLoadPct: 0,
     feedOverride: 100,
     programIndex: 0,
-    activeTool: toolHints?.[0]?.name ? `T1 — ${toolHints[0].name}` : "T1 — (boş)",
+    activeTool: toolHints?.[0]?.name ? `T1 · ${toolHints[0].name}` : "T1",
     alarms: [],
     alarmHistory: [],
     lastHeartbeatMs: Date.now(),
@@ -280,7 +276,6 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
   const [programOpen, setProgramOpen] = useState(false);
   const previousAlarmsRef = useRef<AlarmType[]>([]);
 
-  // Tick every 2s — simulate live data
   useEffect(() => {
     setTelem((prev) => nextTelemetry(prev, status, toolHints));
     const id = setInterval(() => {
@@ -290,7 +285,7 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId, status]);
 
-  // Fire toast for newly raised alarms
+  // Toast when new alarm raised
   useEffect(() => {
     const prev = new Set(previousAlarmsRef.current);
     for (const a of telem.alarms) {
@@ -338,15 +333,15 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
   const StateIcon = m.icon;
 
   return (
-    <Card className="mb-6 overflow-hidden gap-0 py-0">
+    <Card className="mb-6 overflow-hidden gap-0 py-0 border-2">
       <div className={cn("h-1 w-full", m.pulse)} />
-      <CardContent className="p-5 space-y-5">
-        {/* Header strip */}
-        <div className="flex items-center justify-between gap-3 flex-wrap">
+      <CardContent className="p-0">
+        {/* HEADER STRIP */}
+        <div className="flex items-center justify-between gap-3 flex-wrap p-4 border-b">
           <div className="flex items-center gap-3">
             <div
               className={cn(
-                "size-10 rounded-xl flex items-center justify-center border-2",
+                "size-11 rounded-xl flex items-center justify-center border-2 shrink-0",
                 m.tone,
               )}
             >
@@ -357,7 +352,7 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
                 Canlı Durum
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-lg font-bold">{m.label}</span>
+                <span className="text-xl font-bold tracking-tight">{m.label}</span>
                 <span
                   className={cn(
                     "size-2 rounded-full",
@@ -371,68 +366,92 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
           <div className="flex items-center gap-2">
             <Badge
               variant="outline"
-              className="font-normal gap-1 bg-amber-500/10 text-amber-700 border-amber-500/40"
+              className="font-bold text-[10px] tracking-wider gap-1 bg-amber-500/10 text-amber-700 border-amber-500/40"
             >
               DEMO VERİ
             </Badge>
-            <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
+            <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1 tabular-nums">
               <Wifi className="size-3" />
-              {Math.max(0, Math.round((Date.now() - telem.lastHeartbeatMs) / 1000))}{" "}
-              sn önce
+              {Math.max(0, Math.round((Date.now() - telem.lastHeartbeatMs) / 1000))} sn
+              önce
             </span>
           </div>
         </div>
 
-        {/* Top metric tiles */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          <Metric
-            icon={Gauge}
-            label="Spindle"
-            value={telem.spindleRpm.toLocaleString("tr-TR")}
-            unit="dev/dk"
-            primary={telem.state === "running"}
-          />
-          <Metric
-            icon={Flame}
-            label="Spindle Yükü"
-            value={`%${telem.spindleLoadPct}`}
-            unit=""
-            tone={
-              telem.spindleLoadPct > 85 ? "warn" : telem.spindleLoadPct > 0 ? "default" : "muted"
-            }
-          />
-          <Metric icon={WrenchIcon} label="Aktif Takım" value={telem.activeTool} unit="" small />
-          <Metric icon={Zap} label="Feed Override" value={`%${telem.feedOverride}`} unit="" />
-        </div>
-
-        {/* Program window */}
-        <div>
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground inline-flex items-center gap-1.5">
-              <Cpu className="size-3" /> Program · Satır{" "}
-              <span className="font-mono normal-case tracking-normal text-foreground">
-                {telem.programIndex + 1}
-              </span>{" "}
-              / {PROGRAM.length}
+        {/* TWO-COLUMN: METRICS (left) + PROGRAM (right) */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x">
+          {/* METRICS 2x2 */}
+          <div className="lg:col-span-3 p-4">
+            <div className="grid grid-cols-2 gap-3">
+              <Metric
+                icon={Gauge}
+                label="Spindle"
+                value={telem.spindleRpm.toLocaleString("tr-TR")}
+                unit="dev/dk"
+                accent="emerald"
+                primary={telem.state === "running"}
+              />
+              <Metric
+                icon={Flame}
+                label="Spindle Yükü"
+                value={`%${telem.spindleLoadPct}`}
+                unit=""
+                accent={
+                  telem.spindleLoadPct > 85
+                    ? "red"
+                    : telem.spindleLoadPct > 0
+                    ? "amber"
+                    : "zinc"
+                }
+              />
+              <Metric
+                icon={WrenchIcon}
+                label="Aktif Takım"
+                value={telem.activeTool}
+                unit=""
+                accent="blue"
+                small
+              />
+              <Metric
+                icon={Zap}
+                label="Feed Override"
+                value={`%${telem.feedOverride}`}
+                unit=""
+                accent="violet"
+              />
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs gap-1"
-              onClick={() => setProgramOpen(true)}
-            >
-              <Maximize2 className="size-3" /> Tüm Programı Gör
-            </Button>
           </div>
-          <ProgramWindow lines={PROGRAM} currentIndex={telem.programIndex} />
+
+          {/* PROGRAM (right) — white background */}
+          <div className="lg:col-span-2 p-4 bg-white dark:bg-zinc-50">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 inline-flex items-center gap-1.5">
+                <Cpu className="size-3" />
+                Program
+                <span className="text-zinc-400">·</span>
+                <span className="font-mono text-zinc-700 normal-case tracking-normal">
+                  {telem.programIndex + 1}/{PROGRAM.length}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-[10px] gap-1 text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100"
+                onClick={() => setProgramOpen(true)}
+              >
+                <Maximize2 className="size-3" /> Tüm Program
+              </Button>
+            </div>
+            <ProgramWindow lines={PROGRAM} currentIndex={telem.programIndex} />
+          </div>
         </div>
 
-        {/* 15 status indicator cards */}
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
+        {/* STATUS GRID (compact, blink when active) */}
+        <div className="p-4 border-t">
+          <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2.5">
             Durum Göstergeleri
           </div>
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-5 lg:grid-cols-[repeat(15,_minmax(0,1fr))] gap-1.5">
             {ALARM_DEFS.map((def) => {
               const active = telem.alarms.includes(def.type);
               return <StatusCard key={def.type} def={def} active={active} />;
@@ -440,11 +459,11 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
           </div>
         </div>
 
-        {/* Alarm log */}
-        <div>
+        {/* HATA LOGLARI */}
+        <div className="p-4 border-t">
           <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2 flex items-center justify-between">
             <span>Hata Logları</span>
-            <span className="font-mono normal-case tracking-normal text-foreground">
+            <span className="font-mono normal-case tracking-normal text-foreground tabular-nums">
               {telem.alarmHistory.length}
             </span>
           </div>
@@ -453,7 +472,7 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
               Henüz hata yok.
             </div>
           ) : (
-            <div className="rounded-lg border bg-muted/10 max-h-48 overflow-y-auto divide-y">
+            <div className="rounded-lg border bg-muted/10 max-h-44 overflow-y-auto divide-y">
               {telem.alarmHistory.map((entry, i) => {
                 const def = ALARM_BY_TYPE.get(entry.type);
                 if (!def) return null;
@@ -462,7 +481,10 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
                 return (
                   <div
                     key={`${entry.type}-${entry.raisedAt}-${i}`}
-                    className="flex items-center gap-2 px-3 py-2 text-xs"
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-2 text-xs",
+                      stillActive && "bg-red-500/5",
+                    )}
                   >
                     <Icon
                       className={cn(
@@ -470,20 +492,20 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
                         stillActive ? "text-red-600" : "text-muted-foreground",
                       )}
                     />
-                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground w-20 shrink-0">
+                    <span className="font-mono text-[11px] tabular-nums text-muted-foreground w-16 shrink-0">
                       {def.code}
                     </span>
                     <span className="font-medium flex-1 truncate">{def.alertText}</span>
                     {stillActive && (
                       <Badge
                         variant="outline"
-                        className="h-5 text-[10px] bg-red-500/10 text-red-600 border-red-500/40"
+                        className="h-5 text-[10px] bg-red-500/10 text-red-700 border-red-500/40 font-bold"
                       >
                         AKTİF
                       </Badge>
                     )}
                     <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
-                      {Math.max(0, Math.round((Date.now() - entry.raisedAt) / 1000))} sn önce
+                      {Math.max(0, Math.round((Date.now() - entry.raisedAt) / 1000))} sn
                     </span>
                   </div>
                 );
@@ -492,13 +514,13 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
           )}
         </div>
 
-        <div className="text-[10px] text-muted-foreground italic">
-          ⓘ Bu kart şu an mock veri gösteriyor — gerçek MTConnect / FOCAS adaptörü
-          bağlandığında otomatik canlı veriye geçecek.
+        {/* Footer note */}
+        <div className="px-4 pb-3 text-[10px] text-muted-foreground italic">
+          ⓘ Mock veri — gerçek MTConnect / FOCAS adaptörü bağlandığında otomatik
+          canlı veriye geçecek.
         </div>
       </CardContent>
 
-      {/* Full program popup */}
       <ProgramPopup
         open={programOpen}
         onOpenChange={setProgramOpen}
@@ -517,24 +539,22 @@ function StatusCard({ def, active }: { def: AlarmDef; active: boolean }) {
   return (
     <div
       className={cn(
-        "aspect-square rounded-lg border flex flex-col items-center justify-center gap-1 p-2 transition relative",
+        "h-16 rounded-md border flex flex-col items-center justify-center gap-1 px-1 transition relative",
         active
-          ? "bg-red-500/15 border-red-500/60 shadow-[inset_0_0_0_1px_rgba(220,38,38,0.4)]"
-          : "bg-muted/30 border-border",
+          ? "animate-blink-alarm shadow-sm"
+          : "bg-muted/30 border-border hover:bg-muted/50",
       )}
+      title={`${def.code} · ${def.label}`}
     >
-      {active && (
-        <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-red-500 animate-pulse" />
-      )}
       <Icon
         className={cn(
-          "size-5",
-          active ? "text-red-600" : "text-muted-foreground/60",
+          "size-4 shrink-0",
+          active ? "text-red-700" : "text-muted-foreground/60",
         )}
       />
       <div
         className={cn(
-          "text-[10px] font-semibold leading-tight text-center",
+          "text-[9px] font-semibold leading-none text-center truncate w-full",
           active ? "text-red-700 dark:text-red-400" : "text-muted-foreground",
         )}
       >
@@ -551,7 +571,6 @@ function ProgramWindow({
   lines: string[];
   currentIndex: number;
 }) {
-  // 10-line window centred on current
   const window = 10;
   const half = Math.floor(window / 2);
   let start = Math.max(0, currentIndex - half);
@@ -559,7 +578,7 @@ function ProgramWindow({
   const visible = lines.slice(start, start + window);
 
   return (
-    <div className="rounded-lg border bg-zinc-950 text-zinc-100 font-mono text-xs overflow-hidden">
+    <div className="rounded-md border border-zinc-200 bg-zinc-50/60 font-mono text-[11px] overflow-hidden">
       {visible.map((line, i) => {
         const idx = start + i;
         const isCurrent = idx === currentIndex;
@@ -567,22 +586,22 @@ function ProgramWindow({
           <div
             key={idx}
             className={cn(
-              "flex items-center gap-3 px-3 py-1.5 leading-tight",
+              "flex items-center gap-2 px-2.5 py-1 leading-tight border-l-2",
               isCurrent
-                ? "bg-emerald-500/30 text-emerald-100 border-l-2 border-emerald-400"
-                : "border-l-2 border-transparent hover:bg-zinc-900/60",
+                ? "bg-emerald-100 text-emerald-900 border-l-emerald-500 font-semibold"
+                : "border-l-transparent text-zinc-700 hover:bg-zinc-100",
             )}
           >
             <span
               className={cn(
-                "tabular-nums w-10 text-right shrink-0",
-                isCurrent ? "text-emerald-300 font-bold" : "text-zinc-500",
+                "tabular-nums w-7 text-right shrink-0",
+                isCurrent ? "text-emerald-700" : "text-zinc-400",
               )}
             >
               {idx + 1}
             </span>
             <span className="truncate">
-              {isCurrent && <span className="mr-1">▶</span>}
+              {isCurrent && <span className="mr-1 text-emerald-600">▸</span>}
               {line || " "}
             </span>
           </div>
@@ -607,23 +626,21 @@ function ProgramPopup({
 }) {
   const currentLineRef = useRef<HTMLDivElement>(null);
 
-  // Scroll current line into view when opening
   useEffect(() => {
     if (open) {
-      // small delay so dialog is mounted
       const t = setTimeout(() => {
         currentLineRef.current?.scrollIntoView({
           behavior: "smooth",
           block: "center",
         });
-      }, 50);
+      }, 80);
       return () => clearTimeout(t);
     }
   }, [open, currentIndex]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0 gap-0">
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col p-0 gap-0 bg-white">
         <DialogHeader className="p-4 border-b">
           <DialogTitle>Program Görüntüleyici</DialogTitle>
           <DialogDescription>
@@ -635,7 +652,6 @@ function ProgramPopup({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Active alarm strip — visible at top so operator sees why machine stopped */}
         {activeAlarms.length > 0 && (
           <div className="px-4 py-2 border-b bg-red-500/10">
             <div className="text-[10px] font-bold uppercase tracking-wider text-red-700 mb-1.5">
@@ -661,8 +677,7 @@ function ProgramPopup({
           </div>
         )}
 
-        {/* Full program with current highlighted */}
-        <div className="overflow-y-auto bg-zinc-950 text-zinc-100 font-mono text-xs flex-1">
+        <div className="overflow-y-auto bg-white text-zinc-900 font-mono text-xs flex-1">
           {lines.map((line, idx) => {
             const isCurrent = idx === currentIndex;
             return (
@@ -670,22 +685,22 @@ function ProgramPopup({
                 key={idx}
                 ref={isCurrent ? currentLineRef : undefined}
                 className={cn(
-                  "flex items-center gap-3 px-4 py-1.5 leading-tight",
+                  "flex items-center gap-3 px-4 py-1.5 leading-tight border-l-4",
                   isCurrent
-                    ? "bg-emerald-500/30 text-emerald-100 border-l-4 border-emerald-400"
-                    : "border-l-4 border-transparent hover:bg-zinc-900/60",
+                    ? "bg-emerald-100 text-emerald-900 border-l-emerald-500 font-semibold"
+                    : "border-l-transparent text-zinc-700 hover:bg-zinc-50",
                 )}
               >
                 <span
                   className={cn(
                     "tabular-nums w-12 text-right shrink-0",
-                    isCurrent ? "text-emerald-300 font-bold" : "text-zinc-500",
+                    isCurrent ? "text-emerald-700" : "text-zinc-400",
                   )}
                 >
                   {idx + 1}
                 </span>
                 <span className="truncate">
-                  {isCurrent && <span className="mr-1">▶</span>}
+                  {isCurrent && <span className="mr-1 text-emerald-600">▸</span>}
                   {line || " "}
                 </span>
               </div>
@@ -702,7 +717,7 @@ function Metric({
   label,
   value,
   unit,
-  tone = "default",
+  accent,
   primary = false,
   small = false,
 }: {
@@ -710,24 +725,35 @@ function Metric({
   label: string;
   value: string;
   unit: string;
-  tone?: "default" | "warn" | "muted";
+  accent: "emerald" | "amber" | "red" | "blue" | "violet" | "zinc";
   primary?: boolean;
   small?: boolean;
 }) {
+  const tones = {
+    emerald: { iconBg: "bg-emerald-500/10 text-emerald-600", value: "text-emerald-700" },
+    amber:   { iconBg: "bg-amber-500/10 text-amber-600",     value: "text-amber-700" },
+    red:     { iconBg: "bg-red-500/10 text-red-600",         value: "text-red-700" },
+    blue:    { iconBg: "bg-blue-500/10 text-blue-600",       value: "text-blue-700" },
+    violet:  { iconBg: "bg-violet-500/10 text-violet-600",   value: "text-violet-700" },
+    zinc:    { iconBg: "bg-zinc-500/10 text-zinc-600",       value: "text-zinc-700" },
+  } as const;
+  const t = tones[accent];
   return (
-    <div className="rounded-lg border bg-muted/20 p-3">
-      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-        <Icon className="size-3" />
-        {label}
+    <div className="rounded-xl border bg-card p-4 hover:shadow-sm transition-shadow">
+      <div className="flex items-center gap-2 mb-3">
+        <div className={cn("size-8 rounded-lg flex items-center justify-center", t.iconBg)}>
+          <Icon className="size-4" />
+        </div>
+        <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+          {label}
+        </div>
       </div>
-      <div className="mt-1 flex items-baseline gap-1">
+      <div className="flex items-baseline gap-1.5 min-h-[2.5rem]">
         <span
           className={cn(
-            "font-bold tabular-nums leading-tight",
-            small ? "text-sm" : "text-2xl",
-            primary && "text-primary",
-            tone === "warn" && "text-amber-600",
-            tone === "muted" && "text-muted-foreground",
+            "font-bold tabular-nums leading-none tracking-tight",
+            small ? "text-base" : "text-3xl",
+            primary ? "text-foreground" : t.value,
           )}
         >
           {value}
