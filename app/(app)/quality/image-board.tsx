@@ -104,6 +104,13 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
     x: number;
     y: number;
   } | null>(null);
+  // Optimistic position overrides — keeps a bubble at its newly dropped
+  // location while the server action + revalidate completes. Without this,
+  // there's a flicker where the bubble snaps back to the old position
+  // for a frame between pointer-up and the new server data arriving.
+  const [localPositions, setLocalPositions] = useState<
+    Map<string, { x: number; y: number }>
+  >(new Map());
   const draggingRef = useRef<{
     specId: string;
     moved: boolean;
@@ -183,18 +190,39 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
       // safari sometimes throws if no capture
     }
     if (drag.moved && dragging) {
-      const r = await updateBubblePosition(drag.specId, jobId, dragging.x, dragging.y);
+      // 1. Lock the new position locally BEFORE clearing dragging — bubble
+      //    keeps its dropped spot, no snap-back flicker.
+      const droppedX = dragging.x;
+      const droppedY = dragging.y;
+      setLocalPositions((prev) => {
+        const next = new Map(prev);
+        next.set(drag.specId, { x: droppedX, y: droppedY });
+        return next;
+      });
+      setDragging(null);
+
+      // 2. Persist to DB. router.refresh() will eventually sync server data.
+      //    Local override stays until then; once spec.bubble_x matches, no
+      //    visual change happens on refresh.
+      const r = await updateBubblePosition(drag.specId, jobId, droppedX, droppedY);
       if (r.error) {
         toast.error(r.error);
+        // rollback on failure
+        setLocalPositions((prev) => {
+          const next = new Map(prev);
+          next.delete(drag.specId);
+          return next;
+        });
       } else {
-        toast.success("Konum güncellendi");
         router.refresh();
       }
     } else if (!drag.moved) {
+      setDragging(null);
       // Treat as click → select bubble
       setSelectedSpecId(drag.specId);
+    } else {
+      setDragging(null);
     }
-    setDragging(null);
     // Keep moved flag for one tick so onImageClick ignores trailing click
     setTimeout(() => {
       draggingRef.current = null;
@@ -357,9 +385,19 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
                 const result = bubbleResult(own);
                 const isSelected = s.id === selectedSpecId;
                 const isDragging = dragging?.specId === s.id;
-                // Use temporary drag position when active
-                const dragX = isDragging && dragging ? dragging.x : null;
-                const dragY = isDragging && dragging ? dragging.y : null;
+                // Position priority: live drag > local optimistic > server prop
+                let dragX: number | null = null;
+                let dragY: number | null = null;
+                if (isDragging && dragging) {
+                  dragX = dragging.x;
+                  dragY = dragging.y;
+                } else {
+                  const local = localPositions.get(s.id);
+                  if (local) {
+                    dragX = local.x;
+                    dragY = local.y;
+                  }
+                }
                 return (
                   <Bubble
                     key={s.id}
@@ -370,6 +408,7 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
                     measurementCount={own.length}
                     dragX={dragX}
                     dragY={dragY}
+                    isDragging={isDragging}
                     onPointerDown={(e) => onBubblePointerDown(s.id, e)}
                     onPointerMove={onBubblePointerMove}
                     onPointerUp={onBubblePointerUp}
@@ -428,6 +467,7 @@ function Bubble({
   measurementCount,
   dragX,
   dragY,
+  isDragging,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -439,6 +479,7 @@ function Bubble({
   measurementCount: number;
   dragX: number | null;
   dragY: number | null;
+  isDragging: boolean;
   onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
   onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void;
   onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void;
@@ -456,9 +497,11 @@ function Bubble({
       ? "bg-red-500 text-white border-red-700"
       : "bg-white text-zinc-900 border-zinc-700";
 
-  const isDragging = dragX !== null && dragY !== null;
-  const xPct = isDragging ? dragX! * 100 : (spec.bubble_x ?? 0) * 100;
-  const yPct = isDragging ? dragY! * 100 : (spec.bubble_y ?? 0) * 100;
+  // dragX/dragY captures BOTH live drag AND optimistic local override.
+  // The `isDragging` flag is true only during the live drag (visual scale).
+  const hasOverride = dragX !== null && dragY !== null;
+  const xPct = hasOverride ? dragX! * 100 : (spec.bubble_x ?? 0) * 100;
+  const yPct = hasOverride ? dragY! * 100 : (spec.bubble_y ?? 0) * 100;
 
   return (
     <button

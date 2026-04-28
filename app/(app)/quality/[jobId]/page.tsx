@@ -41,6 +41,7 @@ import {
   ImageIcon,
 } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
+import { ClientOnly } from "@/components/app/client-only";
 import { SpecDialog } from "../spec-dialog";
 import { MeasurementDialog } from "../measurement-dialog";
 import { BulkMeasurementDialog } from "../bulk-measurement-dialog";
@@ -190,32 +191,50 @@ export default async function QualityJobPage({
               <FileDown className="size-4" /> Kalite Raporu
             </Link>
           </Button>
-          <ReviewDialog
-            jobId={jobId}
-            trigger={
-              <Button variant="outline">
-                <Stamp className="size-4" /> Onayla / İmzala
-              </Button>
+          {/* Dialog triggers wrapped in ClientOnly: avoids Radix useId mismatches
+              between SSR and hydration when upstream subtrees differ slightly. */}
+          <ClientOnly
+            fallback={
+              <>
+                <Button variant="outline" disabled className="opacity-60">
+                  <Stamp className="size-4" /> Onayla / İmzala
+                </Button>
+                <Button variant="secondary" disabled className="opacity-60">
+                  <ListChecks className="size-4" /> Toplu Ölçüm
+                </Button>
+                <Button disabled className="opacity-60">
+                  <Plus className="size-4" /> Yeni Spec
+                </Button>
+              </>
             }
-          />
-          <BulkMeasurementDialog
-            jobId={jobId}
-            specs={specs}
-            trigger={
-              <Button variant="secondary">
-                <ListChecks className="size-4" /> Toplu Ölçüm
-              </Button>
-            }
-          />
-          <SpecDialog
-            jobId={jobId}
-            defaultBubbleNo={nextBubble}
-            trigger={
-              <Button>
-                <Plus className="size-4" /> Yeni Spec
-              </Button>
-            }
-          />
+          >
+            <ReviewDialog
+              jobId={jobId}
+              trigger={
+                <Button variant="outline">
+                  <Stamp className="size-4" /> Onayla / İmzala
+                </Button>
+              }
+            />
+            <BulkMeasurementDialog
+              jobId={jobId}
+              specs={specs}
+              trigger={
+                <Button variant="secondary">
+                  <ListChecks className="size-4" /> Toplu Ölçüm
+                </Button>
+              }
+            />
+            <SpecDialog
+              jobId={jobId}
+              defaultBubbleNo={nextBubble}
+              trigger={
+                <Button>
+                  <Plus className="size-4" /> Yeni Spec
+                </Button>
+              }
+            />
+          </ClientOnly>
         </div>
       </div>
 
