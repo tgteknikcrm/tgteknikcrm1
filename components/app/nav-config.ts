@@ -11,6 +11,7 @@ import {
   Settings,
   ShoppingCart,
   Truck,
+  Code2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ export const navItems: NavItem[] = [
   { href: "/operators", label: "Operatörler", icon: Users },
   { href: "/tools", label: "Takım Listesi", icon: Wrench },
   { href: "/drawings", label: "Teknik Resimler", icon: ImageIcon },
+  { href: "/cad-cam", label: "CAD/CAM", icon: Code2 },
   { href: "/quality", label: "Kalite Kontrol", icon: ClipboardCheck },
   { href: "/reports", label: "Raporlar", icon: BarChart3 },
   { href: "/settings", label: "Ayarlar", icon: Settings, adminOnly: true },

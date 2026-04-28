@@ -41,10 +41,19 @@ import { EmptyState } from "@/components/app/empty-state";
 import { SpecDialog } from "../spec-dialog";
 import { MeasurementDialog } from "../measurement-dialog";
 import { BulkMeasurementDialog } from "../bulk-measurement-dialog";
+import { ReviewDialog } from "../review-dialog";
 import { ResultBadge } from "../result-badge";
 import { DeleteButton } from "../../operators/delete-button";
-import { deleteSpec, deleteMeasurement } from "../actions";
+import { deleteSpec, deleteMeasurement, deleteQualityReview } from "../actions";
 import { formatDateTime } from "@/lib/utils";
+import {
+  QC_REVIEWER_ROLE_LABEL,
+  QC_REVIEW_STATUS_LABEL,
+  QC_REVIEW_STATUS_TONE,
+  type QualityReview,
+} from "@/lib/supabase/types";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Stamp } from "lucide-react";
 
 export const metadata = { title: "Kalite Kontrol — İş" };
 
@@ -66,7 +75,7 @@ export default async function QualityJobPage({
 
   const supabase = await createClient();
 
-  const [jobRes, specsRes, measRes] = await Promise.all([
+  const [jobRes, specsRes, measRes, reviewsRes] = await Promise.all([
     supabase
       .from("jobs")
       .select("id, job_no, customer, part_name, part_no, quantity, status")
@@ -87,6 +96,11 @@ export default async function QualityJobPage({
       .eq("job_id", jobId)
       .order("measured_at", { ascending: false })
       .limit(200),
+    supabase
+      .from("quality_reviews")
+      .select(`*, reviewer:profiles!quality_reviews_reviewer_id_fkey(full_name)`)
+      .eq("job_id", jobId)
+      .order("reviewed_at", { ascending: false }),
   ]);
 
   if (jobRes.error || !jobRes.data) notFound();
@@ -96,6 +110,9 @@ export default async function QualityJobPage({
   >;
   const specs = (specsRes.data ?? []) as SpecRow[];
   const measurements = (measRes.data ?? []) as MeasRow[];
+  const reviews = (reviewsRes.data ?? []) as Array<
+    QualityReview & { reviewer: { full_name: string | null } | null }
+  >;
 
   const okCount = measurements.filter((m) => m.result === "ok").length;
   const sinirCount = measurements.filter((m) => m.result === "sinirda").length;
@@ -145,6 +162,14 @@ export default async function QualityJobPage({
               <FileDown className="size-4" /> Kalite Raporu
             </Link>
           </Button>
+          <ReviewDialog
+            jobId={jobId}
+            trigger={
+              <Button variant="outline">
+                <Stamp className="size-4" /> Onayla / İmzala
+              </Button>
+            }
+          />
           <BulkMeasurementDialog
             jobId={jobId}
             specs={specs}
@@ -165,6 +190,70 @@ export default async function QualityJobPage({
           />
         </div>
       </div>
+
+      {/* Quality Reviews — sign-off trail */}
+      {reviews.length > 0 && (
+        <Card className="mb-6">
+          <CardContent className="p-4 space-y-2">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-2">
+              <Stamp className="size-3" /> Onay Zinciri ({reviews.length})
+            </div>
+            <div className="space-y-2">
+              {reviews.map((r) => {
+                const initials = (r.reviewer?.full_name || "?")
+                  .split(" ")
+                  .map((s) => s[0])
+                  .slice(0, 2)
+                  .join("")
+                  .toUpperCase();
+                return (
+                  <div
+                    key={r.id}
+                    className="flex items-center gap-3 p-2 rounded-lg border bg-muted/20"
+                  >
+                    <Avatar className="size-9 shrink-0">
+                      <AvatarFallback className="text-xs font-semibold bg-primary/15 text-primary">
+                        {initials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">
+                          {r.reviewer?.full_name || "—"}
+                        </span>
+                        <Badge variant="outline" className="font-normal">
+                          {QC_REVIEWER_ROLE_LABEL[r.reviewer_role]}
+                        </Badge>
+                        <Badge
+                          variant="outline"
+                          className={QC_REVIEW_STATUS_TONE[r.status]}
+                        >
+                          {QC_REVIEW_STATUS_LABEL[r.status]}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground tabular-nums">
+                          {formatDateTime(r.reviewed_at)}
+                        </span>
+                      </div>
+                      {r.notes && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {r.notes}
+                        </p>
+                      )}
+                    </div>
+                    <DeleteButton
+                      action={async () => {
+                        "use server";
+                        return deleteQualityReview(r.id, jobId);
+                      }}
+                      confirmText="Bu onay silinsin mi?"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* KPI row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">

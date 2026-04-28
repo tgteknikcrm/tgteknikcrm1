@@ -47,8 +47,18 @@ import {
   Hash,
   History,
   ListChecks,
+  ClipboardCheck,
+  Stamp,
+  ArrowRight,
 } from "lucide-react";
+import {
+  QC_REVIEWER_ROLE_LABEL,
+  QC_REVIEW_STATUS_TONE,
+  QC_REVIEW_STATUS_LABEL,
+  type QcResult,
+} from "@/lib/supabase/types";
 import { MachineDialog } from "../machine-dialog";
+import { LiveTelemetry } from "./live-telemetry";
 import { cn, formatDate } from "@/lib/utils";
 
 type EntryWithJoins = ProductionEntry & {
@@ -170,6 +180,65 @@ export default async function MachineDetailPage({
       .select(`quantity_used, tool:tools(id, code, name, type, size)`)
       .eq("job_id", currentJob.id);
     currentJobTools = (toolsRes.data ?? []) as unknown as JobToolRow[];
+  }
+
+  // Quality control rollup for the current job
+  let currentJobQc: {
+    spec_count: number;
+    measurement_count: number;
+    ok: number;
+    sinirda: number;
+    nok: number;
+    last_review: {
+      reviewer_name: string | null;
+      role: string;
+      status: string;
+      reviewed_at: string;
+    } | null;
+  } | null = null;
+  if (currentJob) {
+    const [specsRes, measRes, lastRevRes] = await Promise.all([
+      supabase
+        .from("quality_specs")
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", currentJob.id),
+      supabase
+        .from("quality_measurements")
+        .select("result")
+        .eq("job_id", currentJob.id),
+      supabase
+        .from("quality_reviews")
+        .select(
+          `reviewer_role, status, reviewed_at,
+           reviewer:profiles!quality_reviews_reviewer_id_fkey(full_name)`,
+        )
+        .eq("job_id", currentJob.id)
+        .order("reviewed_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    const meas = (measRes.data ?? []) as Array<{ result: QcResult }>;
+    const lr = lastRevRes.data as {
+      reviewer_role: string;
+      status: string;
+      reviewed_at: string;
+      reviewer: { full_name: string | null } | null;
+    } | null;
+    currentJobQc = {
+      spec_count: specsRes.count ?? 0,
+      measurement_count: meas.length,
+      ok: meas.filter((m) => m.result === "ok").length,
+      sinirda: meas.filter((m) => m.result === "sinirda").length,
+      nok: meas.filter((m) => m.result === "nok").length,
+      last_review: lr
+        ? {
+            reviewer_name: lr.reviewer?.full_name ?? null,
+            role: lr.reviewer_role,
+            status: lr.status,
+            reviewed_at: lr.reviewed_at,
+          }
+        : null,
+    };
   }
 
   const todayTotal = todayEntries.reduce((s, e) => s + (e.produced_qty ?? 0), 0);
@@ -296,6 +365,17 @@ export default async function MachineDetailPage({
           </div>
         </div>
       </Card>
+
+      {/* LIVE TELEMETRY — mock, swappable for real MTConnect/FOCAS later */}
+      <LiveTelemetry
+        machineId={machine.id}
+        status={machine.status}
+        toolHints={currentJobTools.map((jt) => ({
+          name: jt.tool?.name ?? "",
+          code: jt.tool?.code ?? null,
+          size: jt.tool?.size ?? null,
+        }))}
+      />
 
       {/* KPI STRIP — 4 tiles in one elegant row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
@@ -463,6 +543,101 @@ export default async function MachineDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* QUALITY CONTROL — only when there's a current job */}
+      {currentJob && currentJobQc && (
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <ClipboardCheck className="size-4 text-muted-foreground" />
+              Kalite Kontrol — Aktif İş
+              <Button asChild size="sm" variant="ghost" className="ml-auto h-7">
+                <Link href={`/quality/${currentJob.id}`}>
+                  Yönet <ArrowRight className="size-3.5" />
+                </Link>
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            {currentJobQc.spec_count === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-sm text-muted-foreground mb-2">
+                  Bu iş için kalite spec'i tanımlanmamış.
+                </p>
+                <Button asChild size="sm" variant="outline">
+                  <Link href={`/quality/${currentJob.id}`}>
+                    Spec Ekle
+                  </Link>
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <QcStat label="Spec" value={currentJobQc.spec_count} />
+                  <QcStat label="Ölçüm" value={currentJobQc.measurement_count} />
+                  <QcStat
+                    label="Kabul"
+                    value={
+                      currentJobQc.measurement_count > 0
+                        ? `%${Math.round(
+                            (currentJobQc.ok / currentJobQc.measurement_count) * 100,
+                          )}`
+                        : "—"
+                    }
+                    tone="ok"
+                  />
+                  <QcStat
+                    label="NOK"
+                    value={currentJobQc.nok}
+                    tone={currentJobQc.nok > 0 ? "bad" : undefined}
+                  />
+                </div>
+
+                {currentJobQc.last_review && (
+                  <div className="flex items-center gap-2 pt-2 border-t flex-wrap">
+                    <Stamp className="size-3.5 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">
+                      Son onay:
+                    </span>
+                    <span className="text-xs font-medium">
+                      {currentJobQc.last_review.reviewer_name || "—"}
+                    </span>
+                    <Badge variant="outline" className="font-normal h-5 text-[10px]">
+                      {
+                        QC_REVIEWER_ROLE_LABEL[
+                          currentJobQc.last_review.role as keyof typeof QC_REVIEWER_ROLE_LABEL
+                        ]
+                      }
+                    </Badge>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "h-5 text-[10px]",
+                        QC_REVIEW_STATUS_TONE[
+                          currentJobQc.last_review
+                            .status as keyof typeof QC_REVIEW_STATUS_TONE
+                        ],
+                      )}
+                    >
+                      {
+                        QC_REVIEW_STATUS_LABEL[
+                          currentJobQc.last_review
+                            .status as keyof typeof QC_REVIEW_STATUS_LABEL
+                        ]
+                      }
+                    </Badge>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {new Date(
+                        currentJobQc.last_review.reviewed_at,
+                      ).toLocaleDateString("tr-TR")}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* TREND CHART + TOOLS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
@@ -845,6 +1020,33 @@ function InfoLine({
         <div className="text-sm font-semibold leading-tight truncate">
           {value}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function QcStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  tone?: "ok" | "bad";
+}) {
+  return (
+    <div className="rounded-lg border p-2.5 bg-muted/20">
+      <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "text-xl font-bold tabular-nums mt-0.5",
+          tone === "ok" && "text-emerald-600",
+          tone === "bad" && "text-red-600",
+        )}
+      >
+        {value}
       </div>
     </div>
   );

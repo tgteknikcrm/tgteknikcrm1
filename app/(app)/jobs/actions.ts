@@ -59,3 +59,41 @@ export async function deleteJob(id: string) {
   revalidatePath("/jobs");
   return { success: true };
 }
+
+export interface JobToolInput {
+  tool_id: string;
+  quantity_used: number;
+  notes?: string | null;
+}
+
+// Replace-all: simpler than diffing, fine at workshop scale.
+export async function setJobTools(jobId: string, items: JobToolInput[]) {
+  const supabase = await createClient();
+
+  // Validate
+  for (const it of items) {
+    if (!it.tool_id) return { error: "Takım seçilmedi." };
+    if (!(it.quantity_used > 0)) {
+      return { error: "Adet 0'dan büyük olmalı." };
+    }
+  }
+
+  // Wipe existing rows for this job
+  const del = await supabase.from("job_tools").delete().eq("job_id", jobId);
+  if (del.error) return { error: del.error.message };
+
+  if (items.length > 0) {
+    const rows = items.map((it) => ({
+      job_id: jobId,
+      tool_id: it.tool_id,
+      quantity_used: it.quantity_used,
+      notes: it.notes?.trim() || null,
+    }));
+    const ins = await supabase.from("job_tools").insert(rows);
+    if (ins.error) return { error: ins.error.message };
+  }
+
+  revalidatePath("/jobs");
+  revalidatePath("/machines");
+  return { success: true };
+}

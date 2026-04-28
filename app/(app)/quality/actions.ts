@@ -5,6 +5,8 @@ import { revalidatePath } from "next/cache";
 import {
   calculateQcResult,
   type QcCharacteristicType,
+  type QcReviewerRole,
+  type QcReviewStatus,
 } from "@/lib/supabase/types";
 
 export interface SaveSpecInput {
@@ -231,5 +233,44 @@ export async function deleteMeasurement(id: string, jobId: string) {
   if (error) return { error: error.message };
   revalidatePath("/quality");
   revalidatePath(`/quality/${jobId}`);
+  return { success: true };
+}
+
+// ============================================================
+// Quality Reviews (sign-off)
+// ============================================================
+export async function addQualityReview(input: {
+  job_id: string;
+  reviewer_role: QcReviewerRole;
+  status: QcReviewStatus;
+  notes?: string;
+}) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Giriş yapılmamış" };
+
+  const { error } = await supabase.from("quality_reviews").insert({
+    job_id: input.job_id,
+    reviewer_id: user.id,
+    reviewer_role: input.reviewer_role,
+    status: input.status,
+    notes: input.notes?.trim() || null,
+  });
+  if (error) return { error: error.message };
+
+  revalidatePath("/quality");
+  revalidatePath(`/quality/${input.job_id}`);
+  revalidatePath(`/machines`);
+  return { success: true };
+}
+
+export async function deleteQualityReview(id: string, jobId: string) {
+  const supabase = await createClient();
+  const { error } = await supabase.from("quality_reviews").delete().eq("id", id);
+  if (error) return { error: error.message };
+  revalidatePath(`/quality/${jobId}`);
+  revalidatePath(`/machines`);
   return { success: true };
 }

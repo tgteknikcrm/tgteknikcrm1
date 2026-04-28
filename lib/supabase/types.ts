@@ -470,3 +470,98 @@ export function formatToleranceBand(tolPlus: number, tolMinus: number): string {
   if (tolPlus === tolMinus) return `±${tolPlus}`;
   return `+${tolPlus} / −${tolMinus}`;
 }
+
+// ============================================================
+// Quality Reviews (sign-off trail)
+// ============================================================
+export type QcReviewerRole = "operator" | "kontrolor" | "onaylayan";
+export type QcReviewStatus = "onaylandi" | "reddedildi" | "koşullu";
+
+export interface QualityReview {
+  id: string;
+  job_id: string;
+  reviewer_id: string;
+  reviewer_role: QcReviewerRole;
+  status: QcReviewStatus;
+  notes: string | null;
+  reviewed_at: string;
+  created_at: string;
+}
+
+export const QC_REVIEWER_ROLE_LABEL: Record<QcReviewerRole, string> = {
+  operator: "Operatör",
+  kontrolor: "Kontrolör",
+  onaylayan: "Onaylayan",
+};
+
+export const QC_REVIEW_STATUS_LABEL: Record<QcReviewStatus, string> = {
+  onaylandi: "Onaylandı",
+  reddedildi: "Reddedildi",
+  "koşullu": "Şartlı Kabul",
+};
+
+export const QC_REVIEW_STATUS_TONE: Record<QcReviewStatus, string> = {
+  onaylandi:
+    "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+  reddedildi: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
+  "koşullu":
+    "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+};
+
+// ============================================================
+// CAD/CAM Programs
+// ============================================================
+export interface CadProgram {
+  id: string;
+  title: string;
+  machine_id: string | null;
+  job_id: string | null;
+  file_path: string;
+  file_type: string | null;
+  file_size: number | null;
+  revision: string | null;
+  notes: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Recognised file kinds — drives icon + label in lists.
+export type CadFileKind = "gcode" | "cad" | "pdf" | "doc" | "other";
+
+export function detectCadFileKind(
+  fileType: string | null,
+  filePath: string,
+): CadFileKind {
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  if (["nc", "tap", "gcode", "ngc", "iso", "eia", "cnc", "mpf"].includes(ext)) {
+    return "gcode";
+  }
+  if (
+    ["step", "stp", "stl", "iges", "igs", "dxf", "dwg", "x_t", "sldprt"].includes(
+      ext,
+    )
+  ) {
+    return "cad";
+  }
+  if (ext === "pdf" || fileType === "application/pdf") return "pdf";
+  if (
+    ["txt", "log", "doc", "docx", "rtf"].includes(ext) ||
+    fileType?.startsWith("text/")
+  ) {
+    return "doc";
+  }
+  return "other";
+}
+
+export const CAD_FILE_KIND_LABEL: Record<CadFileKind, string> = {
+  gcode: "G-Code / NC",
+  cad: "CAD Modeli",
+  pdf: "PDF",
+  doc: "Doküman",
+  other: "Dosya",
+};
+
+// Common CNC/CAD extensions to advertise in the file picker.
+export const CAD_ACCEPT_EXTENSIONS =
+  ".nc,.tap,.gcode,.ngc,.iso,.eia,.cnc,.mpf,.step,.stp,.stl,.iges,.igs,.dxf,.dwg,.x_t,.sldprt,.pdf,.txt,.log";

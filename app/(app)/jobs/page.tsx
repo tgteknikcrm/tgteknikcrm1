@@ -18,11 +18,12 @@ import {
   type Machine,
   type Operator,
 } from "@/lib/supabase/types";
-import { Plus, FileText, ClipboardCheck } from "lucide-react";
+import { Plus, FileText, ClipboardCheck, Wrench } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/app/empty-state";
 import { SearchInput } from "@/components/app/search-input";
 import { JobDialog } from "./job-dialog";
+import { JobToolsDialog } from "./job-tools-dialog";
 import { DeleteButton } from "../operators/delete-button";
 import { deleteJob } from "./actions";
 
@@ -156,6 +157,15 @@ export default async function JobsPage({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex gap-1 justify-end">
+                        <JobToolsDialog
+                          jobId={j.id}
+                          jobLabel={j.part_name}
+                          trigger={
+                            <Button variant="ghost" size="sm" title="Takım Ata">
+                              <Wrench className="size-4" /> Takım
+                            </Button>
+                          }
+                        />
                         <Button asChild variant="ghost" size="sm" title="Kalite Kontrol">
                           <Link href={`/quality/${j.id}`}>
                             <ClipboardCheck className="size-4" /> Kalite
