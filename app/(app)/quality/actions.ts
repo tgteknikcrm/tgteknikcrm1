@@ -101,6 +101,45 @@ export async function saveSpec(input: SaveSpecInput) {
   return { success: true };
 }
 
+// Update bubble normalized position (drag-drop on image board)
+export async function updateBubblePosition(
+  specId: string,
+  jobId: string,
+  x: number,
+  y: number,
+) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return { error: "Geçersiz koordinat" };
+  }
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quality_specs")
+    .update({
+      bubble_x: Math.max(0, Math.min(1, x)),
+      bubble_y: Math.max(0, Math.min(1, y)),
+    })
+    .eq("id", specId);
+  if (error) return { error: error.message };
+  revalidatePath(`/quality/${jobId}`);
+  return { success: true };
+}
+
+// Set/clear bubble override color
+export async function updateBubbleColor(
+  specId: string,
+  jobId: string,
+  color: string | null,
+) {
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quality_specs")
+    .update({ bubble_color: color })
+    .eq("id", specId);
+  if (error) return { error: error.message };
+  revalidatePath(`/quality/${jobId}`);
+  return { success: true };
+}
+
 export async function deleteSpec(id: string, jobId: string) {
   const supabase = await createClient();
   const { data: existing } = await supabase

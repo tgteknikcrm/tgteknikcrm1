@@ -343,11 +343,27 @@ export interface QualitySpec {
   // Normalized coords (0..1) on the linked drawing — survives resize.
   bubble_x: number | null;
   bubble_y: number | null;
+  // Optional per-spec override color (hex or tailwind tone name).
+  bubble_color: string | null;
   notes: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
 }
+
+// Bubble color presets (used in QC image board picker)
+export const BUBBLE_COLOR_PRESETS: ReadonlyArray<{ key: string; bg: string; name: string }> = [
+  { key: "auto", bg: "", name: "Otomatik (sonuca göre)" },
+  { key: "#10b981", bg: "bg-emerald-500", name: "Yeşil" },
+  { key: "#3b82f6", bg: "bg-blue-500", name: "Mavi" },
+  { key: "#8b5cf6", bg: "bg-violet-500", name: "Mor" },
+  { key: "#f59e0b", bg: "bg-amber-500", name: "Sarı" },
+  { key: "#f97316", bg: "bg-orange-500", name: "Turuncu" },
+  { key: "#ef4444", bg: "bg-red-500", name: "Kırmızı" },
+  { key: "#06b6d4", bg: "bg-cyan-500", name: "Cyan" },
+  { key: "#ec4899", bg: "bg-pink-500", name: "Pembe" },
+  { key: "#1f2937", bg: "bg-zinc-800", name: "Siyah" },
+];
 
 export interface QualityMeasurement {
   id: string;

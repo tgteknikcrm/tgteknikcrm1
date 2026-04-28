@@ -13,6 +13,7 @@ import {
   Truck,
   Code2,
   CalendarDays,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,6 +32,7 @@ export const navItems: NavItem[] = [
   { href: "/orders", label: "Siparişler", icon: ShoppingCart },
   { href: "/suppliers", label: "Tedarikçiler", icon: Truck },
   { href: "/machines", label: "Makineler", icon: Factory },
+  { href: "/breakdowns", label: "Arıza & Bakım", icon: AlertTriangle },
   { href: "/operators", label: "Operatörler", icon: Users },
   { href: "/tools", label: "Takım Listesi", icon: Wrench },
   { href: "/drawings", label: "Teknik Resimler", icon: ImageIcon },

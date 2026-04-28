@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition, useEffect } from "react";
+import { useMemo, useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,11 +25,22 @@ import {
   Eye,
   EyeOff,
   Trash2,
+  Palette,
+  Move,
+  Circle,
+  CircleOff,
 } from "lucide-react";
-import { saveMeasurement, deleteSpec, deleteQualityDrawing } from "./actions";
+import {
+  saveMeasurement,
+  deleteSpec,
+  deleteQualityDrawing,
+  updateBubblePosition,
+  updateBubbleColor,
+} from "./actions";
 import { SpecDialog } from "./spec-dialog";
 import { ResultBadge } from "./result-badge";
 import {
+  BUBBLE_COLOR_PRESETS,
   calculateQcResult,
   deviationPct,
   formatToleranceBand,
@@ -84,7 +95,21 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
   );
   const [selectedSpecId, setSelectedSpecId] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
+  const [showBubbles, setShowBubbles] = useState(true);
   const [deletingDrawing, startDeleteDrawing] = useTransition();
+  // Drag state for repositioning bubbles. While a bubble is being dragged
+  // we track its temporary normalized position; on release we persist it.
+  const [dragging, setDragging] = useState<{
+    specId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const draggingRef = useRef<{
+    specId: string;
+    moved: boolean;
+    container: HTMLDivElement | null;
+  } | null>(null);
+  const imageContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Reset selection when drawing changes
   useEffect(() => {
@@ -105,6 +130,11 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
   }, [specs]);
 
   function onImageClick(e: React.MouseEvent<HTMLDivElement>) {
+    // Don't create a new bubble if a drag just happened
+    if (draggingRef.current?.moved) {
+      draggingRef.current = null;
+      return;
+    }
     // If a bubble is open, first click anywhere closes it
     if (selectedSpecId) {
       setSelectedSpecId(null);
@@ -115,6 +145,60 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
     const y = (e.clientY - rect.top) / rect.height;
     if (x < 0 || x > 1 || y < 0 || y > 1) return;
     setPendingClick({ x, y });
+  }
+
+  // ── Drag-drop bubble repositioning ────────────────────────
+  function onBubblePointerDown(specId: string, e: React.PointerEvent<HTMLButtonElement>) {
+    e.stopPropagation();
+    e.preventDefault();
+    const container = imageContainerRef.current;
+    if (!container) return;
+    (e.currentTarget as HTMLButtonElement).setPointerCapture(e.pointerId);
+    draggingRef.current = { specId, moved: false, container };
+    const rect = container.getBoundingClientRect();
+    setDragging({
+      specId,
+      x: (e.clientX - rect.left) / rect.width,
+      y: (e.clientY - rect.top) / rect.height,
+    });
+  }
+
+  function onBubblePointerMove(e: React.PointerEvent<HTMLButtonElement>) {
+    const drag = draggingRef.current;
+    if (!drag) return;
+    const rect = drag.container?.getBoundingClientRect();
+    if (!rect) return;
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+    drag.moved = true;
+    setDragging({ specId: drag.specId, x, y });
+  }
+
+  async function onBubblePointerUp(e: React.PointerEvent<HTMLButtonElement>) {
+    const drag = draggingRef.current;
+    if (!drag) return;
+    try {
+      (e.currentTarget as HTMLButtonElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // safari sometimes throws if no capture
+    }
+    if (drag.moved && dragging) {
+      const r = await updateBubblePosition(drag.specId, jobId, dragging.x, dragging.y);
+      if (r.error) {
+        toast.error(r.error);
+      } else {
+        toast.success("Konum güncellendi");
+        router.refresh();
+      }
+    } else if (!drag.moved) {
+      // Treat as click → select bubble
+      setSelectedSpecId(drag.specId);
+    }
+    setDragging(null);
+    // Keep moved flag for one tick so onImageClick ignores trailing click
+    setTimeout(() => {
+      draggingRef.current = null;
+    }, 0);
   }
 
   function onDeleteDrawing() {
@@ -207,6 +291,16 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
             <Button
               variant="ghost"
               size="sm"
+              onClick={() => setShowBubbles((v) => !v)}
+              className="h-7 px-2 text-xs gap-1"
+              title={showBubbles ? "Balonları gizle" : "Balonları göster"}
+            >
+              {showBubbles ? <Circle className="size-3.5" /> : <CircleOff className="size-3.5" />}
+              Balonlar
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setShowLabels((v) => !v)}
               className="h-7 px-2 text-xs gap-1"
             >
@@ -243,6 +337,7 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
         {/* Image with bubbles */}
         <div className="relative bg-zinc-50 dark:bg-zinc-100 rounded-lg overflow-hidden border">
           <div
+            ref={imageContainerRef}
             onClick={onImageClick}
             className={cn(
               "relative cursor-crosshair select-none",
@@ -256,25 +351,31 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
               className="w-full max-h-[70vh] object-contain block pointer-events-none"
               draggable={false}
             />
-            {specsForDrawing.map((s) => {
-              const own = measMap.get(s.id) ?? [];
-              const result = bubbleResult(own);
-              const isSelected = s.id === selectedSpecId;
-              return (
-                <Bubble
-                  key={s.id}
-                  spec={s}
-                  result={result}
-                  selected={isSelected}
-                  showLabel={showLabels}
-                  measurementCount={own.length}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedSpecId(s.id);
-                  }}
-                />
-              );
-            })}
+            {showBubbles &&
+              specsForDrawing.map((s) => {
+                const own = measMap.get(s.id) ?? [];
+                const result = bubbleResult(own);
+                const isSelected = s.id === selectedSpecId;
+                const isDragging = dragging?.specId === s.id;
+                // Use temporary drag position when active
+                const dragX = isDragging && dragging ? dragging.x : null;
+                const dragY = isDragging && dragging ? dragging.y : null;
+                return (
+                  <Bubble
+                    key={s.id}
+                    spec={s}
+                    result={result}
+                    selected={isSelected}
+                    showLabel={showLabels}
+                    measurementCount={own.length}
+                    dragX={dragX}
+                    dragY={dragY}
+                    onPointerDown={(e) => onBubblePointerDown(s.id, e)}
+                    onPointerMove={onBubblePointerMove}
+                    onPointerUp={onBubblePointerUp}
+                  />
+                );
+              })}
           </div>
         </div>
 
@@ -325,16 +426,28 @@ function Bubble({
   selected,
   showLabel,
   measurementCount,
-  onClick,
+  dragX,
+  dragY,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
 }: {
   spec: QualitySpec;
   result: QcResult | null;
   selected: boolean;
   showLabel: boolean;
   measurementCount: number;
-  onClick: (e: React.MouseEvent) => void;
+  dragX: number | null;
+  dragY: number | null;
+  onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void;
 }) {
-  const tone =
+  // Color resolution: explicit override > result-derived > neutral default
+  const customColor = spec.bubble_color;
+  const usingCustom = customColor && customColor !== "auto";
+
+  const resultTone =
     result === "ok"
       ? "bg-emerald-500 text-white border-emerald-700"
       : result === "sinirda"
@@ -342,23 +455,41 @@ function Bubble({
       : result === "nok"
       ? "bg-red-500 text-white border-red-700"
       : "bg-white text-zinc-900 border-zinc-700";
+
+  const isDragging = dragX !== null && dragY !== null;
+  const xPct = isDragging ? dragX! * 100 : (spec.bubble_x ?? 0) * 100;
+  const yPct = isDragging ? dragY! * 100 : (spec.bubble_y ?? 0) * 100;
+
   return (
     <button
       type="button"
-      onClick={onClick}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onClick={(e) => e.stopPropagation()}
       style={{
-        left: `${(spec.bubble_x ?? 0) * 100}%`,
-        top: `${(spec.bubble_y ?? 0) * 100}%`,
+        left: `${xPct}%`,
+        top: `${yPct}%`,
+        ...(usingCustom
+          ? {
+              backgroundColor: customColor!,
+              borderColor: customColor!,
+              color: "white",
+            }
+          : {}),
+        cursor: isDragging ? "grabbing" : "grab",
+        touchAction: "none",
       }}
       className={cn(
         "absolute -translate-x-1/2 -translate-y-1/2 z-10",
         "size-7 rounded-full border-2 font-bold text-xs tabular-nums shadow-md",
-        "flex items-center justify-center transition-all",
+        "flex items-center justify-center transition-shadow",
         "hover:scale-125 hover:z-20",
         selected && "ring-4 ring-primary/40 scale-125 z-30",
-        tone,
+        isDragging && "opacity-90 scale-125 z-40 shadow-lg",
+        !usingCustom && resultTone,
       )}
-      title={`#${spec.bubble_no ?? "?"} ${spec.description} · ${measurementCount} ölçüm`}
+      title={`#${spec.bubble_no ?? "?"} ${spec.description} · ${measurementCount} ölçüm · sürükle: konum değiştir`}
     >
       {spec.bubble_no ?? "?"}
       {showLabel && (
@@ -366,12 +497,9 @@ function Bubble({
           className={cn(
             "absolute left-full ml-1.5 top-1/2 -translate-y-1/2 whitespace-nowrap",
             "px-1.5 py-0.5 rounded text-[10px] font-medium",
-            "bg-zinc-900/90 text-white shadow",
-            "opacity-0 hover:opacity-100 group-hover:opacity-100",
-            // Always visible when selected
-            selected && "opacity-100",
+            "bg-zinc-900/90 text-white shadow pointer-events-none",
+            selected ? "opacity-100" : "opacity-90",
           )}
-          style={{ pointerEvents: "none" }}
         >
           {spec.description}
         </span>
@@ -397,6 +525,19 @@ function MeasurementBar({
   const [valueText, setValueText] = useState("");
   const [pending, startTransition] = useTransition();
   const [deleting, startDelete] = useTransition();
+  const [colorOpen, setColorOpen] = useState(false);
+  const [pendingColor, startColor] = useTransition();
+
+  function pickColor(c: string | null) {
+    startColor(async () => {
+      const r = await updateBubbleColor(spec.id, spec.job_id, c);
+      if (r.error) toast.error(r.error);
+      else {
+        toast.success("Renk güncellendi");
+        setColorOpen(false);
+      }
+    });
+  }
 
   function onDeleteSpec() {
     const msg = `#${spec.bubble_no ?? "?"} '${spec.description}' bu balon resimden silinsin mi?\n\n(Bu spec ve tüm ölçümleri kalıcı olarak silinir.)`;
@@ -498,7 +639,44 @@ function MeasurementBar({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1 shrink-0 relative">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setColorOpen((v) => !v)}
+            disabled={pendingColor}
+            className="h-7 px-2"
+            title="Balon rengi"
+          >
+            {pendingColor ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Palette className="size-4" />
+            )}
+          </Button>
+          {colorOpen && (
+            <div className="absolute right-16 top-8 z-20 rounded-lg border bg-card shadow-lg p-2 grid grid-cols-5 gap-1.5 min-w-[12rem]">
+              {BUBBLE_COLOR_PRESETS.map((p) => {
+                const active =
+                  (spec.bubble_color ?? "auto") === p.key;
+                return (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => pickColor(p.key === "auto" ? null : p.key)}
+                    className={cn(
+                      "size-7 rounded-full border-2 flex items-center justify-center transition",
+                      active ? "ring-2 ring-primary scale-110" : "hover:scale-110",
+                      p.key === "auto"
+                        ? "bg-gradient-to-br from-emerald-500 via-amber-500 to-red-500 border-zinc-300"
+                        : p.bg + " border-zinc-700",
+                    )}
+                    title={p.name}
+                  />
+                );
+              })}
+            </div>
+          )}
           <Button
             variant="ghost"
             size="sm"
