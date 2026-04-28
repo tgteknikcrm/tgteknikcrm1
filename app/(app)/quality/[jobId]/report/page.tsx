@@ -13,6 +13,11 @@ import {
 import { ArrowLeft } from "lucide-react";
 import { ExportButtons } from "./export-buttons";
 import { ResultBadge } from "../../result-badge";
+import {
+  OverallComplianceBar,
+  SpecDistributionTable,
+  ToleranceBandChart,
+} from "./charts";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
 export const metadata = { title: "Kalite Raporu" };
@@ -149,28 +154,45 @@ export default async function QualityReportPage({
         <SummaryBlock label="NOK" value={nokTotal} tone="bad" />
       </div>
 
-      <div className="rounded-lg border p-4 mb-6 print:border-0">
-        <div className="flex items-baseline justify-between mb-2">
-          <span className="text-sm font-semibold">Kabul Oranı</span>
-          <span className="text-2xl font-bold tabular-nums">%{okPct}</span>
+      <div className="rounded-lg border p-4 mb-6 print:border-zinc-300">
+        <div className="flex items-baseline justify-between mb-3">
+          <span className="text-sm font-semibold">Genel Kabul Oranı</span>
+          <span className="text-3xl font-bold tabular-nums">%{okPct}</span>
         </div>
-        {measurements.length > 0 && (
-          <div className="h-2.5 w-full rounded-full bg-muted overflow-hidden flex">
-            <div
-              className="h-full bg-emerald-500"
-              style={{ width: `${(okTotal / measurements.length) * 100}%` }}
-            />
-            <div
-              className="h-full bg-amber-500"
-              style={{ width: `${(sinirTotal / measurements.length) * 100}%` }}
-            />
-            <div
-              className="h-full bg-red-500"
-              style={{ width: `${(nokTotal / measurements.length) * 100}%` }}
-            />
-          </div>
-        )}
+        <OverallComplianceBar ok={okTotal} sinirda={sinirTotal} nok={nokTotal} />
       </div>
+
+      {/* Per-spec distribution overview */}
+      {specs.length > 0 && measurements.length > 0 && (
+        <>
+          <h2 className="text-lg font-semibold mb-3 mt-6">
+            Spec Bazlı Dağılım
+            <span className="text-xs font-normal text-muted-foreground ml-2">
+              (sorunlu olanlar üstte)
+            </span>
+          </h2>
+          <div className="mb-6">
+            <SpecDistributionTable specs={specs} measurements={measurements} />
+          </div>
+        </>
+      )}
+
+      {/* Tolerance band gauges per spec */}
+      {specs.length > 0 && (
+        <>
+          <h2 className="text-lg font-semibold mb-3 mt-6">
+            Tolerans Bandı Görselleri
+            <span className="text-xs font-normal text-muted-foreground ml-2">
+              (her ölçüm bandın üzerinde nokta)
+            </span>
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6 print:grid-cols-1 print:gap-2">
+            {specs.map((s) => (
+              <ToleranceBandChart key={s.id} spec={s} measurements={measurements} />
+            ))}
+          </div>
+        </>
+      )}
 
       {/* FAI Form 3 stili — Karakteristik Sorumluluğu */}
       <h2 className="text-lg font-semibold mb-3 mt-6">
