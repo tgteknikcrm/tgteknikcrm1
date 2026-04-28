@@ -13,7 +13,7 @@ import {
 import { ArrowLeft } from "lucide-react";
 import { ExportButtons } from "./export-buttons";
 import { ResultBadge } from "../../result-badge";
-import { formatDateTime } from "@/lib/utils";
+import { formatDate, formatDateTime } from "@/lib/utils";
 
 export const metadata = { title: "Kalite Raporu" };
 
@@ -134,13 +134,9 @@ export default async function QualityReportPage({
           <Field label="Planlı Adet" value={String(job.quantity)} />
           <Field
             label="Teslim Tarihi"
-            value={
-              job.due_date
-                ? new Date(job.due_date).toLocaleDateString("tr-TR")
-                : "—"
-            }
+            value={job.due_date ? formatDate(job.due_date) : "—"}
           />
-          <Field label="Rapor Tarihi" value={new Date().toLocaleDateString("tr-TR")} />
+          <Field label="Rapor Tarihi" value={formatDate(new Date())} />
           <Field label="Spec Sayısı" value={String(specs.length)} />
         </div>
       </div>

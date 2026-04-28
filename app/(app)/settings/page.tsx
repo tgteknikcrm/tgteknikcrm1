@@ -12,6 +12,7 @@ import {
 import { createClient, getProfile } from "@/lib/supabase/server";
 import type { Profile } from "@/lib/supabase/types";
 import { formatPhoneForDisplay } from "@/lib/phone";
+import { formatDate } from "@/lib/utils";
 import { RoleSelect } from "./role-select";
 import { CreateUserDialog } from "./create-user-dialog";
 import { ActiveToggle, DeleteUserButton } from "./user-row-actions";
@@ -90,7 +91,7 @@ export default async function SettingsPage() {
                       <ActiveToggle userId={u.id} active={u.active} disabled={isSelf} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {new Date(u.created_at).toLocaleDateString("tr-TR")}
+                      {formatDate(u.created_at)}
                     </TableCell>
                     <TableCell>
                       <DeleteUserButton userId={u.id} disabled={isSelf} />

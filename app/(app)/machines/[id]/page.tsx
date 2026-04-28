@@ -268,8 +268,15 @@ export default async function MachineDetailPage({
     const iso = d.toISOString().slice(0, 10);
     days.push({
       date: iso,
-      label: d.toLocaleDateString("tr-TR", { day: "numeric", month: "short" }),
-      weekday: d.toLocaleDateString("tr-TR", { weekday: "short" }),
+      label: d.toLocaleDateString("tr-TR", {
+        day: "numeric",
+        month: "short",
+        timeZone: "Europe/Istanbul",
+      }),
+      weekday: d.toLocaleDateString("tr-TR", {
+        weekday: "short",
+        timeZone: "Europe/Istanbul",
+      }),
       qty: weekByDate.get(iso) ?? 0,
     });
   }
@@ -629,9 +636,7 @@ export default async function MachineDetailPage({
                       }
                     </Badge>
                     <span className="text-xs text-muted-foreground tabular-nums">
-                      {new Date(
-                        currentJobQc.last_review.reviewed_at,
-                      ).toLocaleDateString("tr-TR")}
+                      {formatDate(currentJobQc.last_review.reviewed_at)}
                     </span>
                   </div>
                 )}
@@ -773,7 +778,7 @@ export default async function MachineDetailPage({
             <Field label="Konum" value={machine.location} icon={MapPin} />
             <Field
               label="Son Güncelleme"
-              value={new Date(machine.updated_at).toLocaleDateString("tr-TR")}
+              value={formatDate(machine.updated_at)}
               icon={Calendar}
             />
           </div>
