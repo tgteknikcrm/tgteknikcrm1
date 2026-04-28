@@ -26,7 +26,7 @@ import {
   EyeOff,
   Trash2,
 } from "lucide-react";
-import { saveMeasurement, deleteSpec } from "./actions";
+import { saveMeasurement, deleteSpec, deleteQualityDrawing } from "./actions";
 import { SpecDialog } from "./spec-dialog";
 import { ResultBadge } from "./result-badge";
 import {
@@ -84,6 +84,7 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
   );
   const [selectedSpecId, setSelectedSpecId] = useState<string | null>(null);
   const [showLabels, setShowLabels] = useState(true);
+  const [deletingDrawing, startDeleteDrawing] = useTransition();
 
   // Reset selection when drawing changes
   useEffect(() => {
@@ -114,6 +115,39 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
     const y = (e.clientY - rect.top) / rect.height;
     if (x < 0 || x > 1 || y < 0 || y > 1) return;
     setPendingClick({ x, y });
+  }
+
+  function onDeleteDrawing() {
+    if (!drawing) return;
+    const specCount = specsForDrawing.length;
+    const measCount = specsForDrawing.reduce(
+      (s, sp) => s + (measMap.get(sp.id)?.length ?? 0),
+      0,
+    );
+    const msg = [
+      `'${drawing.title}' resmi silinsin mi?`,
+      "",
+      `Bu resme bağlı ${specCount} balon ve ${measCount} ölçüm kalıcı olarak silinir.`,
+      "Bu işlem geri alınamaz.",
+    ].join("\n");
+    if (!confirm(msg)) return;
+
+    startDeleteDrawing(async () => {
+      const r = await deleteQualityDrawing(drawing.id, jobId);
+      if (r.error) {
+        toast.error(r.error);
+      } else {
+        toast.success(
+          `Resim silindi · ${r.removedSpecs ?? 0} balon ve ölçümleri temizlendi`,
+        );
+        // Switch to next drawing if any
+        const remaining = drawings.filter((d) => d.id !== drawing.id);
+        setActiveId(remaining[0]?.id ?? null);
+        setSelectedSpecId(null);
+        setPendingClick(null);
+        router.refresh();
+      }
+    });
   }
 
   if (drawings.length === 0) {
@@ -178,6 +212,21 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
             >
               {showLabels ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
               Etiketler
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onDeleteDrawing}
+              disabled={deletingDrawing || !drawing}
+              className="h-7 px-2 text-xs gap-1 text-red-700 hover:text-red-700 hover:bg-red-500/10"
+              title="Bu resmi ve üzerindeki tüm balon/ölçümleri sil"
+            >
+              {deletingDrawing ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="size-3.5" />
+              )}
+              Resmi Sil
             </Button>
           </div>
         </div>

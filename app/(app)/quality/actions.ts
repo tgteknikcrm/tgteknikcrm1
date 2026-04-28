@@ -357,3 +357,54 @@ export async function deleteQualityReview(id: string, jobId: string) {
   revalidatePath(`/machines`);
   return { success: true };
 }
+
+// Delete a drawing used in QC + every spec that referenced it (and via
+// FK cascade their measurements). Use when an operator wants to remove
+// the entire image from the QC board.
+export async function deleteQualityDrawing(drawingId: string, jobId: string) {
+  const supabase = await createClient();
+
+  // Snapshot drawing for label + storage path
+  const { data: drawing } = await supabase
+    .from("drawings")
+    .select("title, file_path")
+    .eq("id", drawingId)
+    .single();
+
+  // Delete specs that reference this drawing within this job. Cascade
+  // wipes their measurements automatically.
+  const { data: specsDeleted, error: sErr } = await supabase
+    .from("quality_specs")
+    .delete()
+    .eq("drawing_id", drawingId)
+    .eq("job_id", jobId)
+    .select("id");
+  if (sErr) return { error: sErr.message };
+
+  // Delete the drawing row + storage file
+  const { error: dErr } = await supabase
+    .from("drawings")
+    .delete()
+    .eq("id", drawingId);
+  if (dErr) return { error: dErr.message };
+
+  if (drawing?.file_path) {
+    await supabase.storage.from("drawings").remove([drawing.file_path]);
+  }
+
+  await recordEvent({
+    type: "drawing.deleted",
+    entity_type: "drawing",
+    entity_id: drawingId,
+    entity_label: drawing?.title ?? null,
+    metadata: {
+      job_id: jobId,
+      cascaded_specs: specsDeleted?.length ?? 0,
+    },
+  });
+
+  revalidatePath("/drawings");
+  revalidatePath("/quality");
+  revalidatePath(`/quality/${jobId}`);
+  return { success: true, removedSpecs: specsDeleted?.length ?? 0 };
+}
