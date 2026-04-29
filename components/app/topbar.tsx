@@ -23,6 +23,7 @@ import { signOut } from "@/app/(auth)/login/actions";
 import { formatPhoneForDisplay } from "@/lib/phone";
 import { NotificationBell } from "./notification-bell";
 import { MessagesButton } from "./messages-button";
+import { MessageNotifier } from "./message-notifier";
 
 interface TopbarProps {
   isAdmin: boolean;
@@ -87,6 +88,9 @@ export function Topbar({ isAdmin, profile }: TopbarProps) {
       <div className="ml-auto flex items-center gap-1">
         {/* Messages — links to /messages with realtime unread badge */}
         <MessagesButton />
+
+        {/* Browser notification toggle (sound + desktop notif when tab hidden) */}
+        <MessageNotifier />
 
         {/* Notifications */}
         <NotificationBell variant="icon" />

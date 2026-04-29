@@ -15,7 +15,9 @@ export const metadata = { title: "Mesajlar" };
 
 interface ConvoListItem {
   conversation: Conversation;
-  participants: Array<Pick<Profile, "id" | "full_name" | "phone">>;
+  participants: Array<
+    Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">
+  >;
   unreadCount: number;
   myLastReadAt: string | null;
   archivedAt: string | null;
@@ -53,7 +55,9 @@ export default async function MessagesPage({
 
   let convos: Conversation[] = [];
   let allParts: ConversationParticipant[] = [];
-  let people: Array<Pick<Profile, "id" | "full_name" | "phone">> = [];
+  let people: Array<
+    Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">
+  > = [];
 
   if (myConvIds.length > 0) {
     const [cRes, pRes] = await Promise.all([
@@ -75,10 +79,10 @@ export default async function MessagesPage({
   // Pull profiles for all participants + a directory for "new conversation".
   const { data: allProfiles } = await supabase
     .from("profiles")
-    .select("id, full_name, phone")
+    .select("id, full_name, phone, last_seen_at")
     .eq("active", true);
   people = (allProfiles ?? []) as Array<
-    Pick<Profile, "id" | "full_name" | "phone">
+    Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">
   >;
   const profileById = new Map(people.map((p) => [p.id, p]));
 
@@ -119,7 +123,14 @@ export default async function MessagesPage({
       conversation: conv,
       participants: parts
         .map((p) => profileById.get(p.user_id))
-        .filter((x): x is Pick<Profile, "id" | "full_name" | "phone"> => !!x),
+        .filter(
+          (
+            x,
+          ): x is Pick<
+            Profile,
+            "id" | "full_name" | "phone" | "last_seen_at"
+          > => !!x,
+        ),
       unreadCount: unreadByConv.get(conv.id) ?? 0,
       myLastReadAt: myLastReadByConv.get(conv.id) ?? null,
       archivedAt: mine?.archived_at ?? null,
@@ -150,11 +161,22 @@ export default async function MessagesPage({
     type MsgRow = MessageWithRelations & {
       message_attachments?: MessageWithRelations["attachments"];
     };
-    initialMessages = ((mRes.data ?? []) as MsgRow[]).map((m) => ({
-      ...m,
-      attachments: m.message_attachments ?? [],
-      author: m.author_id ? profileById.get(m.author_id) ?? null : null,
-    }));
+    initialMessages = ((mRes.data ?? []) as MsgRow[]).map((m) => {
+      const author = m.author_id ? profileById.get(m.author_id) ?? null : null;
+      return {
+        ...m,
+        attachments: m.message_attachments ?? [],
+        // MessageWithRelations wants the lighter author shape (without
+        // last_seen_at). Strip it explicitly so TS stays happy.
+        author: author
+          ? {
+              id: author.id,
+              full_name: author.full_name,
+              phone: author.phone,
+            }
+          : null,
+      };
+    });
     activeParticipants = (pRes.data ?? []) as ConversationParticipant[];
   }
   const myActiveParticipant = active

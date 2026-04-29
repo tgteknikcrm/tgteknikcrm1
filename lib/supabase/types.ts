@@ -28,8 +28,27 @@ export interface Profile {
   phone: string | null;
   avatar_url: string | null;
   active: boolean;
+  last_seen_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// Online: a user pinged within the last 60 seconds. Returns a tuple
+// `[online, label]` where label is "şu an online", "5 dk önce", etc.
+export function presenceLabel(
+  lastSeenAt: string | null | undefined,
+): [online: boolean, label: string] {
+  if (!lastSeenAt) return [false, "uzun süredir görünmedi"];
+  const t = new Date(lastSeenAt).getTime();
+  const diff = Date.now() - t;
+  if (diff < 60_000) return [true, "şu an online"];
+  if (diff < 60 * 60_000)
+    return [false, `${Math.floor(diff / 60_000)} dk önce`];
+  if (diff < 24 * 60 * 60_000)
+    return [false, `${Math.floor(diff / 3_600_000)} sa önce`];
+  if (diff < 7 * 24 * 60 * 60_000)
+    return [false, `${Math.floor(diff / 86_400_000)} gün önce`];
+  return [false, new Date(lastSeenAt).toLocaleDateString("tr-TR")];
 }
 
 export interface Machine {

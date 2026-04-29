@@ -25,6 +25,7 @@ import {
 import { NewConversationDialog } from "./new-conversation-dialog";
 import {
   CONVERSATION_TAG_PRESETS,
+  presenceLabel,
   readableTextOn,
   tagMeta,
   type Conversation,
@@ -39,7 +40,9 @@ import {
 
 interface Item {
   conversation: Conversation;
-  participants: Array<Pick<Profile, "id" | "full_name" | "phone">>;
+  participants: Array<
+    Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">
+  >;
   unreadCount: number;
   myLastReadAt: string | null;
   archivedAt: string | null;
@@ -51,7 +54,7 @@ interface Props {
   items: Item[];
   currentUserId: string;
   activeId: string | null;
-  people: Array<Pick<Profile, "id" | "full_name" | "phone">>;
+  people: Array<Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">>;
 }
 
 type TabKey = "inbox" | "archive" | string; // arbitrary tag key
@@ -351,6 +354,13 @@ function ConvoRow({
   const unread = item.unreadCount;
   const isArchived = !!item.archivedAt;
   const isPinned = !!item.pinnedAt;
+  // For DMs, show the other user's online state on the avatar.
+  const otherForPresence = !isGroup
+    ? item.participants.find((p) => p.id !== currentUserId)
+    : null;
+  const [otherOnline] = presenceLabel(
+    otherForPresence?.last_seen_at ?? null,
+  );
 
   function togglePin(e: React.MouseEvent) {
     e.preventDefault();
@@ -397,17 +407,26 @@ function ConvoRow({
           active && "bg-primary/8 hover:bg-primary/8",
         )}
       >
-        <Avatar className="size-11 shrink-0">
-          <AvatarFallback
-            className="text-sm font-bold"
-            style={{
-              backgroundColor: accent,
-              color: readableTextOn(accent),
-            }}
-          >
-            {isGroup ? <Users className="size-5" /> : initials}
-          </AvatarFallback>
-        </Avatar>
+        <div className="relative shrink-0">
+          <Avatar className="size-11">
+            <AvatarFallback
+              className="text-sm font-bold"
+              style={{
+                backgroundColor: accent,
+                color: readableTextOn(accent),
+              }}
+            >
+              {isGroup ? <Users className="size-5" /> : initials}
+            </AvatarFallback>
+          </Avatar>
+          {otherOnline && (
+            <span
+              className="absolute -bottom-0.5 -right-0.5 size-3 rounded-full bg-emerald-500 border-2 border-card"
+              title="Online"
+              aria-label="Online"
+            />
+          )}
+        </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
             <span

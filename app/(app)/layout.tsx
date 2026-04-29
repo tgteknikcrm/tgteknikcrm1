@@ -5,6 +5,7 @@ import { MobileNav } from "@/components/app/mobile-nav";
 import { Topbar } from "@/components/app/topbar";
 import { SearchFab } from "@/components/app/search-fab";
 import { PwaInstallPrompt } from "@/components/app/pwa-install-prompt";
+import { PresenceHeartbeat } from "@/components/app/presence-heartbeat";
 
 
 export default async function AppLayout({
@@ -49,6 +50,7 @@ export default async function AppLayout({
 
       <SearchFab />
       <PwaInstallPrompt />
+      <PresenceHeartbeat />
     </div>
   );
 }

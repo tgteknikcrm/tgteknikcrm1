@@ -66,6 +66,7 @@ import {
   CHAT_WALLPAPER_COLORS,
   formatWallpaper,
   parseWallpaper,
+  presenceLabel,
   tagMeta,
   type ChatWallpaperPattern,
 } from "@/lib/supabase/types";
@@ -78,7 +79,9 @@ interface Props {
   myParticipant: ConversationParticipant | null;
   initialMessages: MessageWithRelations[];
   currentUserId: string;
-  people: Array<Pick<Profile, "id" | "full_name" | "phone">>;
+  people: Array<
+    Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">
+  >;
 }
 
 function initials(s: string | null | undefined): string {
@@ -144,6 +147,8 @@ export function ChatPanel({
   const [editing, setEditing] = useState<MessageWithRelations | null>(null);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
   const [pendingHeaderAction, startHeaderAction] = useTransition();
+  // userId → expiresAt timestamp for "is currently typing"
+  const [typingMap, setTypingMap] = useState<Map<string, number>>(new Map());
 
   // Reset state whenever the active conversation changes (route change → key
   // changes via parent re-render). The arrays come from props.
@@ -222,10 +227,14 @@ export function ChatPanel({
         formatPhoneForDisplay(directOther?.phone ?? null) ||
         "—";
 
+  const [otherOnline, otherSeenLabel] = presenceLabel(
+    directOther?.last_seen_at ?? null,
+  );
+
   const headerSubtitle =
     conversation.kind === "group"
       ? `${participants.length} üye`
-      : formatPhoneForDisplay(directOther?.phone ?? null);
+      : otherSeenLabel || formatPhoneForDisplay(directOther?.phone ?? null);
 
   // ── Mark-as-read: when this conversation is open, kiss the unread away.
   useEffect(() => {
@@ -317,6 +326,55 @@ export function ChatPanel({
     };
   }, [conversation.id, supabase, profileById, router, currentUserId]);
 
+  // ── Typing indicator: separate broadcast channel.
+  // Composer sends `{ type: "broadcast", event: "typing", payload: { userId } }`
+  // every few seconds while the user is typing. We hold each peer's
+  // userId in `typingMap` with a 5-second TTL so the badge fades out
+  // automatically when they stop.
+  useEffect(() => {
+    const ch = supabase
+      .channel(`typing-${conversation.id}`)
+      .on("broadcast", { event: "typing" }, (payload) => {
+        const uid = (payload.payload as { userId?: string } | undefined)
+          ?.userId;
+        if (!uid || uid === currentUserId) return;
+        setTypingMap((prev) => {
+          const next = new Map(prev);
+          next.set(uid, Date.now() + 5000);
+          return next;
+        });
+      })
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [conversation.id, supabase, currentUserId]);
+
+  // Periodically purge stale typing entries (TTL passed).
+  useEffect(() => {
+    const t = setInterval(() => {
+      setTypingMap((prev) => {
+        const now = Date.now();
+        let changed = false;
+        const next = new Map<string, number>();
+        for (const [k, v] of prev) {
+          if (v > now) next.set(k, v);
+          else changed = true;
+        }
+        return changed ? next : prev;
+      });
+    }, 1500);
+    return () => clearInterval(t);
+  }, []);
+
+  const typingUsers = Array.from(typingMap.entries())
+    .filter(([uid, exp]) => uid !== currentUserId && exp > Date.now())
+    .map(([uid]) => profileById.get(uid))
+    .filter(
+      (p): p is Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at"> =>
+        !!p,
+    );
+
   // ── Auto-scroll to bottom on new messages.
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -360,21 +418,30 @@ export function ChatPanel({
             <ArrowLeft className="size-4" />
           </a>
         </Button>
-        <Avatar
-          className="size-9 shrink-0"
-          style={{ backgroundColor: accent }}
-        >
-          <AvatarFallback
-            style={{ backgroundColor: accent, color: accentText }}
-            className="text-xs font-bold"
+        <div className="relative shrink-0">
+          <Avatar
+            className="size-9"
+            style={{ backgroundColor: accent }}
           >
-            {conversation.kind === "group" ? (
-              <Users className="size-4" />
-            ) : (
-              initials(headerTitle)
-            )}
-          </AvatarFallback>
-        </Avatar>
+            <AvatarFallback
+              style={{ backgroundColor: accent, color: accentText }}
+              className="text-xs font-bold"
+            >
+              {conversation.kind === "group" ? (
+                <Users className="size-4" />
+              ) : (
+                initials(headerTitle)
+              )}
+            </AvatarFallback>
+          </Avatar>
+          {conversation.kind === "direct" && otherOnline && (
+            <span
+              className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-emerald-500 border-2 border-card"
+              title="Online"
+              aria-label="Online"
+            />
+          )}
+        </div>
         <div className="min-w-0 flex-1">
           <div className="font-semibold text-sm truncate leading-tight flex items-center gap-1.5">
             {isPinned && (
@@ -576,6 +643,34 @@ export function ChatPanel({
           </div>
         ))}
       </div>
+
+      {/* Typing indicator — sits between feed and composer */}
+      {typingUsers.length > 0 && (
+        <div className="px-4 py-1.5 text-xs text-muted-foreground border-t bg-card/30 flex items-center gap-2 animate-tg-fade-in">
+          <span className="flex items-center gap-0.5">
+            <span
+              className="size-1.5 rounded-full bg-primary animate-bounce"
+              style={{ animationDelay: "0ms" }}
+            />
+            <span
+              className="size-1.5 rounded-full bg-primary animate-bounce"
+              style={{ animationDelay: "150ms" }}
+            />
+            <span
+              className="size-1.5 rounded-full bg-primary animate-bounce"
+              style={{ animationDelay: "300ms" }}
+            />
+          </span>
+          <span>
+            <strong>
+              {typingUsers
+                .map((p) => p.full_name?.split(" ")[0] || "Birisi")
+                .join(", ")}
+            </strong>{" "}
+            yazıyor…
+          </span>
+        </div>
+      )}
 
       {/* Composer */}
       <MessageComposer
@@ -945,16 +1040,54 @@ function BubbleActionMenu({
 /* ──────────────────────────────────────────────────────────────────
    Attachment preview: image inline, PDF/file as styled link.
    Module-level cache prevents re-fetching signed URLs (and thus
-   re-downloading images) on every re-render of the chat feed.
+   re-downloading images) on every re-render of the chat feed. We
+   also dedupe in-flight requests so React Strict-Mode's double
+   useEffect or rapid scrolls don't fire two roundtrips for the same
+   path.
    ────────────────────────────────────────────────────────────────── */
 
 interface SignedUrlEntry {
   url: string;
-  // Treat URLs as fresh for ~50 minutes (Supabase TTL is 1h with a small safety margin).
   expiresAt: number;
 }
 const URL_CACHE = new Map<string, SignedUrlEntry>();
-const URL_TTL_MS = 50 * 60 * 1000;
+const URL_INFLIGHT = new Map<string, Promise<string | null>>();
+// 7 days — safe well below the upper bound and means a user that opens
+// the chat will reuse the same URL for the rest of their session, so
+// the browser's HTTP cache hits on every subsequent render.
+const URL_TTL_S = 7 * 24 * 60 * 60;
+// Refresh client-side a bit before the URL actually expires.
+const URL_REFRESH_MS = (URL_TTL_S - 6 * 60 * 60) * 1000;
+
+async function fetchSignedUrl(
+  supabase: ReturnType<typeof createClient>,
+  storagePath: string,
+): Promise<string | null> {
+  const cached = URL_CACHE.get(storagePath);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+  const inflight = URL_INFLIGHT.get(storagePath);
+  if (inflight) return inflight;
+  const promise = (async () => {
+    const { data, error } = await supabase.storage
+      .from("message-attachments")
+      .createSignedUrl(storagePath, URL_TTL_S);
+    if (error) {
+      URL_INFLIGHT.delete(storagePath);
+      return null;
+    }
+    const url = data?.signedUrl ?? null;
+    if (url) {
+      URL_CACHE.set(storagePath, {
+        url,
+        expiresAt: Date.now() + URL_REFRESH_MS,
+      });
+    }
+    URL_INFLIGHT.delete(storagePath);
+    return url;
+  })();
+  URL_INFLIGHT.set(storagePath, promise);
+  return promise;
+}
 
 const RawAttachmentPreview = function AttachmentPreview({
   attachment: a,
@@ -965,37 +1098,27 @@ const RawAttachmentPreview = function AttachmentPreview({
   supabase: ReturnType<typeof createClient>;
   onDark: boolean;
 }) {
+  // Synchronously read the cache so the first paint already has the URL
+  // when we've seen this attachment before. Avoids the "loader → swap"
+  // flash and ensures the <img src> stays stable across renders.
   const cached = URL_CACHE.get(a.storage_path);
-  const cachedFresh = cached && cached.expiresAt > Date.now();
+  const cachedFresh = !!cached && cached.expiresAt > Date.now();
   const [signedUrl, setSignedUrl] = useState<string | null>(
-    cachedFresh ? cached.url : null,
+    cachedFresh ? cached!.url : null,
   );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (cachedFresh) {
-      setSignedUrl(cached!.url);
-      return;
-    }
+    if (cachedFresh) return; // already painted from cache
     let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase.storage
-        .from("message-attachments")
-        .createSignedUrl(a.storage_path, 60 * 60); // 1 hour
+    void fetchSignedUrl(supabase, a.storage_path).then((url) => {
       if (cancelled) return;
-      if (error) {
-        setError(error.message);
+      if (!url) {
+        setError("URL alınamadı");
         return;
       }
-      const url = data?.signedUrl ?? null;
-      if (url) {
-        URL_CACHE.set(a.storage_path, {
-          url,
-          expiresAt: Date.now() + URL_TTL_MS,
-        });
-        setSignedUrl(url);
-      }
-    })();
+      setSignedUrl(url);
+    });
     return () => {
       cancelled = true;
     };
@@ -1006,6 +1129,11 @@ const RawAttachmentPreview = function AttachmentPreview({
   const sizeKb = (a.size_bytes / 1024).toFixed(0);
 
   if (isImage && signedUrl) {
+    // Use Supabase image transform for the inline thumb (resize to 600px wide,
+    // re-encode as webp). Click-through link points to the original URL so
+    // users can still see the full-size file.
+    const sep = signedUrl.includes("?") ? "&" : "?";
+    const thumbUrl = `${signedUrl}${sep}width=600&resize=contain&quality=80`;
     return (
       <a
         href={signedUrl}
@@ -1015,8 +1143,10 @@ const RawAttachmentPreview = function AttachmentPreview({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={signedUrl}
+          src={thumbUrl}
           alt={a.file_name}
+          loading="lazy"
+          decoding="async"
           className="block max-h-64 w-auto"
         />
       </a>

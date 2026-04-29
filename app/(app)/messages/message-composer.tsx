@@ -153,6 +153,11 @@ export function MessageComposer({
   onOptimisticFail,
 }: Props) {
   const supabase = createClient();
+  // Hold the typing channel for the lifetime of this composer mount so
+  // we can broadcast "is typing" pings without re-subscribing on every
+  // keystroke. Throttled to one ping every ~3s.
+  const typingChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const lastTypingPingRef = useRef(0);
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false); // only used for the edit-save spinner
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -173,6 +178,28 @@ export function MessageComposer({
     setAttachments([]);
     setText("");
   }, [conversationId]);
+
+  // Typing broadcast channel — one per conversation.
+  useEffect(() => {
+    const ch = supabase.channel(`typing-${conversationId}`);
+    typingChannelRef.current = ch;
+    ch.subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+      typingChannelRef.current = null;
+    };
+  }, [conversationId, supabase]);
+
+  function announceTyping() {
+    const now = Date.now();
+    if (now - lastTypingPingRef.current < 3000) return;
+    lastTypingPingRef.current = now;
+    typingChannelRef.current?.send({
+      type: "broadcast",
+      event: "typing",
+      payload: { userId: currentUserId },
+    });
+  }
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -558,7 +585,10 @@ export function MessageComposer({
         <textarea
           ref={textareaRef}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            if (e.target.value.trim()) announceTyping();
+          }}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
           placeholder={editing ? "Mesajı düzenle…" : "Mesaj yaz…"}
