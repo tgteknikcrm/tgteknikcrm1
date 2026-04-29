@@ -60,8 +60,8 @@ import {
 import { MachineDialog } from "../machine-dialog";
 import { StatusButton } from "../status-button";
 import { LiveTelemetry } from "./live-telemetry";
-import { MachineTimeline } from "./timeline";
-import { getMachineTimeline } from "./timeline-data";
+// MachineTimeline removed from this page (2026-04-29) — kept available
+// in components for future use elsewhere.
 import { getProfile } from "@/lib/supabase/server";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -117,20 +117,7 @@ export default async function MachineDetailPage({
   const machine = machineRes.data as Machine;
 
   const profile = await getProfile();
-  const timeline = await getMachineTimeline(supabase, id);
-  const commentsObj: Record<string, ReturnType<typeof Array.from> extends infer T ? T : never> = {};
-  // Convert Map → plain object for client component prop
-  const commentsRecord: Record<string, Array<{
-    id: string;
-    body: string;
-    author_id: string | null;
-    author_name: string | null;
-    created_at: string;
-  }>> = {};
-  for (const [k, v] of timeline.comments.entries()) {
-    commentsRecord[k] = v;
-  }
-  void commentsObj;
+  void profile;
 
   const [entriesRes, weekRes, todayStatsRes, jobsRes] = await Promise.all([
     supabase
@@ -405,9 +392,8 @@ export default async function MachineDetailPage({
         }))}
       />
 
-      {/* TWO-COLUMN: machine detail (LEFT, compact) + timeline (RIGHT, main feed) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
-        <div className="lg:col-span-5 space-y-4 lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto lg:pr-1">
+      {/* Machine detail — single column (timeline removed 2026-04-29) */}
+      <div className="space-y-4">
 
       {/* KPI STRIP — 2x2 in narrow left column */}
       <div className="grid grid-cols-2 gap-3">
@@ -816,17 +802,6 @@ export default async function MachineDetailPage({
         </CardContent>
       </Card>
 
-        </div>
-        {/* RIGHT COLUMN — main timeline feed */}
-        <div className="lg:col-span-7">
-          <MachineTimeline
-            machineId={machine.id}
-            items={timeline.items}
-            comments={commentsRecord}
-            currentUserId={profile?.id ?? null}
-            isAdmin={profile?.role === "admin"}
-          />
-        </div>
       </div>
 
     </>

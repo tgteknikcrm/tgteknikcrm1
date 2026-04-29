@@ -56,8 +56,15 @@ export function SearchFab() {
         setOpen((v) => !v);
       }
     };
+    // Custom event so other components (e.g. the Topbar search button) can
+    // open this command palette without dispatching synthetic keyboard events.
+    const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("tg-open-search", onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("tg-open-search", onOpen);
+    };
   }, []);
 
   const runSearch = useCallback(async (term: string) => {

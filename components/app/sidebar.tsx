@@ -9,7 +9,6 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { formatPhoneForDisplay } from "@/lib/phone";
 import { signOut } from "@/app/(auth)/login/actions";
-import { NotificationBell } from "./notification-bell";
 
 interface SidebarProps {
   isAdmin: boolean;
@@ -72,12 +71,8 @@ export function Sidebar({ isAdmin, onNavigate, profile }: SidebarProps) {
         })}
       </nav>
 
-      <div className="px-3 pb-2 border-t border-sidebar-border pt-2">
-        <NotificationBell />
-      </div>
-
       {profile && (
-        <div className="border-t border-sidebar-border p-3">
+        <div className="mt-auto border-t border-sidebar-border p-3">
           <div className="flex items-center gap-2.5 rounded-md px-2 py-2">
             <Avatar className="size-9 shrink-0">
               <AvatarFallback className="text-xs font-semibold bg-sidebar-primary/15 text-sidebar-primary">

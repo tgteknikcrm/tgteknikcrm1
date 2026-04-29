@@ -36,7 +36,11 @@ const FILTERS: { key: "all" | ActivityCategory; label: string }[] = [
   { key: "kullanici", label: "Kullanıcı" },
 ];
 
-export function NotificationBell() {
+export function NotificationBell({
+  variant = "list",
+}: {
+  variant?: "list" | "icon";
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<ActivityEvent[]>([]);
@@ -115,25 +119,45 @@ export function NotificationBell() {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="relative h-9 w-full justify-start gap-2 px-3 font-medium"
-          title="Bildirimler"
-        >
-          <Bell className={cn("size-4", unreadCount > 0 && "animate-pulse")} />
-          <span className="text-sm">Bildirimler</span>
-          {unreadCount > 0 && (
-            <Badge
-              className={cn(
-                "ml-auto h-5 min-w-5 px-1.5 text-[10px] tabular-nums",
-                "bg-red-500 hover:bg-red-500 text-white",
-              )}
-            >
-              {unreadCount > 99 ? "99+" : unreadCount}
-            </Badge>
-          )}
-        </Button>
+        {variant === "icon" ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="relative size-9"
+            title="Bildirimler"
+          >
+            <Bell
+              className={cn("size-5", unreadCount > 0 && "animate-pulse")}
+            />
+            {unreadCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 h-4 min-w-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center tabular-nums shadow">
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </span>
+            )}
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="relative h-9 w-full justify-start gap-2 px-3 font-medium"
+            title="Bildirimler"
+          >
+            <Bell
+              className={cn("size-4", unreadCount > 0 && "animate-pulse")}
+            />
+            <span className="text-sm">Bildirimler</span>
+            {unreadCount > 0 && (
+              <Badge
+                className={cn(
+                  "ml-auto h-5 min-w-5 px-1.5 text-[10px] tabular-nums",
+                  "bg-red-500 hover:bg-red-500 text-white",
+                )}
+              >
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </Badge>
+            )}
+          </Button>
+        )}
       </SheetTrigger>
 
       <SheetContent
