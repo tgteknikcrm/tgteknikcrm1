@@ -928,6 +928,114 @@ export const CALENDAR_ATTENDEE_LABEL: Record<CalendarAttendeeStatus, string> = {
   tentative: "Belki",
 };
 
+// ── Tasks ───────────────────────────────────────────────────────────
+export type TaskStatus = "todo" | "in_progress" | "done" | "cancelled";
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+
+export interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  due_date: string | null;
+  assigned_to: string | null;
+  job_id: string | null;
+  machine_id: string | null;
+  tags: string[];
+  created_by: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskChecklistItem {
+  id: string;
+  task_id: string;
+  body: string;
+  done: boolean;
+  position: number;
+  created_at: string;
+}
+
+export interface TaskComment {
+  id: string;
+  task_id: string;
+  author_id: string | null;
+  body: string;
+  created_at: string;
+}
+
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: "Yapılacak",
+  in_progress: "Devam Ediyor",
+  done: "Tamamlandı",
+  cancelled: "İptal",
+};
+
+export const TASK_STATUS_TONE: Record<
+  TaskStatus,
+  { bg: string; text: string; dot: string; border: string }
+> = {
+  todo: {
+    bg: "bg-zinc-500/10",
+    text: "text-zinc-700 dark:text-zinc-300",
+    dot: "bg-zinc-500",
+    border: "border-zinc-500/30",
+  },
+  in_progress: {
+    bg: "bg-blue-500/10",
+    text: "text-blue-700 dark:text-blue-300",
+    dot: "bg-blue-500",
+    border: "border-blue-500/30",
+  },
+  done: {
+    bg: "bg-emerald-500/10",
+    text: "text-emerald-700 dark:text-emerald-300",
+    dot: "bg-emerald-500",
+    border: "border-emerald-500/30",
+  },
+  cancelled: {
+    bg: "bg-rose-500/10",
+    text: "text-rose-700 dark:text-rose-300",
+    dot: "bg-rose-500",
+    border: "border-rose-500/30",
+  },
+};
+
+export const TASK_PRIORITY_LABEL: Record<TaskPriority, string> = {
+  low: "Düşük",
+  medium: "Orta",
+  high: "Yüksek",
+  urgent: "Acil",
+};
+
+export const TASK_PRIORITY_TONE: Record<
+  TaskPriority,
+  { bg: string; text: string; ring: string }
+> = {
+  low: {
+    bg: "bg-zinc-500/15",
+    text: "text-zinc-700 dark:text-zinc-300",
+    ring: "ring-zinc-500/40",
+  },
+  medium: {
+    bg: "bg-amber-500/15",
+    text: "text-amber-700 dark:text-amber-300",
+    ring: "ring-amber-500/40",
+  },
+  high: {
+    bg: "bg-orange-500/15",
+    text: "text-orange-700 dark:text-orange-300",
+    ring: "ring-orange-500/40",
+  },
+  urgent: {
+    bg: "bg-red-500/15",
+    text: "text-red-700 dark:text-red-300",
+    ring: "ring-red-500/40",
+  },
+};
+
 // Predefined Outlook-style label palette (key + bg/text classes + name)
 export const CONVERSATION_TAG_PRESETS: ReadonlyArray<{
   key: string;
