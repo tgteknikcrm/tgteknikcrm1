@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +21,7 @@ type View = "month" | "week" | "day";
 
 interface Props {
   view: View;
-  anchor: string; // YYYY-MM-DD
+  anchor: string; // YYYY-MM-DD — initial values, then fully client-driven
   todayISO: string;
   events: CalendarEvent[];
   attendees: CalendarEventAttendee[];
@@ -31,6 +30,12 @@ interface Props {
   machines: Pick<Machine, "id" | "name">[];
   currentUserId: string;
 }
+
+// Whole calendar shell is client-state-driven: view + anchor live in
+// React state, URL is mirrored via pushState so refresh / share still
+// work, and navigation never triggers a server roundtrip. The initial
+// payload from page.tsx covers a wide window (~3mo back, 9mo ahead),
+// so flipping months/weeks/days is instant.
 
 const TR_MONTHS = [
   "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
@@ -58,8 +63,8 @@ function addMonthsISO(iso: string, n: number) {
 }
 
 export function CalendarShell({
-  view,
-  anchor,
+  view: initialView,
+  anchor: initialAnchor,
   todayISO,
   events,
   attendees,
@@ -69,6 +74,8 @@ export function CalendarShell({
   currentUserId,
 }: Props) {
   const router = useRouter();
+  const [view, setView] = useState<View>(initialView);
+  const [anchor, setAnchor] = useState<string>(initialAnchor);
   const [editEvent, setEditEvent] = useState<CalendarEvent | null>(null);
   const [createPrefill, setCreatePrefill] = useState<{
     starts_at: string;
@@ -76,23 +83,38 @@ export function CalendarShell({
     all_day: boolean;
   } | null>(null);
 
-  // Realtime: refresh on any event/attendee change
+  // Mirror state into the URL so refresh / share still work, but never
+  // trigger a server re-render: pushState is a no-op for Next router.
+  const syncUrl = useCallback((nextView: View, nextAnchor: string) => {
+    if (typeof window === "undefined") return;
+    const url = `/calendar?view=${nextView}&date=${nextAnchor}`;
+    window.history.replaceState({}, "", url);
+  }, []);
+
+  // Realtime: keep the cached events fresh. Debounced so a burst of
+  // RSVP updates only triggers one server fetch.
   useEffect(() => {
     const supabase = createClient();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => router.refresh(), 250);
+    };
     const ch = supabase
       .channel("calendar-feed")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "calendar_events" },
-        () => router.refresh(),
+        schedule,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "calendar_event_attendees" },
-        () => router.refresh(),
+        schedule,
       )
       .subscribe();
     return () => {
+      if (timer) clearTimeout(timer);
       supabase.removeChannel(ch);
     };
   }, [router]);
@@ -100,10 +122,17 @@ export function CalendarShell({
   function navigate(direction: "prev" | "next" | "today") {
     let nextAnchor = anchor;
     if (direction === "today") nextAnchor = todayISO;
-    else if (view === "month") nextAnchor = addMonthsISO(anchor, direction === "next" ? 1 : -1);
-    else if (view === "week") nextAnchor = addDaysISO(anchor, direction === "next" ? 7 : -7);
+    else if (view === "month")
+      nextAnchor = addMonthsISO(anchor, direction === "next" ? 1 : -1);
+    else if (view === "week")
+      nextAnchor = addDaysISO(anchor, direction === "next" ? 7 : -7);
     else nextAnchor = addDaysISO(anchor, direction === "next" ? 1 : -1);
-    router.push(`/calendar?view=${view}&date=${nextAnchor}`);
+    setAnchor(nextAnchor);
+    syncUrl(view, nextAnchor);
+  }
+  function changeView(v: View) {
+    setView(v);
+    syncUrl(v, anchor);
   }
 
   const titleLabel = useMemo(() => {
@@ -181,7 +210,7 @@ export function CalendarShell({
         </div>
 
         <div className="ml-auto flex items-center gap-1">
-          <ViewSwitcher view={view} anchor={anchor} />
+          <ViewSwitcher view={view} onChange={changeView} />
           <EventDialog
             currentUserId={currentUserId}
             people={people}
@@ -259,13 +288,20 @@ export function CalendarShell({
   );
 }
 
-function ViewSwitcher({ view, anchor }: { view: View; anchor: string }) {
+function ViewSwitcher({
+  view,
+  onChange,
+}: {
+  view: View;
+  onChange: (v: View) => void;
+}) {
   return (
     <div className="inline-flex items-center gap-0.5 rounded-lg border bg-card p-0.5 shadow-sm">
       {(["month", "week", "day"] as const).map((v) => (
-        <Link
+        <button
           key={v}
-          href={`/calendar?view=${v}&date=${anchor}`}
+          type="button"
+          onClick={() => onChange(v)}
           className={cn(
             "px-2.5 py-1 rounded-md text-xs font-medium transition",
             view === v
@@ -274,7 +310,7 @@ function ViewSwitcher({ view, anchor }: { view: View; anchor: string }) {
           )}
         >
           {v === "month" ? "Ay" : v === "week" ? "Hafta" : "Gün"}
-        </Link>
+        </button>
       ))}
     </div>
   );

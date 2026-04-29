@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,7 +32,6 @@ import {
   CalendarDays,
   CheckCircle2,
   AlertTriangle,
-  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -87,31 +86,43 @@ export function TasksShell({
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  const [pendingMove, startMove] = useTransition();
+  // Optimistic status overrides (taskId → status) so the card jumps to
+  // the new column instantly on drop. Cleared automatically when the
+  // realtime push or the next server render brings the new state.
+  const [statusOverrides, setStatusOverrides] = useState<
+    Map<string, TaskStatus>
+  >(new Map());
 
-  // Realtime: refresh on any task change (insert/update/delete) +
-  // checklist + comments. Cheap because the page is a server component.
+  // Realtime: refresh on any task change. Debounced so a burst of
+  // updates (drop + status touch + checklist tick) only triggers one
+  // server roundtrip instead of three.
   useEffect(() => {
     const supabase = createClient();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => router.refresh(), 250);
+    };
     const ch = supabase
       .channel("tasks-feed")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "tasks" },
-        () => router.refresh(),
+        schedule,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "task_checklist" },
-        () => router.refresh(),
+        schedule,
       )
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "task_comments" },
-        () => router.refresh(),
+        schedule,
       )
       .subscribe();
     return () => {
+      if (timer) clearTimeout(timer);
       supabase.removeChannel(ch);
     };
   }, [router]);
@@ -122,9 +133,19 @@ export function TasksShell({
   );
 
   const today = todayISO();
+  // Apply optimistic status overrides on top of server data.
+  const tasksWithOverride = useMemo(
+    () =>
+      tasks.map((t) =>
+        statusOverrides.has(t.id)
+          ? { ...t, status: statusOverrides.get(t.id)! }
+          : t,
+      ),
+    [tasks, statusOverrides],
+  );
   const filtered = useMemo(() => {
     const term = q.trim().toLocaleLowerCase("tr");
-    return tasks.filter((t) => {
+    return tasksWithOverride.filter((t) => {
       // scope
       if (scope === "mine" && t.assigned_to !== currentUserId) return false;
       if (scope === "created" && t.created_by !== currentUserId) return false;
@@ -142,7 +163,7 @@ export function TasksShell({
       }
       return true;
     });
-  }, [tasks, scope, q, today, currentUserId]);
+  }, [tasksWithOverride, scope, q, today, currentUserId]);
 
   const tasksByStatus = useMemo(() => {
     const m: Record<TaskStatus, Task[]> = {
@@ -193,10 +214,34 @@ export function TasksShell({
     if (!id) return;
     const task = tasks.find((t) => t.id === id);
     if (!task || task.status === status) return;
-    startMove(async () => {
-      const r = await setTaskStatus(id, status);
-      if (r.error) toast.error(r.error);
-      router.refresh();
+    // 1. Optimistic — card jumps to the new column on the next paint.
+    setStatusOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(id, status);
+      return next;
+    });
+    // 2. Fire-and-forget — Realtime + the server-side revalidate will
+    //    bring the canonical state back; we just clean up the override.
+    void setTaskStatus(id, status).then((r) => {
+      if (r.error) {
+        toast.error(r.error);
+        setStatusOverrides((prev) => {
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
+        return;
+      }
+      // Drop the override after a short delay so the realtime row
+      // (or next refresh) has time to land. If they collide, the
+      // canonical row wins (same value anyway).
+      setTimeout(() => {
+        setStatusOverrides((prev) => {
+          const next = new Map(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 1500);
     });
   }
 
@@ -262,13 +307,6 @@ export function TasksShell({
           tone="bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30"
         />
       </div>
-
-      {/* Loading bar while a status move is committing */}
-      {pendingMove && (
-        <div className="text-xs text-muted-foreground mb-2 flex items-center gap-1.5 animate-tg-fade-in">
-          <Loader2 className="size-3 animate-spin" /> Güncelleniyor…
-        </div>
-      )}
 
       {view === "kanban" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">

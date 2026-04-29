@@ -33,30 +33,13 @@ export default async function CalendarPage({
   }).format(new Date());
   const anchor = sp.date && /^\d{4}-\d{2}-\d{2}$/.test(sp.date) ? sp.date : todayTR;
 
-  // Compute the visible window based on the view, then over-fetch a bit
-  // so navigating doesn't re-roundtrip immediately.
-  const [y, m, d] = anchor.split("-").map(Number);
-  const anchorDate = new Date(Date.UTC(y, m - 1, d));
-  let from: Date;
-  let to: Date;
-  if (view === "month") {
-    // 6-week visible grid: last few days of prev month + entire month + first few of next.
-    const first = new Date(Date.UTC(y, m - 1, 1));
-    const dow = (first.getUTCDay() + 6) % 7; // Mon-first
-    from = new Date(Date.UTC(y, m - 1, 1 - dow));
-    to = new Date(from.getTime());
-    to.setUTCDate(from.getUTCDate() + 42);
-  } else if (view === "week") {
-    const dow = (anchorDate.getUTCDay() + 6) % 7;
-    from = new Date(anchorDate.getTime());
-    from.setUTCDate(anchorDate.getUTCDate() - dow);
-    to = new Date(from.getTime());
-    to.setUTCDate(from.getUTCDate() + 7);
-  } else {
-    from = new Date(anchorDate.getTime());
-    to = new Date(anchorDate.getTime());
-    to.setUTCDate(anchorDate.getUTCDate() + 1);
-  }
+  // Wide initial window so the shell can navigate months/weeks/days
+  // without ever round-tripping the server. We pull 3 months back to
+  // 9 months forward — that covers the typical user's calendar working
+  // set and keeps client-side navigation instant.
+  const [y, m] = anchor.split("-").map(Number);
+  const from = new Date(Date.UTC(y, m - 1 - 3, 1));
+  const to = new Date(Date.UTC(y, m - 1 + 9, 1));
 
   const supabase = await createClient();
   const [eventsRes, attendeesRes, peopleRes, jobsRes, machinesRes] = await Promise.all([
