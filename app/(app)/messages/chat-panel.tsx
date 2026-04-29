@@ -28,6 +28,11 @@ import {
   Settings,
   Check,
   CheckCheck,
+  Pin,
+  PinOff,
+  Archive,
+  ArchiveRestore,
+  Tag,
 } from "lucide-react";
 import {
   CONVERSATION_COLOR_PRESETS,
@@ -51,12 +56,20 @@ import {
   renameConversation,
   setConversationColor,
   addParticipant,
+  setConversationArchived,
+  setConversationPinned,
+  setConversationTags,
 } from "./actions";
+import {
+  CONVERSATION_TAG_PRESETS,
+  tagMeta,
+} from "@/lib/supabase/types";
 import { MessageComposer } from "./message-composer";
 
 interface Props {
   conversation: Conversation;
   participants: ConversationParticipant[];
+  myParticipant: ConversationParticipant | null;
   initialMessages: MessageWithRelations[];
   currentUserId: string;
   people: Array<Pick<Profile, "id" | "full_name" | "phone">>;
@@ -102,6 +115,7 @@ function formatDayLabel(iso: string): string {
 export function ChatPanel({
   conversation,
   participants: initialParticipants,
+  myParticipant,
   initialMessages,
   currentUserId,
   people,
@@ -117,6 +131,8 @@ export function ChatPanel({
   const [participants, setParticipants] = useState(initialParticipants);
   const [replyTo, setReplyTo] = useState<MessageWithRelations | null>(null);
   const [editing, setEditing] = useState<MessageWithRelations | null>(null);
+  const [tagPickerOpen, setTagPickerOpen] = useState(false);
+  const [pendingHeaderAction, startHeaderAction] = useTransition();
 
   // Reset state whenever the active conversation changes (route change → key
   // changes via parent re-render). The arrays come from props.
@@ -125,7 +141,39 @@ export function ChatPanel({
     setParticipants(initialParticipants);
     setReplyTo(null);
     setEditing(null);
+    setTagPickerOpen(false);
   }, [conversation.id, initialMessages, initialParticipants]);
+
+  const isPinned = !!myParticipant?.pinned_at;
+  const isArchived = !!myParticipant?.archived_at;
+  const myTags = myParticipant?.tags ?? [];
+
+  function doPin() {
+    startHeaderAction(async () => {
+      const r = await setConversationPinned(conversation.id, !isPinned);
+      if (r.error) toast.error(r.error);
+      else toast.success(isPinned ? "Sabitleme kaldırıldı" : "Sabitlendi");
+      router.refresh();
+    });
+  }
+  function doArchive() {
+    startHeaderAction(async () => {
+      const r = await setConversationArchived(conversation.id, !isArchived);
+      if (r.error) toast.error(r.error);
+      else toast.success(isArchived ? "Arşivden çıkarıldı" : "Arşivlendi");
+      router.refresh();
+    });
+  }
+  function toggleTag(key: string) {
+    const next = myTags.includes(key)
+      ? myTags.filter((t) => t !== key)
+      : [...myTags, key];
+    startHeaderAction(async () => {
+      const r = await setConversationTags(conversation.id, next);
+      if (r.error) toast.error(r.error);
+      router.refresh();
+    });
+  }
 
   const accent = conversation.color || "#3b82f6";
   const accentText = readableTextOn(accent);
@@ -286,20 +334,130 @@ export function ChatPanel({
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1">
-          <div className="font-semibold text-sm truncate leading-tight">
+          <div className="font-semibold text-sm truncate leading-tight flex items-center gap-1.5">
+            {isPinned && (
+              <Pin className="size-3 shrink-0 text-amber-500 fill-amber-500" />
+            )}
             {headerTitle}
+            {isArchived && (
+              <Badge
+                variant="outline"
+                className="h-4 text-[9px] bg-zinc-500/10"
+              >
+                Arşivde
+              </Badge>
+            )}
           </div>
-          <div className="text-[11px] text-muted-foreground truncate">
-            {headerSubtitle}
+          <div className="text-[11px] text-muted-foreground truncate flex items-center gap-1.5">
+            <span>{headerSubtitle}</span>
+            {myTags.length > 0 && (
+              <span className="flex gap-1 flex-wrap">
+                {myTags.map((t) => {
+                  const meta = tagMeta(t);
+                  return (
+                    <span
+                      key={t}
+                      className={cn(
+                        "inline-flex items-center gap-1 px-1.5 h-4 rounded-full text-[9px] font-semibold",
+                        meta.bg,
+                        meta.text,
+                      )}
+                    >
+                      <span
+                        className={cn("size-1.5 rounded-full", meta.dot)}
+                      />
+                      {meta.name}
+                    </span>
+                  );
+                })}
+              </span>
+            )}
           </div>
         </div>
-        <ConversationSettings
-          conversation={conversation}
-          participants={participants}
-          people={people}
-          currentUserId={currentUserId}
-          accent={accent}
-        />
+
+        {/* Outlook-style action toolbar (pin / archive / tag / settings) */}
+        <div className="flex items-center gap-0.5 shrink-0">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={doPin}
+            disabled={pendingHeaderAction}
+            className="size-9 transition hover:scale-105"
+            title={isPinned ? "Sabitlemeyi kaldır" : "Sabitle"}
+          >
+            {pendingHeaderAction ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : isPinned ? (
+              <PinOff className="size-4" />
+            ) : (
+              <Pin className="size-4" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={doArchive}
+            disabled={pendingHeaderAction}
+            className="size-9 transition hover:scale-105"
+            title={isArchived ? "Arşivden çıkar" : "Arşivle"}
+          >
+            {isArchived ? (
+              <ArchiveRestore className="size-4" />
+            ) : (
+              <Archive className="size-4" />
+            )}
+          </Button>
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setTagPickerOpen((v) => !v)}
+              disabled={pendingHeaderAction}
+              className="size-9 transition hover:scale-105"
+              title="Etiketle"
+            >
+              <Tag className="size-4" />
+            </Button>
+            {tagPickerOpen && (
+              <div
+                className="absolute z-30 right-0 top-full mt-1 w-48 rounded-lg border bg-popover shadow-lg p-1.5 animate-tg-fade-in"
+                onMouseLeave={() => setTagPickerOpen(false)}
+              >
+                <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground px-1.5 py-1">
+                  Etiketler
+                </div>
+                {CONVERSATION_TAG_PRESETS.filter(
+                  (t) => t.key !== "arsiv",
+                ).map((t) => {
+                  const checked = myTags.includes(t.key);
+                  return (
+                    <button
+                      key={t.key}
+                      type="button"
+                      onClick={() => toggleTag(t.key)}
+                      className="w-full flex items-center gap-2 px-1.5 py-1.5 rounded text-xs transition hover:bg-muted"
+                    >
+                      <span
+                        className={cn("size-2 rounded-full", t.dot)}
+                      />
+                      <span className="flex-1 text-left">{t.name}</span>
+                      {checked && (
+                        <Check className="size-3.5 text-primary" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <ConversationSettings
+            conversation={conversation}
+            participants={participants}
+            people={people}
+            currentUserId={currentUserId}
+            accent={accent}
+          />
+        </div>
       </header>
 
       {/* Messages feed */}
@@ -328,12 +486,28 @@ export function ChatPanel({
                   new Date(m.created_at).getTime() -
                     new Date(prev.created_at).getTime() <
                     60 * 1000;
+                const fromMe = m.author_id === currentUserId;
+                // Read receipt: if any other participant's last_read_at is
+                // after this message's created_at, treat it as "seen".
+                let receipt: "sent" | "delivered" | "seen" = "sent";
+                if (fromMe) {
+                  const others = participants.filter(
+                    (p) => p.user_id !== currentUserId,
+                  );
+                  const seenByAny = others.some(
+                    (p) =>
+                      p.last_read_at &&
+                      new Date(p.last_read_at) >= new Date(m.created_at),
+                  );
+                  receipt = seenByAny ? "seen" : "delivered";
+                }
                 return (
                   <MessageBubble
                     key={m.id}
                     message={m}
-                    fromMe={m.author_id === currentUserId}
+                    fromMe={fromMe}
                     consecutive={!!consecutive}
+                    receipt={receipt}
                     showAuthorName={
                       conversation.kind === "group" &&
                       !consecutive &&
@@ -376,6 +550,7 @@ function MessageBubble({
   message: m,
   fromMe,
   consecutive,
+  receipt,
   showAuthorName,
   accent,
   accentText,
@@ -386,6 +561,7 @@ function MessageBubble({
   message: MessageWithRelations;
   fromMe: boolean;
   consecutive: boolean;
+  receipt: "sent" | "delivered" | "seen";
   showAuthorName: boolean;
   accent: string;
   accentText: string;
@@ -412,7 +588,7 @@ function MessageBubble({
   return (
     <div
       className={cn(
-        "group/msg flex gap-2 max-w-full",
+        "group/msg flex gap-2 max-w-full animate-tg-fade-in",
         fromMe ? "flex-row-reverse" : "flex-row",
       )}
     >
@@ -518,7 +694,9 @@ function MessageBubble({
               {m.edited_at && !isDeleted && (
                 <span title="düzenlendi">·düzenlendi</span>
               )}
-              {fromMe && !isDeleted && <CheckCheck className="size-3" />}
+              {fromMe && !isDeleted && (
+                <ReadReceipt receipt={receipt} accentText={accentText} />
+              )}
             </div>
           </div>
           {!fromMe && (
@@ -540,6 +718,37 @@ function MessageBubble({
       </div>
     </div>
   );
+}
+
+/**
+ * WhatsApp-style read receipt:
+ *  - "sent"  → single grey tick (saved to DB, not yet read)
+ *  - "seen"  → double blue tick (at least one other participant has
+ *              last_read_at >= the message's created_at)
+ *
+ * `delivered` is treated identically to `sent` here because we don't
+ * track per-device delivery — the moment Realtime pushes the row, all
+ * participants effectively have it.
+ */
+function ReadReceipt({
+  receipt,
+  accentText,
+}: {
+  receipt: "sent" | "delivered" | "seen";
+  accentText: string;
+}) {
+  if (receipt === "seen") {
+    return (
+      <CheckCheck
+        className="size-3.5"
+        style={{ color: "#38bdf8" /* sky-400 — pops on dark accents */ }}
+      />
+    );
+  }
+  if (receipt === "delivered") {
+    return <CheckCheck className="size-3.5" style={{ color: accentText }} />;
+  }
+  return <Check className="size-3.5" style={{ color: accentText }} />;
 }
 
 function BubbleActionMenu({

@@ -265,3 +265,61 @@ export async function markConversationRead(conversationId: string) {
   if (e) return { error: e.message };
   return { success: true };
 }
+
+// ── Outlook features: archive / pin / tags (per-user) ──────────────
+
+export async function setConversationArchived(
+  conversationId: string,
+  archived: boolean,
+) {
+  const { supabase, user, error } = await requireUser();
+  if (error) return { error };
+  const { error: e } = await supabase
+    .from("conversation_participants")
+    .update({ archived_at: archived ? new Date().toISOString() : null })
+    .eq("conversation_id", conversationId)
+    .eq("user_id", user.id);
+  if (e) return { error: e.message };
+  revalidatePath("/messages");
+  return { success: true };
+}
+
+export async function setConversationPinned(
+  conversationId: string,
+  pinned: boolean,
+) {
+  const { supabase, user, error } = await requireUser();
+  if (error) return { error };
+  const { error: e } = await supabase
+    .from("conversation_participants")
+    .update({ pinned_at: pinned ? new Date().toISOString() : null })
+    .eq("conversation_id", conversationId)
+    .eq("user_id", user.id);
+  if (e) return { error: e.message };
+  revalidatePath("/messages");
+  return { success: true };
+}
+
+export async function setConversationTags(
+  conversationId: string,
+  tags: string[],
+) {
+  const { supabase, user, error } = await requireUser();
+  if (error) return { error };
+  // Sanitize and dedupe — keep only known/sane tag keys.
+  const clean = Array.from(
+    new Set(
+      tags
+        .map((t) => t.trim().toLocaleLowerCase("tr"))
+        .filter((t) => t && /^[a-z0-9_-]{1,20}$/.test(t)),
+    ),
+  );
+  const { error: e } = await supabase
+    .from("conversation_participants")
+    .update({ tags: clean })
+    .eq("conversation_id", conversationId)
+    .eq("user_id", user.id);
+  if (e) return { error: e.message };
+  revalidatePath("/messages");
+  return { success: true };
+}

@@ -770,6 +770,39 @@ export interface ConversationParticipant {
   role: "admin" | "member";
   joined_at: string;
   last_read_at: string | null;
+  archived_at: string | null;
+  pinned_at: string | null;
+  tags: string[];
+}
+
+// Predefined Outlook-style label palette (key + bg/text classes + name)
+export const CONVERSATION_TAG_PRESETS: ReadonlyArray<{
+  key: string;
+  name: string;
+  bg: string;
+  text: string;
+  dot: string;
+}> = [
+  { key: "onemli", name: "Önemli", bg: "bg-red-500/15", text: "text-red-700 dark:text-red-300", dot: "bg-red-500" },
+  { key: "is", name: "İş", bg: "bg-blue-500/15", text: "text-blue-700 dark:text-blue-300", dot: "bg-blue-500" },
+  { key: "kisisel", name: "Kişisel", bg: "bg-violet-500/15", text: "text-violet-700 dark:text-violet-300", dot: "bg-violet-500" },
+  { key: "acil", name: "Acil", bg: "bg-orange-500/15", text: "text-orange-700 dark:text-orange-300", dot: "bg-orange-500" },
+  { key: "musteri", name: "Müşteri", bg: "bg-emerald-500/15", text: "text-emerald-700 dark:text-emerald-300", dot: "bg-emerald-500" },
+  { key: "tedarikci", name: "Tedarikçi", bg: "bg-amber-500/15", text: "text-amber-700 dark:text-amber-300", dot: "bg-amber-500" },
+  { key: "takip", name: "Takip", bg: "bg-cyan-500/15", text: "text-cyan-700 dark:text-cyan-300", dot: "bg-cyan-500" },
+  { key: "arsiv", name: "Arşiv", bg: "bg-zinc-500/15", text: "text-zinc-700 dark:text-zinc-300", dot: "bg-zinc-500" },
+];
+
+export function tagMeta(key: string) {
+  return (
+    CONVERSATION_TAG_PRESETS.find((t) => t.key === key) ?? {
+      key,
+      name: key,
+      bg: "bg-muted",
+      text: "text-foreground",
+      dot: "bg-zinc-500",
+    }
+  );
 }
 
 export interface Message {

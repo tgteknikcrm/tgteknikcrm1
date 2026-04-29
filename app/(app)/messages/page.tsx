@@ -18,6 +18,9 @@ interface ConvoListItem {
   participants: Array<Pick<Profile, "id" | "full_name" | "phone">>;
   unreadCount: number;
   myLastReadAt: string | null;
+  archivedAt: string | null;
+  pinnedAt: string | null;
+  tags: string[];
 }
 
 export default async function MessagesPage({
@@ -34,12 +37,15 @@ export default async function MessagesPage({
   // 1) My participant rows tell me which conversations I'm in + my last_read_at.
   const { data: myPartRows } = await supabase
     .from("conversation_participants")
-    .select("conversation_id, last_read_at, role")
+    .select("conversation_id, last_read_at, role, archived_at, pinned_at, tags")
     .eq("user_id", profile.id);
   const myParts = (myPartRows ?? []) as Array<{
     conversation_id: string;
     last_read_at: string | null;
     role: "admin" | "member";
+    archived_at: string | null;
+    pinned_at: string | null;
+    tags: string[];
   }>;
   const myConvIds = myParts.map((p) => p.conversation_id);
 
@@ -103,8 +109,10 @@ export default async function MessagesPage({
   }
 
   // Build the sidebar list.
+  const myPartByConv = new Map(myParts.map((p) => [p.conversation_id, p]));
   const items: ConvoListItem[] = convos.map((conv) => {
     const parts = allParts.filter((p) => p.conversation_id === conv.id);
+    const mine = myPartByConv.get(conv.id);
     return {
       conversation: conv,
       participants: parts
@@ -112,6 +120,9 @@ export default async function MessagesPage({
         .filter((x): x is Pick<Profile, "id" | "full_name" | "phone"> => !!x),
       unreadCount: unreadByConv.get(conv.id) ?? 0,
       myLastReadAt: myLastReadByConv.get(conv.id) ?? null,
+      archivedAt: mine?.archived_at ?? null,
+      pinnedAt: mine?.pinned_at ?? null,
+      tags: mine?.tags ?? [],
     };
   });
 
@@ -144,6 +155,9 @@ export default async function MessagesPage({
     }));
     activeParticipants = (pRes.data ?? []) as ConversationParticipant[];
   }
+  const myActiveParticipant = active
+    ? activeParticipants.find((p) => p.user_id === profile.id) ?? null
+    : null;
 
   return (
     <div className="-m-4 md:-m-6 lg:-m-8 h-[calc(100vh-3.5rem)] grid grid-cols-1 md:grid-cols-[20rem_1fr] lg:grid-cols-[22rem_1fr] overflow-hidden">
@@ -161,6 +175,7 @@ export default async function MessagesPage({
           <ChatPanel
             conversation={active}
             participants={activeParticipants}
+            myParticipant={myActiveParticipant}
             initialMessages={initialMessages}
             currentUserId={profile.id}
             people={people}

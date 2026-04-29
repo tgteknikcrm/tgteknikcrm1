@@ -155,6 +155,67 @@
   }
 }
 
+/* ── Soft motion utilities ─────────────────────────────────────────
+   Used across the messaging surface (and reusable elsewhere) to make
+   route transitions, list mounts, and bubble inserts feel less abrupt.
+   Honors `prefers-reduced-motion`. */
+@keyframes tg-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes tg-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-tg-fade-in {
+  animation: tg-fade-in 220ms ease-out both;
+}
+.animate-tg-slide-up {
+  animation: tg-slide-up 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+/* Apply a gentle fade to every route's main content. Cheap, GPU-friendly,
+   and avoids the harsh "snap" between server-rendered pages. */
+main > * {
+  animation: tg-fade-in 220ms ease-out both;
+}
+
+/* Stagger list items inside .tg-stagger > * children — used by the
+   conversation list so rows don't all flash in at once. */
+.tg-stagger > * {
+  animation: tg-slide-up 260ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+.tg-stagger > *:nth-child(1)  { animation-delay: 0ms; }
+.tg-stagger > *:nth-child(2)  { animation-delay: 25ms; }
+.tg-stagger > *:nth-child(3)  { animation-delay: 50ms; }
+.tg-stagger > *:nth-child(4)  { animation-delay: 75ms; }
+.tg-stagger > *:nth-child(5)  { animation-delay: 100ms; }
+.tg-stagger > *:nth-child(6)  { animation-delay: 125ms; }
+.tg-stagger > *:nth-child(7)  { animation-delay: 150ms; }
+.tg-stagger > *:nth-child(8)  { animation-delay: 175ms; }
+.tg-stagger > *:nth-child(n+9) { animation-delay: 200ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-tg-fade-in,
+  .animate-tg-slide-up,
+  main > *,
+  .tg-stagger > * {
+    animation: none !important;
+  }
+}
+
 /* Industrial-HMI alarm blink — stronger than animate-pulse, used on
    active alarm tiles in the live telemetry dashboard. */
 @keyframes blink-alarm {
