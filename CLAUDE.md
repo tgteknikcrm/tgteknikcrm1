@@ -239,6 +239,7 @@ tgteknikcrm/
 | 0011 | cad_programs.sql | CAD/CAM programları tablosu + private `cad-programs` storage bucket |
 | 0012 | qc_spec_bubble_coords.sql | quality_specs.bubble_x/bubble_y (0..1 normalize) — resim üzerinde balon konumlandırma |
 | 0013 | activity_events.sql | activity_events + activity_reads + activity_event_type enum (~32 değer) + measurement.nok fail-safe trigger + Realtime publication |
+| 0014 | qc_bubble_appearance.sql | quality_specs.bubble_size (sm/md/lg/xl) + bubble_shape (circle/square/diamond/triangle/hexagon/star) — balon görünüm özelleştirme |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -401,7 +402,16 @@ Silme butonu gibi client component'lar için inline server action şablonu:
 
 ## Son commit
 
-**`d7389ef` — QC resim üzerinden ölçü noktası tıklama + mock alarm sıklığı arttı**
+**(yeni) — QC: kontrollü balon UX (Yeni Balon mode + Taşı/Renk/Boyut/Şekil mini paneli) + DecimalInput (whole + frac)**
+
+Bu turda yapılanlar:
+- **QC balon UX disiplin:** resme tıklamak artık sadece **Yeni Balon** modu açıkken yeni spec açar (popup spam'i bitti). Drag-to-move tamamen kaldırıldı. Balona tıklayınca kompakt mini panel açılır: `Taşı · Renk · Boyut · Şekil · Sil · Kapat`. **Taşı**: bas → balon imleci canlı takip eder (ghost) → tıkla → konum kaydedilir + ✓ tik flash. Esc iptal.
+- **Renk popover** — 14 renk + auto + **özel hex** (input[type=color])
+- **Boyut popover** — sm/md/lg/xl (DB: `quality_specs.bubble_size`)
+- **Şekil popover** — daire/kare/baklava/üçgen/altıgen/yıldız (clipPath polygon'ları, DB: `quality_specs.bubble_shape`)
+- **Migration 0014** — `bubble_size` + `bubble_shape` kolonları
+- **DecimalInput component** ([components/ui/decimal-input.tsx](components/ui/decimal-input.tsx)): tüm sayısal QC giriş alanları artık **iki ayrı kutu** (tam kısım + ondalık kısım). `100 . 00` → 100.00. Tab/`.`/`,` ile fractional input'a atlar. Uncontrolled — parent `key={...}` ile reset eder.
+- **DecimalInput uygulanan yerler:** `spec-dialog.tsx` (nominal + tol+ + tol−), `measurement-dialog.tsx`, `bulk-measurement-dialog.tsx` (her spec için), `image-board.tsx` MeasurementBar (hızlı ölçüm).
 
 Önceki commit'lerin özeti için `git log --oneline` ya da memory'deki `project_tgteknikcrm.md`.
 

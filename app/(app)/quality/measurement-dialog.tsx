@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DecimalInput } from "@/components/ui/decimal-input";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -46,8 +47,8 @@ export function MeasurementDialog({
   const [serial, setSerial] = useState(
     measurement?.part_serial ?? defaultPartSerial ?? "",
   );
-  const [value, setValue] = useState<string>(
-    measurement ? String(measurement.measured_value) : "",
+  const [value, setValue] = useState<number | null>(
+    measurement ? Number(measurement.measured_value) : null,
   );
   const [tool, setTool] = useState(
     measurement?.measurement_tool ?? spec.measurement_tool ?? "",
@@ -55,26 +56,25 @@ export function MeasurementDialog({
   const [notes, setNotes] = useState(measurement?.notes ?? "");
 
   const liveResult = useMemo(() => {
-    const num = Number(value);
-    if (!Number.isFinite(num) || value === "") return null;
+    if (value === null || !Number.isFinite(value)) return null;
     return {
       result: calculateQcResult(
-        num,
+        value,
         Number(spec.nominal_value),
         Number(spec.tolerance_plus),
         Number(spec.tolerance_minus),
       ),
-      deviation: num - Number(spec.nominal_value),
+      deviation: value - Number(spec.nominal_value),
     };
   }, [value, spec]);
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const num = Number(value);
-    if (!Number.isFinite(num)) {
+    if (value === null || !Number.isFinite(value)) {
       toast.error("Ölçülen değer geçersiz.");
       return;
     }
+    const num = value;
     startTransition(async () => {
       const r = await saveMeasurement({
         id: measurement?.id,
@@ -175,17 +175,17 @@ export function MeasurementDialog({
           <div className="space-y-1.5">
             <Label htmlFor="m-value">Ölçülen Değer ({spec.unit}) *</Label>
             <div className="flex gap-2 items-center">
-              <Input
+              <DecimalInput
                 id="m-value"
-                type="number"
-                step="any"
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder={Number(spec.nominal_value).toFixed(3)}
+                defaultValue={value}
+                onChange={setValue}
+                decimals={3}
+                wholePlaceholder={String(Math.trunc(Number(spec.nominal_value)))}
                 required
                 autoFocus
-                className="tabular-nums text-lg font-semibold flex-1"
+                ariaLabel="Ölçülen değer"
               />
+              <span className="text-xs text-muted-foreground">{spec.unit}</span>
               {liveResult && <ResultBadge result={liveResult.result} />}
             </div>
             {liveResult && (

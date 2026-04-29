@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { DecimalInput } from "@/components/ui/decimal-input";
 import {
   Select,
   SelectContent,
@@ -25,10 +26,14 @@ import {
   Eye,
   EyeOff,
   Trash2,
-  Palette,
   Move,
   Circle,
   CircleOff,
+  Check,
+  PlusCircle,
+  Palette,
+  Maximize2,
+  Shapes,
 } from "lucide-react";
 import {
   saveMeasurement,
@@ -36,11 +41,15 @@ import {
   deleteQualityDrawing,
   updateBubblePosition,
   updateBubbleColor,
+  updateBubbleSize,
+  updateBubbleShape,
 } from "./actions";
 import { SpecDialog } from "./spec-dialog";
 import { ResultBadge } from "./result-badge";
 import {
   BUBBLE_COLOR_PRESETS,
+  BUBBLE_SIZE_PRESETS,
+  BUBBLE_SHAPE_PRESETS,
   calculateQcResult,
   deviationPct,
   formatToleranceBand,
@@ -49,6 +58,8 @@ import {
   type QualitySpec,
   type QualityMeasurement,
   type QcResult,
+  type BubbleSize,
+  type BubbleShape,
 } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
@@ -97,32 +108,52 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
   const [showLabels, setShowLabels] = useState(true);
   const [showBubbles, setShowBubbles] = useState(true);
   const [deletingDrawing, startDeleteDrawing] = useTransition();
-  // Drag state for repositioning bubbles. While a bubble is being dragged
-  // we track its temporary normalized position; on release we persist it.
-  const [dragging, setDragging] = useState<{
-    specId: string;
-    x: number;
-    y: number;
-  } | null>(null);
-  // Optimistic position overrides — keeps a bubble at its newly dropped
-  // location while the server action + revalidate completes. Without this,
+  // Add mode: when true, clicking the image creates a new bubble (opens SpecDialog).
+  // When false, clicks on the canvas just close any open panel — no popup spam.
+  const [addMode, setAddMode] = useState(false);
+  // Move mode: when true (after pressing "Taşı" in the bubble panel), the
+  // selected bubble live-follows the cursor; clicking on the image commits
+  // the new position and shows a brief ✓ tick flash. Esc cancels.
+  const [moveMode, setMoveMode] = useState(false);
+  // Live cursor position (normalized 0..1) while in move mode — drives the
+  // ghost bubble preview. Null when cursor is outside the image.
+  const [movePreview, setMovePreview] = useState<{ x: number; y: number } | null>(null);
+  // Spec id to flash a green ✓ over after a successful move (auto-clears).
+  const [tickFlashId, setTickFlashId] = useState<string | null>(null);
+  // Optimistic position overrides — keeps a bubble at its newly placed
+  // location while the server action + revalidate completes. Without this
   // there's a flicker where the bubble snaps back to the old position
-  // for a frame between pointer-up and the new server data arriving.
+  // for a frame between commit and the new server data arriving.
   const [localPositions, setLocalPositions] = useState<
     Map<string, { x: number; y: number }>
   >(new Map());
-  const draggingRef = useRef<{
-    specId: string;
-    moved: boolean;
-    container: HTMLDivElement | null;
-  } | null>(null);
   const imageContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Reset selection when drawing changes
   useEffect(() => {
     setSelectedSpecId(null);
     setPendingClick(null);
+    setMoveMode(false);
   }, [activeId]);
+
+  // Esc → cancel move mode / add mode / close selection
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (moveMode) setMoveMode(false);
+      else if (addMode) setAddMode(false);
+      else if (selectedSpecId) setSelectedSpecId(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [moveMode, addMode, selectedSpecId]);
+
+  // Auto-clear the green ✓ flash after a short moment.
+  useEffect(() => {
+    if (!tickFlashId) return;
+    const t = setTimeout(() => setTickFlashId(null), 1100);
+    return () => clearTimeout(t);
+  }, [tickFlashId]);
 
   const measMap = useMemo(() => buildMeasMap(measurements), [measurements]);
   const drawing = drawings.find((d) => d.id === activeId);
@@ -136,97 +167,79 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
     return used.length === 0 ? 1 : Math.max(...used) + 1;
   }, [specs]);
 
+  function eventNormCoords(
+    e: React.MouseEvent<HTMLDivElement>,
+  ): { x: number; y: number } | null {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+    return { x, y };
+  }
+
   function onImageClick(e: React.MouseEvent<HTMLDivElement>) {
-    // Don't create a new bubble if a drag just happened
-    if (draggingRef.current?.moved) {
-      draggingRef.current = null;
+    const c = eventNormCoords(e);
+    if (!c) return;
+
+    // Move mode: commit new position for the selected bubble + tick flash
+    if (moveMode && selectedSpecId) {
+      const targetId = selectedSpecId;
+      setLocalPositions((prev) => {
+        const next = new Map(prev);
+        next.set(targetId, c);
+        return next;
+      });
+      setMoveMode(false);
+      setMovePreview(null);
+      setTickFlashId(targetId);
+      void (async () => {
+        const r = await updateBubblePosition(targetId, jobId, c.x, c.y);
+        if (r.error) {
+          toast.error(r.error);
+          setLocalPositions((prev) => {
+            const next = new Map(prev);
+            next.delete(targetId);
+            return next;
+          });
+        } else {
+          router.refresh();
+        }
+      })();
       return;
     }
-    // If a bubble is open, first click anywhere closes it
+
+    // If a bubble is open, first click anywhere closes it (without spawning a new one)
     if (selectedSpecId) {
       setSelectedSpecId(null);
       return;
     }
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width;
-    const y = (e.clientY - rect.top) / rect.height;
-    if (x < 0 || x > 1 || y < 0 || y > 1) return;
-    setPendingClick({ x, y });
+
+    // Only open the new-bubble dialog when add mode is explicitly enabled.
+    if (!addMode) return;
+    setPendingClick(c);
+    setAddMode(false);
   }
 
-  // ── Drag-drop bubble repositioning ────────────────────────
-  function onBubblePointerDown(specId: string, e: React.PointerEvent<HTMLButtonElement>) {
+  // Live cursor preview while in move mode — drives the ghost bubble.
+  function onContainerMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    if (!moveMode || !selectedSpecId) return;
+    const c = eventNormCoords(e);
+    setMovePreview(c);
+  }
+
+  function onContainerMouseLeave() {
+    if (moveMode) setMovePreview(null);
+  }
+
+  // Bubble click — just selects, opening the panel. (Drag-to-move removed.)
+  function onBubbleClick(specId: string, e: React.MouseEvent<HTMLButtonElement>) {
     e.stopPropagation();
-    e.preventDefault();
-    const container = imageContainerRef.current;
-    if (!container) return;
-    (e.currentTarget as HTMLButtonElement).setPointerCapture(e.pointerId);
-    draggingRef.current = { specId, moved: false, container };
-    const rect = container.getBoundingClientRect();
-    setDragging({
-      specId,
-      x: (e.clientX - rect.left) / rect.width,
-      y: (e.clientY - rect.top) / rect.height,
-    });
-  }
-
-  function onBubblePointerMove(e: React.PointerEvent<HTMLButtonElement>) {
-    const drag = draggingRef.current;
-    if (!drag) return;
-    const rect = drag.container?.getBoundingClientRect();
-    if (!rect) return;
-    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
-    drag.moved = true;
-    setDragging({ specId: drag.specId, x, y });
-  }
-
-  async function onBubblePointerUp(e: React.PointerEvent<HTMLButtonElement>) {
-    const drag = draggingRef.current;
-    if (!drag) return;
-    try {
-      (e.currentTarget as HTMLButtonElement).releasePointerCapture(e.pointerId);
-    } catch {
-      // safari sometimes throws if no capture
+    if (moveMode) {
+      // In move mode, clicking another bubble switches the target.
+      setSelectedSpecId(specId);
+      return;
     }
-    if (drag.moved && dragging) {
-      // 1. Lock the new position locally BEFORE clearing dragging — bubble
-      //    keeps its dropped spot, no snap-back flicker.
-      const droppedX = dragging.x;
-      const droppedY = dragging.y;
-      setLocalPositions((prev) => {
-        const next = new Map(prev);
-        next.set(drag.specId, { x: droppedX, y: droppedY });
-        return next;
-      });
-      setDragging(null);
-
-      // 2. Persist to DB. router.refresh() will eventually sync server data.
-      //    Local override stays until then; once spec.bubble_x matches, no
-      //    visual change happens on refresh.
-      const r = await updateBubblePosition(drag.specId, jobId, droppedX, droppedY);
-      if (r.error) {
-        toast.error(r.error);
-        // rollback on failure
-        setLocalPositions((prev) => {
-          const next = new Map(prev);
-          next.delete(drag.specId);
-          return next;
-        });
-      } else {
-        router.refresh();
-      }
-    } else if (!drag.moved) {
-      setDragging(null);
-      // Treat as click → select bubble
-      setSelectedSpecId(drag.specId);
-    } else {
-      setDragging(null);
-    }
-    // Keep moved flag for one tick so onImageClick ignores trailing click
-    setTimeout(() => {
-      draggingRef.current = null;
-    }, 0);
+    setSelectedSpecId(specId);
   }
 
   function onDeleteDrawing() {
@@ -317,6 +330,20 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
               {specsForDrawing.length} ölçü noktası
             </Badge>
             <Button
+              variant={addMode ? "default" : "outline"}
+              size="sm"
+              onClick={() => {
+                setAddMode((v) => !v);
+                setMoveMode(false);
+                setSelectedSpecId(null);
+              }}
+              className="h-7 px-2.5 text-xs gap-1"
+              title="Yeni balon ekleme modunu aç/kapat"
+            >
+              <PlusCircle className="size-3.5" />
+              {addMode ? "Ekleme açık" : "Yeni Balon"}
+            </Button>
+            <Button
               variant="ghost"
               size="sm"
               onClick={() => setShowBubbles((v) => !v)}
@@ -353,23 +380,44 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
           </div>
         </div>
 
-        {/* Help banner */}
-        <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 px-3 py-2 text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2">
-          <Crosshair className="size-3.5 shrink-0" />
-          <span>
-            Yeni nokta için resme <strong>tıkla</strong> · Mevcut balona{" "}
-            <strong>tıkla</strong>, alttan ölçüm gir
-          </span>
-        </div>
+        {/* Help banner — content depends on the active mode */}
+        {moveMode ? (
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-300 flex items-center gap-2">
+            <Move className="size-3.5 shrink-0" />
+            <span>
+              <strong>Taşıma modu aktif</strong> — balonun gideceği noktaya
+              tıkla. Esc ile iptal.
+            </span>
+          </div>
+        ) : addMode ? (
+          <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-2">
+            <PlusCircle className="size-3.5 shrink-0" />
+            <span>
+              <strong>Ekleme modu aktif</strong> — yeni balon için resmin
+              üstünde bir noktaya tıkla. Esc ile iptal.
+            </span>
+          </div>
+        ) : (
+          <div className="rounded-lg bg-blue-500/5 border border-blue-500/20 px-3 py-2 text-xs text-blue-700 dark:text-blue-300 flex items-center gap-2">
+            <Crosshair className="size-3.5 shrink-0" />
+            <span>
+              Yeni nokta için yukarıdan <strong>Yeni Balon</strong>’u aç ·
+              Mevcut balona <strong>tıkla</strong>, alttan renk/taşı/ölçüm
+            </span>
+          </div>
+        )}
 
         {/* Image with bubbles */}
         <div className="relative bg-zinc-50 dark:bg-zinc-100 rounded-lg overflow-hidden border">
           <div
             ref={imageContainerRef}
             onClick={onImageClick}
+            onMouseMove={onContainerMouseMove}
+            onMouseLeave={onContainerMouseLeave}
             className={cn(
-              "relative cursor-crosshair select-none",
-              selectedSpecId && "cursor-pointer",
+              "relative select-none",
+              moveMode || addMode ? "cursor-crosshair" : "cursor-default",
+              selectedSpecId && !moveMode && !addMode && "cursor-pointer",
             )}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -384,18 +432,20 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
                 const own = measMap.get(s.id) ?? [];
                 const result = bubbleResult(own);
                 const isSelected = s.id === selectedSpecId;
-                const isDragging = dragging?.specId === s.id;
-                // Position priority: live drag > local optimistic > server prop
-                let dragX: number | null = null;
-                let dragY: number | null = null;
-                if (isDragging && dragging) {
-                  dragX = dragging.x;
-                  dragY = dragging.y;
+                // While the selected bubble is being live-moved, hide its real
+                // position and show a ghost at the cursor instead.
+                const liveMove =
+                  moveMode && selectedSpecId === s.id && movePreview;
+                let overrideX: number | null = null;
+                let overrideY: number | null = null;
+                if (liveMove) {
+                  overrideX = movePreview!.x;
+                  overrideY = movePreview!.y;
                 } else {
                   const local = localPositions.get(s.id);
                   if (local) {
-                    dragX = local.x;
-                    dragY = local.y;
+                    overrideX = local.x;
+                    overrideY = local.y;
                   }
                 }
                 return (
@@ -406,33 +456,39 @@ export function QcImageBoard({ jobId, drawings, specs, measurements }: Props) {
                     selected={isSelected}
                     showLabel={showLabels}
                     measurementCount={own.length}
-                    dragX={dragX}
-                    dragY={dragY}
-                    isDragging={isDragging}
-                    onPointerDown={(e) => onBubblePointerDown(s.id, e)}
-                    onPointerMove={onBubblePointerMove}
-                    onPointerUp={onBubblePointerUp}
+                    overrideX={overrideX}
+                    overrideY={overrideY}
+                    ghost={Boolean(liveMove)}
+                    // While moving, no bubble should swallow the click —
+                    // the click must reach the image container to commit
+                    // the new position.
+                    interactive={!moveMode}
+                    showTickFlash={tickFlashId === s.id}
+                    onClick={(e) => onBubbleClick(s.id, e)}
                   />
                 );
               })}
           </div>
         </div>
 
-        {/* Measurement entry bar OR coords helper */}
-        {selectedSpec ? (
+        {/* Measurement entry bar OR coords helper.
+            Hidden while move mode is active so the user focuses on picking
+            the new point on the image. */}
+        {selectedSpec && !moveMode ? (
           <MeasurementBar
             key={selectedSpec.id}
             spec={selectedSpec}
             measurements={measMap.get(selectedSpec.id) ?? []}
             onClose={() => setSelectedSpecId(null)}
             onSaved={() => router.refresh()}
+            onMove={() => setMoveMode(true)}
           />
-        ) : (
+        ) : !moveMode && !addMode ? (
           <div className="text-[11px] text-muted-foreground text-center italic">
-            Mevcut bir balona tıkla → ölçüm gir, ya da yeni nokta için resme
-            tıkla.
+            Mevcut balona tıkla → renk / taşı / ölçüm. Yeni nokta için
+            yukarıdan <strong>Yeni Balon</strong>’u aç.
           </div>
-        )}
+        ) : null}
       </CardContent>
 
       {/* Controlled SpecDialog for new spec from image click */}
@@ -465,28 +521,28 @@ function Bubble({
   selected,
   showLabel,
   measurementCount,
-  dragX,
-  dragY,
-  isDragging,
-  onPointerDown,
-  onPointerMove,
-  onPointerUp,
+  overrideX,
+  overrideY,
+  ghost,
+  interactive,
+  showTickFlash,
+  onClick,
 }: {
   spec: QualitySpec;
   result: QcResult | null;
   selected: boolean;
   showLabel: boolean;
   measurementCount: number;
-  dragX: number | null;
-  dragY: number | null;
-  isDragging: boolean;
-  onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
-  onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void;
-  onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  overrideX: number | null;
+  overrideY: number | null;
+  ghost: boolean;
+  interactive: boolean;
+  showTickFlash: boolean;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
   // Color resolution: explicit override > result-derived > neutral default
   const customColor = spec.bubble_color;
-  const usingCustom = customColor && customColor !== "auto";
+  const usingCustom = Boolean(customColor && customColor !== "auto");
 
   const resultTone =
     result === "ok"
@@ -497,22 +553,39 @@ function Bubble({
       ? "bg-red-500 text-white border-red-700"
       : "bg-white text-zinc-900 border-zinc-700";
 
-  // dragX/dragY captures BOTH live drag AND optimistic local override.
-  // The `isDragging` flag is true only during the live drag (visual scale).
-  const hasOverride = dragX !== null && dragY !== null;
-  const xPct = hasOverride ? dragX! * 100 : (spec.bubble_x ?? 0) * 100;
-  const yPct = hasOverride ? dragY! * 100 : (spec.bubble_y ?? 0) * 100;
+  const hasOverride = overrideX !== null && overrideY !== null;
+  const xPct = hasOverride ? overrideX! * 100 : (spec.bubble_x ?? 0) * 100;
+  const yPct = hasOverride ? overrideY! * 100 : (spec.bubble_y ?? 0) * 100;
+
+  // Resolve size + shape — fall back to defaults if DB row is older.
+  const sizeDef =
+    BUBBLE_SIZE_PRESETS.find((s) => s.key === spec.bubble_size) ??
+    BUBBLE_SIZE_PRESETS[1]; // md
+  const shapeDef =
+    BUBBLE_SHAPE_PRESETS.find((s) => s.key === spec.bubble_shape) ??
+    BUBBLE_SHAPE_PRESETS[0]; // circle
+
+  // Triangle needs the number nudged down a touch — visually it sits in the
+  // bottom 2/3 of its bounding box.
+  const labelOffsetY = shapeDef.key === "triangle" ? "translate-y-[15%]" : "";
 
   return (
     <button
       type="button"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onClick={(e) => e.stopPropagation()}
+      onClick={onClick}
       style={{
         left: `${xPct}%`,
         top: `${yPct}%`,
+        width: `${sizeDef.px}px`,
+        height: `${sizeDef.px}px`,
+        fontSize: `${sizeDef.fontPx}px`,
+        // While in move mode, let pointer events fall through to the image
+        // container so the click commits the new position.
+        pointerEvents: interactive ? "auto" : "none",
+        ...(shapeDef.borderRadius
+          ? { borderRadius: shapeDef.borderRadius }
+          : {}),
+        ...(shapeDef.clipPath ? { clipPath: shapeDef.clipPath } : {}),
         ...(usingCustom
           ? {
               backgroundColor: customColor!,
@@ -520,21 +593,35 @@ function Bubble({
               color: "white",
             }
           : {}),
-        cursor: isDragging ? "grabbing" : "grab",
-        touchAction: "none",
       }}
       className={cn(
         "absolute -translate-x-1/2 -translate-y-1/2 z-10",
-        "size-7 rounded-full border-2 font-bold text-xs tabular-nums shadow-md",
-        "flex items-center justify-center transition-shadow",
-        "hover:scale-125 hover:z-20",
-        selected && "ring-4 ring-primary/40 scale-125 z-30",
-        isDragging && "opacity-90 scale-125 z-40 shadow-lg",
+        // Border only renders for circle/square; clipPath shapes draw bg only.
+        shapeDef.clipPath ? "" : "border-2",
+        "font-bold tabular-nums shadow-md cursor-pointer",
+        "flex items-center justify-center transition-transform",
+        "hover:scale-110 hover:z-20",
+        selected && "ring-4 ring-primary/40 scale-110 z-30",
+        ghost && "opacity-70 z-40 shadow-lg ring-2 ring-amber-400",
         !usingCustom && resultTone,
       )}
-      title={`#${spec.bubble_no ?? "?"} ${spec.description} · ${measurementCount} ölçüm · sürükle: konum değiştir`}
+      title={`#${spec.bubble_no ?? "?"} ${spec.description} · ${measurementCount} ölçüm`}
     >
-      {spec.bubble_no ?? "?"}
+      <span className={cn("leading-none pointer-events-none", labelOffsetY)}>
+        {spec.bubble_no ?? "?"}
+      </span>
+      {showTickFlash && (
+        <span
+          className={cn(
+            "absolute -top-2 -right-2 size-5 rounded-full border-2 border-white",
+            "bg-emerald-500 text-white shadow-md flex items-center justify-center",
+            "animate-in zoom-in-50 fade-in pointer-events-none",
+          )}
+          aria-hidden
+        >
+          <Check className="size-3 stroke-[3]" />
+        </span>
+      )}
       {showLabel && (
         <span
           className={cn(
@@ -558,29 +645,74 @@ function MeasurementBar({
   measurements,
   onClose,
   onSaved,
+  onMove,
 }: {
   spec: QualitySpec;
   measurements: QualityMeasurement[];
   onClose: () => void;
   onSaved: () => void;
+  onMove: () => void;
 }) {
   const [partSerial, setPartSerial] = useState("");
-  const [valueText, setValueText] = useState("");
+  const [measValue, setMeasValue] = useState<number | null>(null);
+  // Bumped after each successful save → DecimalInput remounts and clears.
+  const [valueResetNonce, setValueResetNonce] = useState(0);
   const [pending, startTransition] = useTransition();
   const [deleting, startDelete] = useTransition();
-  const [colorOpen, setColorOpen] = useState(false);
   const [pendingColor, startColor] = useTransition();
+  const [pendingSize, startSize] = useTransition();
+  const [pendingShape, startShape] = useTransition();
+  // Which appearance popover (if any) is currently open
+  const [openPanel, setOpenPanel] = useState<"color" | "size" | "shape" | null>(
+    null,
+  );
+  const popRootRef = useRef<HTMLDivElement | null>(null);
+
+  // Close popover on outside click
+  useEffect(() => {
+    if (!openPanel) return;
+    function onDoc(e: MouseEvent) {
+      const root = popRootRef.current;
+      if (root && !root.contains(e.target as Node)) setOpenPanel(null);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [openPanel]);
 
   function pickColor(c: string | null) {
     startColor(async () => {
       const r = await updateBubbleColor(spec.id, spec.job_id, c);
       if (r.error) toast.error(r.error);
+      else toast.success("Renk güncellendi");
+    });
+  }
+
+  function pickSize(s: BubbleSize) {
+    startSize(async () => {
+      const r = await updateBubbleSize(spec.id, spec.job_id, s);
+      if (r.error) toast.error(r.error);
       else {
-        toast.success("Renk güncellendi");
-        setColorOpen(false);
+        toast.success("Boyut güncellendi");
+        setOpenPanel(null);
       }
     });
   }
+
+  function pickShape(sh: BubbleShape) {
+    startShape(async () => {
+      const r = await updateBubbleShape(spec.id, spec.job_id, sh);
+      if (r.error) toast.error(r.error);
+      else {
+        toast.success("Şekil güncellendi");
+        setOpenPanel(null);
+      }
+    });
+  }
+
+  // Resolved appearance for live previews in popovers
+  const currentSize = spec.bubble_size ?? "md";
+  const currentShape = spec.bubble_shape ?? "circle";
+  const currentColorKey = spec.bubble_color ?? "auto";
 
   function onDeleteSpec() {
     const msg = `#${spec.bubble_no ?? "?"} '${spec.description}' bu balon resimden silinsin mi?\n\n(Bu spec ve tüm ölçümleri kalıcı olarak silinir.)`;
@@ -596,8 +728,8 @@ function MeasurementBar({
     });
   }
 
-  const num = Number(valueText);
-  const hasVal = valueText !== "" && Number.isFinite(num);
+  const hasVal = measValue !== null && Number.isFinite(measValue);
+  const num = hasVal ? (measValue as number) : 0;
   const result = hasVal
     ? calculateQcResult(
         num,
@@ -631,7 +763,8 @@ function MeasurementBar({
             r.result === "ok" ? "OK" : r.result === "sinirda" ? "Sınırda" : "NOK"
           }`,
         );
-        setValueText("");
+        setMeasValue(null);
+        setValueResetNonce((n) => n + 1);
         onSaved();
       }
     });
@@ -682,44 +815,84 @@ function MeasurementBar({
             )}
           </div>
         </div>
-        <div className="flex items-center gap-1 shrink-0 relative">
+        <div ref={popRootRef} className="flex items-center gap-1 shrink-0 relative">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onMove}
+            className="h-7 px-2.5 text-xs gap-1"
+            title="Balonu yeni bir noktaya taşı (sonra resme tıkla)"
+          >
+            <Move className="size-3.5" />
+            Taşı
+          </Button>
+
+          {/* Color popover trigger */}
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setColorOpen((v) => !v)}
+            onClick={() =>
+              setOpenPanel((p) => (p === "color" ? null : "color"))
+            }
             disabled={pendingColor}
-            className="h-7 px-2"
+            className="h-7 px-2 gap-1"
             title="Balon rengi"
           >
             {pendingColor ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
-              <Palette className="size-4" />
+              <span
+                className={cn(
+                  "size-4 rounded-full border-2 border-zinc-400",
+                  currentColorKey === "auto" &&
+                    "bg-gradient-to-br from-emerald-500 via-amber-500 to-red-500",
+                )}
+                style={
+                  currentColorKey !== "auto"
+                    ? { backgroundColor: currentColorKey }
+                    : undefined
+                }
+                aria-hidden
+              />
+            )}
+            <Palette className="size-3.5" />
+          </Button>
+
+          {/* Size popover trigger */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setOpenPanel((p) => (p === "size" ? null : "size"))}
+            disabled={pendingSize}
+            className="h-7 px-2 gap-1 text-[11px] font-bold uppercase"
+            title="Balon boyutu"
+          >
+            {pendingSize ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Maximize2 className="size-3.5" />
+            )}
+            {currentSize}
+          </Button>
+
+          {/* Shape popover trigger */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              setOpenPanel((p) => (p === "shape" ? null : "shape"))
+            }
+            disabled={pendingShape}
+            className="h-7 px-2"
+            title="Balon şekli"
+          >
+            {pendingShape ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Shapes className="size-4" />
             )}
           </Button>
-          {colorOpen && (
-            <div className="absolute right-16 top-8 z-20 rounded-lg border bg-card shadow-lg p-2 grid grid-cols-5 gap-1.5 min-w-[12rem]">
-              {BUBBLE_COLOR_PRESETS.map((p) => {
-                const active =
-                  (spec.bubble_color ?? "auto") === p.key;
-                return (
-                  <button
-                    key={p.key}
-                    type="button"
-                    onClick={() => pickColor(p.key === "auto" ? null : p.key)}
-                    className={cn(
-                      "size-7 rounded-full border-2 flex items-center justify-center transition",
-                      active ? "ring-2 ring-primary scale-110" : "hover:scale-110",
-                      p.key === "auto"
-                        ? "bg-gradient-to-br from-emerald-500 via-amber-500 to-red-500 border-zinc-300"
-                        : p.bg + " border-zinc-700",
-                    )}
-                    title={p.name}
-                  />
-                );
-              })}
-            </div>
-          )}
+
           <Button
             variant="ghost"
             size="sm"
@@ -743,6 +916,146 @@ function MeasurementBar({
           >
             <X className="size-4" />
           </Button>
+
+          {/* ── Color popover ── */}
+          {openPanel === "color" && (
+            <div className="absolute right-0 top-9 z-30 w-64 rounded-lg border bg-card shadow-xl p-3 space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Renk
+              </div>
+              <div className="grid grid-cols-8 gap-1.5">
+                {BUBBLE_COLOR_PRESETS.map((p) => {
+                  const active = currentColorKey === p.key;
+                  return (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => pickColor(p.key === "auto" ? null : p.key)}
+                      disabled={pendingColor}
+                      className={cn(
+                        "size-6 rounded-full border-2 flex items-center justify-center transition",
+                        active
+                          ? "ring-2 ring-primary scale-110 shadow"
+                          : "hover:scale-110",
+                        p.key === "auto"
+                          ? "bg-gradient-to-br from-emerald-500 via-amber-500 to-red-500 border-zinc-300"
+                          : p.bg + " border-zinc-700",
+                      )}
+                      title={p.name}
+                      aria-label={p.name}
+                    >
+                      {active && (
+                        <Check className="size-3 stroke-[3] text-white drop-shadow" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="border-t pt-2 flex items-center gap-2">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground shrink-0">
+                  Özel
+                </label>
+                <input
+                  type="color"
+                  value={
+                    currentColorKey !== "auto" && /^#/.test(currentColorKey)
+                      ? currentColorKey
+                      : "#3b82f6"
+                  }
+                  onChange={(e) => pickColor(e.target.value)}
+                  disabled={pendingColor}
+                  className="h-7 w-10 rounded border bg-transparent cursor-pointer p-0"
+                />
+                <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                  {currentColorKey === "auto" ? "auto" : currentColorKey}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* ── Size popover ── */}
+          {openPanel === "size" && (
+            <div className="absolute right-0 top-9 z-30 w-56 rounded-lg border bg-card shadow-xl p-3 space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Boyut
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {BUBBLE_SIZE_PRESETS.map((s) => {
+                  const active = currentSize === s.key;
+                  return (
+                    <button
+                      key={s.key}
+                      type="button"
+                      onClick={() => pickSize(s.key)}
+                      disabled={pendingSize}
+                      className={cn(
+                        "h-16 rounded-md border flex flex-col items-center justify-center gap-1 transition",
+                        active
+                          ? "ring-2 ring-primary border-primary bg-primary/5"
+                          : "hover:bg-muted",
+                      )}
+                      title={s.name}
+                    >
+                      <span
+                        className="rounded-full bg-zinc-700 dark:bg-zinc-300 inline-block"
+                        style={{
+                          width: `${Math.min(s.px, 28)}px`,
+                          height: `${Math.min(s.px, 28)}px`,
+                        }}
+                      />
+                      <span className="text-[10px] font-bold uppercase tracking-wider">
+                        {s.key}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* ── Shape popover ── */}
+          {openPanel === "shape" && (
+            <div className="absolute right-0 top-9 z-30 w-64 rounded-lg border bg-card shadow-xl p-3 space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Şekil
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {BUBBLE_SHAPE_PRESETS.map((sh) => {
+                  const active = currentShape === sh.key;
+                  return (
+                    <button
+                      key={sh.key}
+                      type="button"
+                      onClick={() => pickShape(sh.key)}
+                      disabled={pendingShape}
+                      className={cn(
+                        "h-16 rounded-md border flex flex-col items-center justify-center gap-1 transition",
+                        active
+                          ? "ring-2 ring-primary border-primary bg-primary/5"
+                          : "hover:bg-muted",
+                      )}
+                      title={sh.name}
+                    >
+                      <span
+                        className="bg-zinc-700 dark:bg-zinc-300 inline-block"
+                        style={{
+                          width: "22px",
+                          height: "22px",
+                          ...(sh.borderRadius
+                            ? { borderRadius: sh.borderRadius }
+                            : {}),
+                          ...(sh.clipPath ? { clipPath: sh.clipPath } : {}),
+                        }}
+                      />
+                      <span className="text-[10px] font-medium">
+                        {sh.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -763,16 +1076,18 @@ function MeasurementBar({
           <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             Ölçülen ({spec.unit})
           </label>
-          <Input
-            type="number"
-            step="any"
-            value={valueText}
-            onChange={(e) => setValueText(e.target.value)}
-            placeholder={Number(spec.nominal_value).toFixed(3)}
-            autoFocus
-            className="h-9 mt-1 tabular-nums text-base font-bold"
-            required
-          />
+          <div className="mt-1">
+            <DecimalInput
+              key={`mb-meas-${spec.id}-${valueResetNonce}`}
+              defaultValue={measValue}
+              onChange={setMeasValue}
+              decimals={3}
+              autoFocus
+              required
+              wholePlaceholder={String(Math.trunc(Number(spec.nominal_value)))}
+              ariaLabel="Ölçülen değer"
+            />
+          </div>
         </div>
         <div className="col-span-12 sm:col-span-3 flex items-end">
           {hasVal && result ? (

@@ -345,24 +345,87 @@ export interface QualitySpec {
   bubble_y: number | null;
   // Optional per-spec override color (hex or tailwind tone name).
   bubble_color: string | null;
+  // Bubble visual style on the drawing.
+  bubble_size: BubbleSize;
+  bubble_shape: BubbleShape;
   notes: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
 }
 
-// Bubble color presets (used in QC image board picker)
+// Bubble color presets (used in QC image board picker) — 14 + auto + custom
 export const BUBBLE_COLOR_PRESETS: ReadonlyArray<{ key: string; bg: string; name: string }> = [
   { key: "auto", bg: "", name: "Otomatik (sonuca göre)" },
   { key: "#10b981", bg: "bg-emerald-500", name: "Yeşil" },
-  { key: "#3b82f6", bg: "bg-blue-500", name: "Mavi" },
-  { key: "#8b5cf6", bg: "bg-violet-500", name: "Mor" },
-  { key: "#f59e0b", bg: "bg-amber-500", name: "Sarı" },
-  { key: "#f97316", bg: "bg-orange-500", name: "Turuncu" },
-  { key: "#ef4444", bg: "bg-red-500", name: "Kırmızı" },
+  { key: "#14b8a6", bg: "bg-teal-500", name: "Teal" },
   { key: "#06b6d4", bg: "bg-cyan-500", name: "Cyan" },
+  { key: "#3b82f6", bg: "bg-blue-500", name: "Mavi" },
+  { key: "#6366f1", bg: "bg-indigo-500", name: "İndigo" },
+  { key: "#8b5cf6", bg: "bg-violet-500", name: "Mor" },
+  { key: "#a855f7", bg: "bg-purple-500", name: "Erguvan" },
   { key: "#ec4899", bg: "bg-pink-500", name: "Pembe" },
+  { key: "#f43f5e", bg: "bg-rose-500", name: "Gül" },
+  { key: "#ef4444", bg: "bg-red-500", name: "Kırmızı" },
+  { key: "#f97316", bg: "bg-orange-500", name: "Turuncu" },
+  { key: "#f59e0b", bg: "bg-amber-500", name: "Sarı" },
+  { key: "#84cc16", bg: "bg-lime-500", name: "Limon" },
   { key: "#1f2937", bg: "bg-zinc-800", name: "Siyah" },
+];
+
+// ── Bubble size + shape ──────────────────────────────────────────────
+export type BubbleSize = "sm" | "md" | "lg" | "xl";
+export type BubbleShape =
+  | "circle"
+  | "square"
+  | "diamond"
+  | "triangle"
+  | "hexagon"
+  | "star";
+
+export const BUBBLE_SIZE_PRESETS: ReadonlyArray<{
+  key: BubbleSize;
+  px: number;
+  fontPx: number;
+  name: string;
+}> = [
+  { key: "sm", px: 22, fontPx: 10, name: "Küçük" },
+  { key: "md", px: 28, fontPx: 12, name: "Orta" },
+  { key: "lg", px: 36, fontPx: 14, name: "Büyük" },
+  { key: "xl", px: 48, fontPx: 18, name: "Çok Büyük" },
+];
+
+// clip-path polygons for non-trivial shapes; circle/square handled via border-radius.
+export const BUBBLE_SHAPE_PRESETS: ReadonlyArray<{
+  key: BubbleShape;
+  name: string;
+  clipPath?: string;
+  borderRadius?: string;
+}> = [
+  { key: "circle", name: "Daire", borderRadius: "9999px" },
+  { key: "square", name: "Kare", borderRadius: "6px" },
+  {
+    key: "diamond",
+    name: "Baklava",
+    clipPath: "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)",
+  },
+  {
+    key: "triangle",
+    name: "Üçgen",
+    clipPath: "polygon(50% 0%, 100% 100%, 0% 100%)",
+  },
+  {
+    key: "hexagon",
+    name: "Altıgen",
+    clipPath:
+      "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
+  },
+  {
+    key: "star",
+    name: "Yıldız",
+    clipPath:
+      "polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)",
+  },
 ];
 
 export interface QualityMeasurement {

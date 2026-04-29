@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DecimalInput } from "@/components/ui/decimal-input";
 import { toast } from "sonner";
 import { Loader2, ArrowRight } from "lucide-react";
 import { saveBulkMeasurements } from "./actions";
@@ -47,10 +48,13 @@ export function BulkMeasurementDialog({ jobId, specs, trigger }: Props) {
   const [pending, startTransition] = useTransition();
 
   const [serial, setSerial] = useState("Numune-1");
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, number | null>>({});
+  // Bumped to remount DecimalInputs after a successful "next part" reset.
+  const [resetNonce, setResetNonce] = useState(0);
 
   function reset() {
     setValues({});
+    setResetNonce((n) => n + 1);
   }
 
   function nextPart() {
@@ -60,10 +64,10 @@ export function BulkMeasurementDialog({ jobId, specs, trigger }: Props) {
 
   function onSubmit(advance = false) {
     const entries = Object.entries(values)
-      .filter(([, v]) => v !== "" && Number.isFinite(Number(v)))
+      .filter(([, v]) => v !== null && v !== undefined && Number.isFinite(v))
       .map(([spec_id, v]) => ({
         spec_id,
-        measured_value: Number(v),
+        measured_value: v as number,
       }));
 
     if (entries.length === 0) {
@@ -129,12 +133,11 @@ export function BulkMeasurementDialog({ jobId, specs, trigger }: Props) {
             </div>
           ) : (
             specs.map((s) => {
-              const raw = values[s.id] ?? "";
-              const num = Number(raw);
-              const hasVal = raw !== "" && Number.isFinite(num);
+              const num = values[s.id];
+              const hasVal = num !== null && num !== undefined && Number.isFinite(num);
               const result = hasVal
                 ? calculateQcResult(
-                    num,
+                    num as number,
                     Number(s.nominal_value),
                     Number(s.tolerance_plus),
                     Number(s.tolerance_minus),
@@ -171,16 +174,19 @@ export function BulkMeasurementDialog({ jobId, specs, trigger }: Props) {
                       )}
                     </div>
                   </div>
-                  <div className="col-span-3">
-                    <Input
-                      type="number"
-                      step="any"
-                      value={raw}
-                      onChange={(e) =>
-                        setValues((p) => ({ ...p, [s.id]: e.target.value }))
+                  <div className="col-span-3 flex justify-end">
+                    <DecimalInput
+                      key={`${s.id}-${resetNonce}`}
+                      defaultValue={null}
+                      onChange={(n) =>
+                        setValues((p) => ({ ...p, [s.id]: n }))
                       }
-                      placeholder={Number(s.nominal_value).toFixed(3)}
-                      className="h-9 tabular-nums text-right"
+                      decimals={3}
+                      size="sm"
+                      wholePlaceholder={String(
+                        Math.trunc(Number(s.nominal_value)),
+                      )}
+                      ariaLabel={`Ölçüm ${s.description}`}
                     />
                   </div>
                   <div className="col-span-2 flex justify-end">

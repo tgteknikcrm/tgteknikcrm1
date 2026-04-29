@@ -140,6 +140,50 @@ export async function updateBubbleColor(
   return { success: true };
 }
 
+const ALLOWED_SIZES = ["sm", "md", "lg", "xl"] as const;
+type AllowedSize = (typeof ALLOWED_SIZES)[number];
+const ALLOWED_SHAPES = [
+  "circle",
+  "square",
+  "diamond",
+  "triangle",
+  "hexagon",
+  "star",
+] as const;
+type AllowedShape = (typeof ALLOWED_SHAPES)[number];
+
+export async function updateBubbleSize(
+  specId: string,
+  jobId: string,
+  size: AllowedSize,
+) {
+  if (!ALLOWED_SIZES.includes(size)) return { error: "Geçersiz boyut" };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quality_specs")
+    .update({ bubble_size: size })
+    .eq("id", specId);
+  if (error) return { error: error.message };
+  revalidatePath(`/quality/${jobId}`);
+  return { success: true };
+}
+
+export async function updateBubbleShape(
+  specId: string,
+  jobId: string,
+  shape: AllowedShape,
+) {
+  if (!ALLOWED_SHAPES.includes(shape)) return { error: "Geçersiz şekil" };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("quality_specs")
+    .update({ bubble_shape: shape })
+    .eq("id", specId);
+  if (error) return { error: error.message };
+  revalidatePath(`/quality/${jobId}`);
+  return { success: true };
+}
+
 export async function deleteSpec(id: string, jobId: string) {
   const supabase = await createClient();
   const { data: existing } = await supabase

@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DecimalInput } from "@/components/ui/decimal-input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -85,23 +86,27 @@ export function SpecDialog({
     spec?.characteristic_type ?? "boyut",
   );
   const [description, setDescription] = useState(spec?.description ?? "");
-  const [nominal, setNominal] = useState<string>(
-    spec ? String(spec.nominal_value) : "",
+  const [nominal, setNominal] = useState<number | null>(
+    spec ? Number(spec.nominal_value) : null,
   );
-  const [tolPlus, setTolPlus] = useState<string>(
-    spec ? String(spec.tolerance_plus) : "0.05",
+  const [tolPlus, setTolPlus] = useState<number | null>(
+    spec ? Number(spec.tolerance_plus) : 0.05,
   );
-  const [tolMinus, setTolMinus] = useState<string>(
-    spec ? String(spec.tolerance_minus) : "0.05",
+  const [tolMinus, setTolMinus] = useState<number | null>(
+    spec ? Number(spec.tolerance_minus) : 0.05,
   );
+  // Bumped each time we apply a preset, so DecimalInput remounts and shows
+  // the new value (it is uncontrolled and keyed by this nonce).
+  const [tolPresetNonce, setTolPresetNonce] = useState(0);
   const [unit, setUnit] = useState(spec?.unit ?? "mm");
   const [tool, setTool] = useState(spec?.measurement_tool ?? "");
   const [critical, setCritical] = useState(spec?.is_critical ?? false);
   const [notes, setNotes] = useState(spec?.notes ?? "");
 
   function applyTolerancePreset(value: number) {
-    setTolPlus(String(value));
-    setTolMinus(String(value));
+    setTolPlus(value);
+    setTolMinus(value);
+    setTolPresetNonce((n) => n + 1);
   }
 
   function onSubmit(e: React.FormEvent) {
@@ -110,21 +115,26 @@ export function SpecDialog({
       toast.error("Açıklama gerekli.");
       return;
     }
-    const nominalNum = Number(nominal);
-    const plusNum = Number(tolPlus);
-    const minusNum = Number(tolMinus);
-    if (!Number.isFinite(nominalNum)) {
+    if (nominal === null || !Number.isFinite(nominal)) {
       toast.error("Nominal değer geçersiz.");
       return;
     }
-    if (!Number.isFinite(plusNum) || !Number.isFinite(minusNum)) {
+    if (
+      tolPlus === null ||
+      tolMinus === null ||
+      !Number.isFinite(tolPlus) ||
+      !Number.isFinite(tolMinus)
+    ) {
       toast.error("Tolerans geçersiz.");
       return;
     }
-    if (plusNum < 0 || minusNum < 0) {
+    if (tolPlus < 0 || tolMinus < 0) {
       toast.error("Tolerans negatif olamaz (asimetrik için her ikisi de + girilir).");
       return;
     }
+    const nominalNum = nominal;
+    const plusNum = tolPlus;
+    const minusNum = tolMinus;
 
     const payload: SaveSpecInput = {
       id: spec?.id,
@@ -214,44 +224,43 @@ export function SpecDialog({
           </div>
 
           <div className="grid grid-cols-12 gap-3">
-            <div className="col-span-4 space-y-1.5">
+            <div className="col-span-5 space-y-1.5">
               <Label htmlFor="s-nominal">Nominal *</Label>
-              <Input
+              <DecimalInput
                 id="s-nominal"
-                type="number"
-                step="any"
-                value={nominal}
-                onChange={(e) => setNominal(e.target.value)}
-                placeholder="50.00"
+                defaultValue={nominal}
+                onChange={setNominal}
+                decimals={3}
+                wholePlaceholder="50"
                 required
-                className="tabular-nums"
+                ariaLabel="Nominal değer"
               />
             </div>
             <div className="col-span-3 space-y-1.5">
-              <Label htmlFor="s-tplus">Tol +</Label>
-              <Input
-                id="s-tplus"
-                type="number"
-                step="any"
-                min="0"
-                value={tolPlus}
-                onChange={(e) => setTolPlus(e.target.value)}
-                className="tabular-nums"
+              <Label>Tol +</Label>
+              <DecimalInput
+                key={`tol-plus-${tolPresetNonce}`}
+                defaultValue={tolPlus}
+                onChange={setTolPlus}
+                decimals={3}
+                min={0}
+                size="sm"
+                ariaLabel="Üst tolerans"
               />
             </div>
             <div className="col-span-3 space-y-1.5">
-              <Label htmlFor="s-tminus">Tol −</Label>
-              <Input
-                id="s-tminus"
-                type="number"
-                step="any"
-                min="0"
-                value={tolMinus}
-                onChange={(e) => setTolMinus(e.target.value)}
-                className="tabular-nums"
+              <Label>Tol −</Label>
+              <DecimalInput
+                key={`tol-minus-${tolPresetNonce}`}
+                defaultValue={tolMinus}
+                onChange={setTolMinus}
+                decimals={3}
+                min={0}
+                size="sm"
+                ariaLabel="Alt tolerans"
               />
             </div>
-            <div className="col-span-2 space-y-1.5">
+            <div className="col-span-1 space-y-1.5">
               <Label htmlFor="s-unit">Birim</Label>
               <Input
                 id="s-unit"
