@@ -70,6 +70,13 @@ import {
   tagMeta,
   type ChatWallpaperPattern,
 } from "@/lib/supabase/types";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { MessageComposer } from "./message-composer";
 import { setConversationWallpaper } from "./actions";
 
@@ -659,9 +666,7 @@ function MessageBubble({
   repliedToMessage: MessageWithRelations | null;
 }) {
   const isOptimistic = m.id.startsWith("temp_");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const supabase = useMemo(() => createClient(), []);
   const isDeleted = !!m.deleted_at;
   const authorLabel =
     m.author?.full_name || formatPhoneForDisplay(m.author?.phone ?? null) || "?";
@@ -671,7 +676,6 @@ function MessageBubble({
     startTransition(async () => {
       const r = await deleteMessage(m.id);
       if (r.error) toast.error(r.error);
-      setMenuOpen(false);
     });
   }
 
@@ -732,8 +736,6 @@ function MessageBubble({
             <BubbleActionMenu
               fromMe
               isDeleted={isDeleted}
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
               onReply={onReply}
               onEdit={onEdit}
               onDelete={onDelete}
@@ -765,7 +767,6 @@ function MessageBubble({
                       <AttachmentPreview
                         key={a.id}
                         attachment={a}
-                        supabase={supabase}
                         onDark={fromMe}
                       />
                     ))}
@@ -793,8 +794,6 @@ function MessageBubble({
           {!fromMe && (
             <BubbleActionMenu
               isDeleted={isDeleted}
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
               onReply={onReply}
               onEdit={() => {
                 /* not editable */
@@ -912,8 +911,6 @@ function BubbleActionMenu({
   onReply,
   onEdit,
   onDelete,
-  open,
-  onOpenChange,
   pending,
 }: {
   fromMe?: boolean;
@@ -921,207 +918,96 @@ function BubbleActionMenu({
   onReply: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
+  open?: boolean; // legacy, ignored — radix handles its own open state
+  onOpenChange?: (v: boolean) => void;
   pending: boolean;
 }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-
-  // Click-outside closes the menu. We don't rely on onMouseLeave because
-  // the cursor easily slips off and the menu would close before the user
-  // clicks an option (the original "buttons don't work" complaint).
-  useEffect(() => {
-    if (!open) return;
-    function onDoc(e: MouseEvent) {
-      const r = ref.current;
-      if (r && !r.contains(e.target as Node)) onOpenChange(false);
-    }
-    function onEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") onOpenChange(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [open, onOpenChange]);
-
   if (isDeleted) return <div className="size-8" />;
+  // Radix DropdownMenu renders the panel inside a portal attached to
+  // <body>, so the parent's `overflow-y-auto` (the chat feed) can't
+  // clip it and z-index conflicts disappear. It also handles
+  // click-outside, Esc, focus trap, and keyboard nav for free.
   return (
-    <div ref={ref} className="relative">
-      <Button
-        variant="ghost"
-        size="icon"
-        // Always visible (not hover-gated) so users can find the menu.
-        // A subtle background tint signals it's interactive.
-        className={cn(
-          "size-8 rounded-full bg-background/70 backdrop-blur-sm border shadow-sm",
-          "opacity-70 hover:opacity-100 hover:bg-background transition",
-          open && "opacity-100 bg-background ring-2 ring-primary/40",
-        )}
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpenChange(!open);
-        }}
-        aria-label="Mesaj eylemleri"
-        title="Mesaj eylemleri"
-      >
-        <MoreVertical className="size-4" />
-      </Button>
-      {open && (
-        <div
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
           className={cn(
-            "absolute z-30 top-full mt-1 min-w-40 rounded-lg border bg-popover shadow-xl p-1",
-            "animate-tg-fade-in",
-            fromMe ? "right-0" : "left-0",
+            "size-8 rounded-full bg-background/70 backdrop-blur-sm border shadow-sm",
+            "opacity-70 hover:opacity-100 hover:bg-background transition",
+            "data-[state=open]:opacity-100 data-[state=open]:bg-background data-[state=open]:ring-2 data-[state=open]:ring-primary/40",
           )}
+          aria-label="Mesaj eylemleri"
+          title="Mesaj eylemleri"
         >
-          <button
-            type="button"
-            onClick={() => {
-              onReply();
-              onOpenChange(false);
-            }}
-            className="flex items-center gap-2 w-full px-2.5 py-2 text-sm rounded hover:bg-accent transition"
-          >
-            <Reply className="size-4" /> Yanıtla
-          </button>
-          {fromMe && (
-            <>
-              <button
-                type="button"
-                onClick={() => {
-                  onEdit();
-                  onOpenChange(false);
-                }}
-                className="flex items-center gap-2 w-full px-2.5 py-2 text-sm rounded hover:bg-accent transition"
-              >
-                <Pencil className="size-4" /> Düzenle
-              </button>
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={pending}
-                className="flex items-center gap-2 w-full px-2.5 py-2 text-sm rounded hover:bg-red-500/10 text-red-600 transition"
-              >
-                {pending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Trash2 className="size-4" />
-                )}
-                Sil
-              </button>
-            </>
-          )}
-        </div>
-      )}
-    </div>
+          <MoreVertical className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align={fromMe ? "end" : "start"}
+        sideOffset={6}
+        className="min-w-40"
+      >
+        <DropdownMenuItem onSelect={onReply} className="gap-2">
+          <Reply className="size-4" /> Yanıtla
+        </DropdownMenuItem>
+        {fromMe && (
+          <>
+            <DropdownMenuItem onSelect={onEdit} className="gap-2">
+              <Pencil className="size-4" /> Düzenle
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              disabled={pending}
+              onSelect={(e) => {
+                e.preventDefault();
+                onDelete();
+              }}
+              className="gap-2 text-red-600 focus:text-red-600 focus:bg-red-500/10"
+            >
+              {pending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              Sil
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
 /* ──────────────────────────────────────────────────────────────────
-   Attachment preview: image inline, PDF/file as styled link.
-   Module-level cache prevents re-fetching signed URLs (and thus
-   re-downloading images) on every re-render of the chat feed. We
-   also dedupe in-flight requests so React Strict-Mode's double
-   useEffect or rapid scrolls don't fire two roundtrips for the same
-   path.
+   Attachment preview — deterministic, token-less URL.
+   `/api/attach/<uuid>` proxies the file through our authenticated
+   route handler (RLS-checked, admin storage fetch). Because the URL
+   string never changes for a given attachment id, the browser's
+   HTTP cache (1-year `Cache-Control: immutable`) hits on every
+   subsequent render — even after a hard refresh.
    ────────────────────────────────────────────────────────────────── */
-
-interface SignedUrlEntry {
-  url: string;
-  expiresAt: number;
-}
-const URL_CACHE = new Map<string, SignedUrlEntry>();
-const URL_INFLIGHT = new Map<string, Promise<string | null>>();
-// 7 days — safe well below the upper bound and means a user that opens
-// the chat will reuse the same URL for the rest of their session, so
-// the browser's HTTP cache hits on every subsequent render.
-const URL_TTL_S = 7 * 24 * 60 * 60;
-// Refresh client-side a bit before the URL actually expires.
-const URL_REFRESH_MS = (URL_TTL_S - 6 * 60 * 60) * 1000;
-
-async function fetchSignedUrl(
-  supabase: ReturnType<typeof createClient>,
-  storagePath: string,
-): Promise<string | null> {
-  const cached = URL_CACHE.get(storagePath);
-  if (cached && cached.expiresAt > Date.now()) return cached.url;
-  const inflight = URL_INFLIGHT.get(storagePath);
-  if (inflight) return inflight;
-  const promise = (async () => {
-    const { data, error } = await supabase.storage
-      .from("message-attachments")
-      .createSignedUrl(storagePath, URL_TTL_S);
-    if (error) {
-      URL_INFLIGHT.delete(storagePath);
-      return null;
-    }
-    const url = data?.signedUrl ?? null;
-    if (url) {
-      URL_CACHE.set(storagePath, {
-        url,
-        expiresAt: Date.now() + URL_REFRESH_MS,
-      });
-    }
-    URL_INFLIGHT.delete(storagePath);
-    return url;
-  })();
-  URL_INFLIGHT.set(storagePath, promise);
-  return promise;
-}
 
 const RawAttachmentPreview = function AttachmentPreview({
   attachment: a,
-  supabase,
   onDark,
 }: {
   attachment: MessageAttachment;
-  supabase: ReturnType<typeof createClient>;
   onDark: boolean;
 }) {
-  // Synchronously read the cache so the first paint already has the URL
-  // when we've seen this attachment before. Avoids the "loader → swap"
-  // flash and ensures the <img src> stays stable across renders.
-  const cached = URL_CACHE.get(a.storage_path);
-  const cachedFresh = !!cached && cached.expiresAt > Date.now();
-  const [signedUrl, setSignedUrl] = useState<string | null>(
-    cachedFresh ? cached!.url : null,
-  );
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (cachedFresh) return; // already painted from cache
-    let cancelled = false;
-    void fetchSignedUrl(supabase, a.storage_path).then((url) => {
-      if (cancelled) return;
-      if (!url) {
-        setError("URL alınamadı");
-        return;
-      }
-      setSignedUrl(url);
-    });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [a.storage_path]);
-
   const isImage = a.mime_type.startsWith("image/");
   const sizeKb = (a.size_bytes / 1024).toFixed(0);
 
-  if (isImage && signedUrl) {
-    // Use Supabase image transform for the inline thumb (resize to 600px wide,
-    // re-encode as webp). Click-through link points to the original URL so
-    // users can still see the full-size file. The download button uses
-    // `download` to force a save dialog.
-    const sep = signedUrl.includes("?") ? "&" : "?";
-    const thumbUrl = `${signedUrl}${sep}width=600&resize=contain&quality=80`;
+  // Stable URL — same for every render and every page load.
+  const fullUrl = `/api/attach/${a.id}`;
+  const thumbUrl = `${fullUrl}?w=600&q=80`;
+
+  if (isImage) {
     return (
       <div className="relative inline-block group/att rounded-lg overflow-hidden max-w-xs">
         <a
-          href={signedUrl}
+          href={fullUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="block"
@@ -1135,9 +1021,8 @@ const RawAttachmentPreview = function AttachmentPreview({
             className="block max-h-64 w-auto"
           />
         </a>
-        {/* Always-visible download button on the image */}
         <a
-          href={signedUrl}
+          href={fullUrl}
           download={a.file_name}
           target="_blank"
           rel="noopener noreferrer"
@@ -1163,7 +1048,7 @@ const RawAttachmentPreview = function AttachmentPreview({
       )}
     >
       <a
-        href={signedUrl ?? undefined}
+        href={fullUrl}
         target="_blank"
         rel="noopener noreferrer"
         className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition"
@@ -1171,14 +1056,10 @@ const RawAttachmentPreview = function AttachmentPreview({
         <div
           className={cn(
             "size-9 rounded-md flex items-center justify-center shrink-0",
-            isImage ? "bg-blue-500/15" : "bg-amber-500/15",
+            "bg-amber-500/15",
           )}
         >
-          {isImage ? (
-            <ImageIcon className="size-4" />
-          ) : (
-            <FileText className="size-4" />
-          )}
+          <FileText className="size-4" />
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-xs font-semibold truncate">{a.file_name}</div>
@@ -1187,36 +1068,30 @@ const RawAttachmentPreview = function AttachmentPreview({
           </div>
         </div>
       </a>
-      {/* Dedicated download button — always visible, forces "save as" */}
-      {signedUrl ? (
-        <a
-          href={signedUrl}
-          download={a.file_name}
-          target="_blank"
-          rel="noopener noreferrer"
-          className={cn(
-            "size-7 rounded-md flex items-center justify-center shrink-0",
-            "border transition hover:scale-105",
-            onDark
-              ? "bg-white/10 border-white/20 hover:bg-white/20"
-              : "bg-background hover:bg-muted",
-          )}
-          title="İndir"
-        >
-          <Download className="size-3.5" />
-        </a>
-      ) : error ? (
-        <X className="size-4 text-red-500 shrink-0" />
-      ) : (
-        <Loader2 className="size-4 animate-spin opacity-70 shrink-0" />
-      )}
+      <a
+        href={fullUrl}
+        download={a.file_name}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={cn(
+          "size-7 rounded-md flex items-center justify-center shrink-0",
+          "border transition hover:scale-105",
+          onDark
+            ? "bg-white/10 border-white/20 hover:bg-white/20"
+            : "bg-background hover:bg-muted",
+        )}
+        title="İndir"
+      >
+        <Download className="size-3.5" />
+      </a>
     </div>
   );
 };
 
-// Memoize on attachment id — same row, same render. Stops the chat feed
-// from refetching every signed URL whenever any other state changes
-// (typing, hover, realtime updates to other messages, etc.)
+// Memoize on attachment id. The URL is now deterministic and the
+// component is essentially pure on (id, onDark), so a single shallow
+// compare on those two is enough to skip every re-render that doesn't
+// touch this attachment.
 const AttachmentPreview = React.memo(
   RawAttachmentPreview,
   (prev, next) =>
