@@ -300,6 +300,29 @@ export async function setConversationPinned(
   return { success: true };
 }
 
+export async function setConversationWallpaper(
+  conversationId: string,
+  wallpaper: string | null,
+) {
+  const { supabase, user, error } = await requireUser();
+  if (error) return { error };
+  if (
+    wallpaper &&
+    !/^#[0-9a-fA-F]{6}$/.test(wallpaper) &&
+    !/^pattern:[a-z]+#[0-9a-fA-F]{6}$/.test(wallpaper)
+  ) {
+    return { error: "Geçersiz wallpaper" };
+  }
+  const { error: e } = await supabase
+    .from("conversation_participants")
+    .update({ wallpaper: wallpaper || null })
+    .eq("conversation_id", conversationId)
+    .eq("user_id", user.id);
+  if (e) return { error: e.message };
+  revalidatePath("/messages");
+  return { success: true };
+}
+
 export async function setConversationTags(
   conversationId: string,
   tags: string[],

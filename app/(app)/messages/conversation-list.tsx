@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -94,8 +95,51 @@ export function ConversationList({
   activeId,
   people,
 }: Props) {
+  const router = useRouter();
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<TabKey>("inbox");
+
+  // Realtime: keep the list fresh when messages land in any of my
+  // conversations or my participant row changes (last_read, archive,
+  // pin, tags). We just trigger a server refresh — the page is a server
+  // component so this rebuilds the items array with the latest state.
+  useEffect(() => {
+    const supabase = createClient();
+    const ch = supabase
+      .channel("convo-list")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "messages" },
+        () => {
+          router.refresh();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages" },
+        () => {
+          router.refresh();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversation_participants" },
+        () => {
+          router.refresh();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "conversations" },
+        () => {
+          router.refresh();
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [router]);
 
   // Build a list of tag keys actually used by this user (so the tabs reflect
   // what the user has, not the static palette).

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import React, { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -62,9 +62,15 @@ import {
 } from "./actions";
 import {
   CONVERSATION_TAG_PRESETS,
+  CHAT_WALLPAPER_PATTERNS,
+  CHAT_WALLPAPER_COLORS,
+  formatWallpaper,
+  parseWallpaper,
   tagMeta,
+  type ChatWallpaperPattern,
 } from "@/lib/supabase/types";
 import { MessageComposer } from "./message-composer";
+import { setConversationWallpaper } from "./actions";
 
 interface Props {
   conversation: Conversation;
@@ -129,6 +135,11 @@ export function ChatPanel({
 
   const [messages, setMessages] = useState<MessageWithRelations[]>(initialMessages);
   const [participants, setParticipants] = useState(initialParticipants);
+  // Optimistic messages — pushed instantly when the user taps Send so the
+  // bubble appears with no perceived delay. They live alongside the
+  // server-confirmed `messages` array, keyed by a `temp_*` id. Realtime
+  // INSERT replaces them by content match (or we drop them on success).
+  const [optimistic, setOptimistic] = useState<MessageWithRelations[]>([]);
   const [replyTo, setReplyTo] = useState<MessageWithRelations | null>(null);
   const [editing, setEditing] = useState<MessageWithRelations | null>(null);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
@@ -139,14 +150,34 @@ export function ChatPanel({
   useEffect(() => {
     setMessages(initialMessages);
     setParticipants(initialParticipants);
+    setOptimistic([]);
     setReplyTo(null);
     setEditing(null);
     setTagPickerOpen(false);
   }, [conversation.id, initialMessages, initialParticipants]);
 
+  // ── Optimistic helpers (passed to the composer) ─────────────────
+  function pushOptimistic(msg: MessageWithRelations) {
+    setOptimistic((prev) => [...prev, msg]);
+  }
+  function clearOptimistic(tempId: string) {
+    setOptimistic((prev) => prev.filter((m) => m.id !== tempId));
+  }
+  function failOptimistic(tempId: string) {
+    setOptimistic((prev) =>
+      prev.map((m) =>
+        m.id === tempId
+          ? { ...m, body: (m.body ?? "") + " ⚠️", deleted_at: null }
+          : m,
+      ),
+    );
+  }
+
   const isPinned = !!myParticipant?.pinned_at;
   const isArchived = !!myParticipant?.archived_at;
   const myTags = myParticipant?.tags ?? [];
+  const myWallpaper = parseWallpaper(myParticipant?.wallpaper);
+  const wallpaperStyle = wallpaperCss(myWallpaper.pattern, myWallpaper.color);
 
   function doPin() {
     startHeaderAction(async () => {
@@ -235,6 +266,11 @@ export function ChatPanel({
                   },
                 ],
           );
+          // If this is our own message landing from the server, drop the
+          // matching optimistic placeholder (FIFO — earliest first).
+          if (m.author_id === currentUserId) {
+            setOptimistic((prev) => prev.slice(1));
+          }
           // Refresh sidebar list (last_message_*)
           router.refresh();
         },
@@ -279,7 +315,7 @@ export function ChatPanel({
     return () => {
       supabase.removeChannel(ch);
     };
-  }, [conversation.id, supabase, profileById, router]);
+  }, [conversation.id, supabase, profileById, router, currentUserId]);
 
   // ── Auto-scroll to bottom on new messages.
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -289,17 +325,23 @@ export function ChatPanel({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [messages.length]);
 
-  // Group messages by day for nicer separators.
+  // Group messages by day for nicer separators. We merge server messages
+  // with the optimistic queue, sorted by created_at. Optimistic rows have
+  // an id starting with "temp_" and are visually marked as "sending".
   const grouped = useMemo(() => {
+    const merged = [...messages, ...optimistic].sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
     const out: { day: string; items: MessageWithRelations[] }[] = [];
-    for (const m of messages) {
+    for (const m of merged) {
       const day = formatDayLabel(m.created_at);
       const last = out[out.length - 1];
       if (last && last.day === day) last.items.push(m);
       else out.push({ day, items: [m] });
     }
     return out;
-  }, [messages]);
+  }, [messages, optimistic]);
 
   return (
     <div className="flex flex-col h-full">
@@ -460,10 +502,15 @@ export function ChatPanel({
         </div>
       </header>
 
-      {/* Messages feed */}
+      {/* Messages feed — user-chosen wallpaper applied as background */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-1 bg-muted/20"
+        className={cn(
+          "flex-1 overflow-y-auto p-3 sm:p-4 space-y-1",
+          // Fallback when no wallpaper is set
+          !wallpaperStyle && "bg-muted/20",
+        )}
+        style={wallpaperStyle ?? undefined}
       >
         {grouped.length === 0 && (
           <div className="text-center text-sm text-muted-foreground py-12">
@@ -534,11 +581,17 @@ export function ChatPanel({
       <MessageComposer
         conversationId={conversation.id}
         currentUserId={currentUserId}
+        currentUserProfile={
+          profileById.get(currentUserId) ?? null
+        }
         replyTo={replyTo}
         onClearReply={() => setReplyTo(null)}
         editing={editing}
         onClearEditing={() => setEditing(null)}
         accent={accent}
+        onOptimisticAdd={pushOptimistic}
+        onOptimisticClear={clearOptimistic}
+        onOptimisticFail={failOptimistic}
       />
     </div>
   );
@@ -720,6 +773,62 @@ function MessageBubble({
   );
 }
 
+/* ──────────────────────────────────────────────────────────────────
+   wallpaperCss(pattern, color) — turns a (pattern, color) pair into a
+   React.CSSProperties object that can drive the chat-feed background.
+   `null` means "use the default".
+   ────────────────────────────────────────────────────────────────── */
+function wallpaperCss(
+  pattern: ChatWallpaperPattern,
+  color: string,
+): React.CSSProperties | null {
+  if (pattern === "none" && !color) return null;
+  const base: React.CSSProperties = color
+    ? { backgroundColor: color }
+    : { backgroundColor: "transparent" };
+  if (pattern === "none") return base;
+  // Use a contrast-aware accent for the pattern strokes.
+  const accent = readableTextOn(color || "#ffffff");
+  const accentRgba =
+    accent === "white" ? "rgba(255,255,255,0.10)" : "rgba(15,23,42,0.06)";
+  switch (pattern) {
+    case "dots":
+      return {
+        ...base,
+        backgroundImage: `radial-gradient(${accentRgba} 1.2px, transparent 1.5px)`,
+        backgroundSize: "16px 16px",
+      };
+    case "grid":
+      return {
+        ...base,
+        backgroundImage: `linear-gradient(${accentRgba} 1px, transparent 1px), linear-gradient(90deg, ${accentRgba} 1px, transparent 1px)`,
+        backgroundSize: "22px 22px",
+      };
+    case "diagonal":
+      return {
+        ...base,
+        backgroundImage: `repeating-linear-gradient(45deg, ${accentRgba} 0 1px, transparent 1px 14px)`,
+      };
+    case "hex":
+      return {
+        ...base,
+        // Approximated hex-like rhombic pattern using SVG data URI
+        backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='28' height='32' viewBox='0 0 28 32'><path d='M14 2 L26 9 L26 23 L14 30 L2 23 L2 9 Z' fill='none' stroke='${encodeURIComponent(accent === "white" ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.05)")}' stroke-width='1'/></svg>")`,
+      };
+    case "plus":
+      return {
+        ...base,
+        backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'><path d='M12 6 L12 18 M6 12 L18 12' stroke='${encodeURIComponent(accent === "white" ? "rgba(255,255,255,0.10)" : "rgba(15,23,42,0.07)")}' stroke-width='1'/></svg>")`,
+      };
+    case "waves":
+      return {
+        ...base,
+        backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='12' viewBox='0 0 40 12'><path d='M0 6 Q 10 0 20 6 T 40 6' fill='none' stroke='${encodeURIComponent(accent === "white" ? "rgba(255,255,255,0.10)" : "rgba(15,23,42,0.07)")}' stroke-width='1'/></svg>")`,
+      };
+  }
+  return base;
+}
+
 /**
  * WhatsApp-style read receipt:
  *  - "sent"  → single grey tick (saved to DB, not yet read)
@@ -835,9 +944,19 @@ function BubbleActionMenu({
 
 /* ──────────────────────────────────────────────────────────────────
    Attachment preview: image inline, PDF/file as styled link.
+   Module-level cache prevents re-fetching signed URLs (and thus
+   re-downloading images) on every re-render of the chat feed.
    ────────────────────────────────────────────────────────────────── */
 
-function AttachmentPreview({
+interface SignedUrlEntry {
+  url: string;
+  // Treat URLs as fresh for ~50 minutes (Supabase TTL is 1h with a small safety margin).
+  expiresAt: number;
+}
+const URL_CACHE = new Map<string, SignedUrlEntry>();
+const URL_TTL_MS = 50 * 60 * 1000;
+
+const RawAttachmentPreview = function AttachmentPreview({
   attachment: a,
   supabase,
   onDark,
@@ -846,23 +965,42 @@ function AttachmentPreview({
   supabase: ReturnType<typeof createClient>;
   onDark: boolean;
 }) {
-  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const cached = URL_CACHE.get(a.storage_path);
+  const cachedFresh = cached && cached.expiresAt > Date.now();
+  const [signedUrl, setSignedUrl] = useState<string | null>(
+    cachedFresh ? cached.url : null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (cachedFresh) {
+      setSignedUrl(cached!.url);
+      return;
+    }
     let cancelled = false;
     (async () => {
       const { data, error } = await supabase.storage
         .from("message-attachments")
         .createSignedUrl(a.storage_path, 60 * 60); // 1 hour
       if (cancelled) return;
-      if (error) setError(error.message);
-      else setSignedUrl(data?.signedUrl ?? null);
+      if (error) {
+        setError(error.message);
+        return;
+      }
+      const url = data?.signedUrl ?? null;
+      if (url) {
+        URL_CACHE.set(a.storage_path, {
+          url,
+          expiresAt: Date.now() + URL_TTL_MS,
+        });
+        setSignedUrl(url);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [a.storage_path, supabase]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [a.storage_path]);
 
   const isImage = a.mime_type.startsWith("image/");
   const sizeKb = (a.size_bytes / 1024).toFixed(0);
@@ -923,7 +1061,16 @@ function AttachmentPreview({
       )}
     </a>
   );
-}
+};
+
+// Memoize on attachment id — same row, same render. Stops the chat feed
+// from refetching every signed URL whenever any other state changes
+// (typing, hover, realtime updates to other messages, etc.)
+const AttachmentPreview = React.memo(
+  RawAttachmentPreview,
+  (prev, next) =>
+    prev.attachment.id === next.attachment.id && prev.onDark === next.onDark,
+);
 
 /* ──────────────────────────────────────────────────────────────────
    Settings sheet — group rename, color, members
@@ -942,6 +1089,8 @@ function ConversationSettings({
   currentUserId: string;
   accent: string;
 }) {
+  const myParticipant =
+    participants.find((p) => p.user_id === currentUserId) ?? null;
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -957,11 +1106,44 @@ function ConversationSettings({
   const [color, setColor] = useState(conversation.color || "#3b82f6");
   const [pickAdd, setPickAdd] = useState<Set<string>>(new Set());
 
+  const initialWp = parseWallpaper(myParticipant?.wallpaper);
+  const [wpPattern, setWpPattern] = useState<ChatWallpaperPattern>(
+    initialWp.pattern,
+  );
+  const [wpColor, setWpColor] = useState<string>(initialWp.color || "");
+
   useEffect(() => {
     setTitle(conversation.title ?? "");
     setColor(conversation.color || "#3b82f6");
     setPickAdd(new Set());
-  }, [conversation.id, conversation.title, conversation.color]);
+    const wp = parseWallpaper(myParticipant?.wallpaper);
+    setWpPattern(wp.pattern);
+    setWpColor(wp.color || "");
+  }, [
+    conversation.id,
+    conversation.title,
+    conversation.color,
+    myParticipant?.wallpaper,
+  ]);
+
+  function applyWallpaper(p: ChatWallpaperPattern, c: string) {
+    setWpPattern(p);
+    setWpColor(c);
+    const value = p === "none" && !c ? null : formatWallpaper(p, c || "#0f172a");
+    startTransition(async () => {
+      const r = await setConversationWallpaper(conversation.id, value);
+      if (r.error) toast.error(r.error);
+    });
+  }
+  function clearWallpaper() {
+    setWpPattern("none");
+    setWpColor("");
+    startTransition(async () => {
+      const r = await setConversationWallpaper(conversation.id, null);
+      if (r.error) toast.error(r.error);
+      else toast.success("Arka plan sıfırlandı");
+    });
+  }
 
   const candidates = people.filter(
     (p) =>
@@ -1117,6 +1299,102 @@ function ConversationSettings({
                 onChange={(e) => applyColor(e.target.value)}
                 disabled={pending}
                 className="size-8 rounded-full border-2 border-transparent cursor-pointer p-0"
+                title="Özel renk"
+              />
+            </div>
+          </div>
+
+          {/* ── Chat wallpaper (per-user) ── */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Sohbet Arka Planı
+              </label>
+              {(wpPattern !== "none" || wpColor) && (
+                <button
+                  type="button"
+                  onClick={clearWallpaper}
+                  disabled={pending}
+                  className="text-[11px] text-muted-foreground hover:underline"
+                >
+                  Sıfırla
+                </button>
+              )}
+            </div>
+            <div className="text-[10px] text-muted-foreground">
+              Bu konuşmanın arka planı sadece sana özel.
+            </div>
+
+            {/* Pattern picker */}
+            <div className="grid grid-cols-7 gap-1.5">
+              {CHAT_WALLPAPER_PATTERNS.map((p) => {
+                const active = wpPattern === p.key;
+                const previewStyle = wallpaperCss(
+                  p.key,
+                  wpColor || "#0f172a",
+                );
+                return (
+                  <button
+                    key={p.key}
+                    type="button"
+                    onClick={() => applyWallpaper(p.key, wpColor || "#0f172a")}
+                    disabled={pending}
+                    className={cn(
+                      "h-12 rounded-md border overflow-hidden transition relative",
+                      active
+                        ? "ring-2 ring-primary scale-[1.04]"
+                        : "hover:scale-[1.04]",
+                    )}
+                    style={previewStyle ?? { backgroundColor: "#f8fafc" }}
+                    title={p.name}
+                  >
+                    {active && (
+                      <span className="absolute inset-0 flex items-center justify-center">
+                        <Check className="size-4 drop-shadow text-white" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Color picker */}
+            <div className="flex flex-wrap gap-1.5">
+              {CHAT_WALLPAPER_COLORS.map((c) => {
+                const active =
+                  wpColor.toLowerCase() === c.hex.toLowerCase();
+                return (
+                  <button
+                    key={c.hex}
+                    type="button"
+                    onClick={() => applyWallpaper(wpPattern, c.hex)}
+                    disabled={pending}
+                    className={cn(
+                      "size-7 rounded-full border-2 transition flex items-center justify-center",
+                      active
+                        ? "ring-2 ring-primary scale-110 border-white"
+                        : "border-transparent hover:scale-110",
+                    )}
+                    style={{ backgroundColor: c.hex }}
+                    title={c.name}
+                  >
+                    {active && (
+                      <Check
+                        className="size-3 drop-shadow"
+                        style={{ color: readableTextOn(c.hex) }}
+                      />
+                    )}
+                  </button>
+                );
+              })}
+              <input
+                type="color"
+                value={
+                  /^#[0-9a-fA-F]{6}$/.test(wpColor) ? wpColor : "#0f172a"
+                }
+                onChange={(e) => applyWallpaper(wpPattern, e.target.value)}
+                disabled={pending}
+                className="size-7 rounded-full border-2 border-transparent cursor-pointer p-0"
                 title="Özel renk"
               />
             </div>

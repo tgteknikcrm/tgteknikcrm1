@@ -263,23 +263,9 @@ export function SearchFab() {
 
   return (
     <>
-      <Button
-        onClick={() => setOpen(true)}
-        size="lg"
-        className={cn(
-          "fixed z-40 rounded-full shadow-lg gap-2 h-12 pl-4 pr-5",
-          "bottom-[50px] right-[50px]",
-          "hover:shadow-xl hover:scale-105 transition-all",
-        )}
-        title="Ara (⌘K / Ctrl+K)"
-      >
-        <Search className="size-4" />
-        <span className="font-medium">Ara</span>
-        <kbd className="hidden lg:inline-flex ml-1 items-center gap-0.5 rounded border border-primary-foreground/30 bg-primary-foreground/10 px-1.5 py-0.5 text-[10px] font-mono">
-          ⌘K
-        </kbd>
-      </Button>
-
+      {/* The floating button was removed — search is now opened from the
+          topbar pill or via ⌘K / "/" / `tg-open-search` event. The dialog
+          itself is kept; it's the actual command palette. */}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-xl p-0 gap-0 top-[20%] translate-y-0">
           <DialogHeader className="sr-only">

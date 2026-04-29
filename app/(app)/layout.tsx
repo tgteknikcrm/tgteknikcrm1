@@ -6,6 +6,7 @@ import { Topbar } from "@/components/app/topbar";
 import { SearchFab } from "@/components/app/search-fab";
 import { PwaInstallPrompt } from "@/components/app/pwa-install-prompt";
 
+
 export default async function AppLayout({
   children,
 }: {

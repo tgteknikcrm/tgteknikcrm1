@@ -773,6 +773,77 @@ export interface ConversationParticipant {
   archived_at: string | null;
   pinned_at: string | null;
   tags: string[];
+  /** Format: "pattern:<key>#<hex>" or "#<hex>" or null. */
+  wallpaper: string | null;
+}
+
+// Chat wallpaper presets — pattern key + readable name. The actual CSS
+// gradient/background-image lives in the renderer (chat-panel.tsx) so
+// types stay framework-agnostic.
+export type ChatWallpaperPattern =
+  | "none"
+  | "dots"
+  | "grid"
+  | "diagonal"
+  | "hex"
+  | "plus"
+  | "waves";
+
+export const CHAT_WALLPAPER_PATTERNS: ReadonlyArray<{
+  key: ChatWallpaperPattern;
+  name: string;
+}> = [
+  { key: "none", name: "Düz" },
+  { key: "dots", name: "Noktalar" },
+  { key: "grid", name: "Izgara" },
+  { key: "diagonal", name: "Çizgi" },
+  { key: "hex", name: "Petek" },
+  { key: "plus", name: "Artı" },
+  { key: "waves", name: "Dalga" },
+];
+
+// 8 + auto color choices for the wallpaper accent color.
+export const CHAT_WALLPAPER_COLORS: ReadonlyArray<{
+  hex: string;
+  name: string;
+}> = [
+  { hex: "#f8fafc", name: "Beyaz" },
+  { hex: "#0f172a", name: "Lacivert" },
+  { hex: "#1e293b", name: "Slate" },
+  { hex: "#0c4a6e", name: "Deniz" },
+  { hex: "#064e3b", name: "Orman" },
+  { hex: "#3b0764", name: "Mor" },
+  { hex: "#7c2d12", name: "Kahve" },
+  { hex: "#831843", name: "Bordo" },
+];
+
+export interface ParsedWallpaper {
+  pattern: ChatWallpaperPattern;
+  color: string;
+}
+
+export function parseWallpaper(input: string | null | undefined): ParsedWallpaper {
+  // Accepts:
+  //  - null / "" → default (none + theme bg)
+  //  - "#rrggbb"   → solid color, no pattern
+  //  - "pattern:dots#ff8800" → pattern + accent
+  if (!input) return { pattern: "none", color: "" };
+  const m = input.match(/^pattern:([a-z]+)(#[0-9a-fA-F]{6})$/);
+  if (m) {
+    const [, p, c] = m;
+    const known = CHAT_WALLPAPER_PATTERNS.some((x) => x.key === p);
+    return {
+      pattern: known ? (p as ChatWallpaperPattern) : "none",
+      color: c,
+    };
+  }
+  if (/^#[0-9a-fA-F]{6}$/.test(input)) return { pattern: "none", color: input };
+  return { pattern: "none", color: "" };
+}
+
+export function formatWallpaper(p: ChatWallpaperPattern, color: string): string {
+  if (p === "none") return color;
+  return `pattern:${p}${color}`;
 }
 
 // Predefined Outlook-style label palette (key + bg/text classes + name)

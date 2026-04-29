@@ -37,7 +37,9 @@ export default async function MessagesPage({
   // 1) My participant rows tell me which conversations I'm in + my last_read_at.
   const { data: myPartRows } = await supabase
     .from("conversation_participants")
-    .select("conversation_id, last_read_at, role, archived_at, pinned_at, tags")
+    .select(
+      "conversation_id, last_read_at, role, archived_at, pinned_at, tags, wallpaper",
+    )
     .eq("user_id", profile.id);
   const myParts = (myPartRows ?? []) as Array<{
     conversation_id: string;
