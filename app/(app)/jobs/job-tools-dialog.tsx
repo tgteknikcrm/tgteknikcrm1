@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   Dialog,
   DialogContent,
@@ -12,20 +12,22 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Plus, Trash2, Wrench } from "lucide-react";
+import {
+  Loader2,
+  Plus,
+  Trash2,
+  Wrench,
+  Search,
+  Check,
+  ChevronDown,
+} from "lucide-react";
 import { setJobTools, type JobToolInput } from "./actions";
 import { createClient } from "@/lib/supabase/client";
 import type { Tool } from "@/lib/supabase/types";
+import { cn } from "@/lib/utils";
 
 interface ExistingJobTool {
   tool_id: string;
@@ -51,6 +53,10 @@ export function JobToolsDialog({ jobId, jobLabel, trigger }: Props) {
   const [tools, setTools] = useState<Tool[]>([]);
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
+  // Bulk picker state
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (!open) return;
@@ -78,12 +84,13 @@ export function JobToolsDialog({ jobId, jobLabel, trigger }: Props) {
       .finally(() => setLoading(false));
   }, [open, jobId]);
 
-  function addRow() {
-    setRows((p) => [
-      ...p,
-      { _key: rowKey(), tool_id: "", quantity_used: 1, notes: null },
-    ]);
-  }
+  // Reset picker state whenever the picker is closed/dialog is closed
+  useEffect(() => {
+    if (!pickerOpen) {
+      setPickerSearch("");
+      setPickerSelected(new Set());
+    }
+  }, [pickerOpen]);
 
   function updateRow(key: string, patch: Partial<Row>) {
     setRows((p) => p.map((r) => (r._key === key ? { ...r, ...patch } : r)));
@@ -91,6 +98,64 @@ export function JobToolsDialog({ jobId, jobLabel, trigger }: Props) {
 
   function removeRow(key: string) {
     setRows((p) => p.filter((r) => r._key !== key));
+  }
+
+  // Tools currently in `rows` — used to exclude from the picker.
+  const usedToolIds = useMemo(
+    () => new Set(rows.map((r) => r.tool_id).filter(Boolean)),
+    [rows],
+  );
+
+  // Filter the picker list by search and exclude already-added tools.
+  const pickerList = useMemo(() => {
+    const q = pickerSearch.trim().toLocaleLowerCase("tr");
+    return tools.filter((t) => {
+      if (usedToolIds.has(t.id)) return false;
+      if (!q) return true;
+      const hay = [t.name, t.code, t.size, t.location, t.type, t.supplier]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase("tr");
+      return hay.includes(q);
+    });
+  }, [tools, usedToolIds, pickerSearch]);
+
+  function togglePickerOne(id: string) {
+    setPickerSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllPickerVisible() {
+    setPickerSelected((prev) => {
+      const next = new Set(prev);
+      for (const t of pickerList) next.add(t.id);
+      return next;
+    });
+  }
+  function clearPickerSelection() {
+    setPickerSelected(new Set());
+  }
+
+  function addSelected() {
+    if (pickerSelected.size === 0) {
+      toast.error("Önce en az bir takım seç.");
+      return;
+    }
+    setRows((prev) => [
+      ...prev,
+      ...Array.from(pickerSelected).map((tool_id) => ({
+        _key: rowKey(),
+        tool_id,
+        quantity_used: 1,
+        notes: null,
+      })),
+    ]);
+    toast.success(`${pickerSelected.size} takım eklendi`);
+    setPickerOpen(false);
   }
 
   function onSubmit(e: React.FormEvent) {
@@ -124,12 +189,6 @@ export function JobToolsDialog({ jobId, jobLabel, trigger }: Props) {
     });
   }
 
-  // Tools that aren't already selected (avoid duplicates in dropdowns)
-  function availableTools(currentToolId: string) {
-    const used = new Set(rows.map((r) => r.tool_id).filter(Boolean));
-    return tools.filter((t) => t.id === currentToolId || !used.has(t.id));
-  }
-
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{trigger}</DialogTrigger>
@@ -151,61 +210,39 @@ export function JobToolsDialog({ jobId, jobLabel, trigger }: Props) {
             <div className="border-2 border-dashed rounded-lg p-6 text-center">
               <Wrench className="size-8 mx-auto text-muted-foreground/40 mb-2" />
               <p className="text-sm text-muted-foreground">
-                Henüz takım atanmadı.
+                Henüz takım atanmadı. Aşağıdan{" "}
+                <span className="font-medium text-foreground">+ Takım Ekle</span>{" "}
+                ile birden fazla takım seçebilirsin.
               </p>
             </div>
           ) : (
             <div className="space-y-2">
               {rows.map((r) => {
-                const available = availableTools(r.tool_id);
                 const selected = tools.find((t) => t.id === r.tool_id);
                 return (
                   <div
                     key={r._key}
-                    className="grid grid-cols-12 gap-2 items-start p-2 rounded-lg border bg-muted/20"
+                    className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg border bg-muted/20"
                   >
-                    <div className="col-span-12 sm:col-span-7">
-                      <Select
-                        value={r.tool_id}
-                        onValueChange={(v) => updateRow(r._key, { tool_id: v })}
-                      >
-                        <SelectTrigger className="h-9">
-                          <SelectValue placeholder="Takım seç" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {available.length === 0 ? (
-                            <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                              Tüm takımlar zaten eklendi.
-                            </div>
-                          ) : (
-                            available.map((t) => (
-                              <SelectItem key={t.id} value={t.id}>
-                                <span className="font-medium">{t.name}</span>
-                                {t.code && (
-                                  <span className="text-xs text-muted-foreground ml-1.5 font-mono">
-                                    {t.code}
-                                  </span>
-                                )}
-                                {t.size && (
-                                  <span className="text-xs text-muted-foreground ml-1.5">
-                                    · {t.size}
-                                  </span>
-                                )}
-                              </SelectItem>
-                            ))
-                          )}
-                        </SelectContent>
-                      </Select>
-                      {selected && (
-                        <div className="text-[10px] text-muted-foreground mt-1 flex gap-2">
-                          {selected.location && (
-                            <Badge variant="outline" className="font-normal h-4 px-1.5">
-                              {selected.location}
-                            </Badge>
-                          )}
-                          <span>Stok: {selected.quantity}</span>
-                        </div>
-                      )}
+                    <div className="col-span-12 sm:col-span-7 min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {selected?.name ?? "—"}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+                        {selected?.code && (
+                          <span className="font-mono">{selected.code}</span>
+                        )}
+                        {selected?.size && <span>· {selected.size}</span>}
+                        {selected?.location && (
+                          <Badge
+                            variant="outline"
+                            className="font-normal h-4 px-1.5"
+                          >
+                            {selected.location}
+                          </Badge>
+                        )}
+                        {selected && <span>Stok: {selected.quantity}</span>}
+                      </div>
                     </div>
                     <div className="col-span-7 sm:col-span-3">
                       <Input
@@ -223,7 +260,9 @@ export function JobToolsDialog({ jobId, jobLabel, trigger }: Props) {
                       />
                     </div>
                     <div className="col-span-4 sm:col-span-1 flex items-center gap-1">
-                      <span className="text-xs text-muted-foreground">adet</span>
+                      <span className="text-xs text-muted-foreground">
+                        adet
+                      </span>
                     </div>
                     <div className="col-span-1 flex items-center justify-end">
                       <Button
@@ -242,15 +281,153 @@ export function JobToolsDialog({ jobId, jobLabel, trigger }: Props) {
             </div>
           )}
 
-          <Button
-            type="button"
-            variant="outline"
-            onClick={addRow}
-            disabled={tools.length === 0 || rows.length >= tools.length}
-            className="w-full"
-          >
-            <Plus className="size-4" /> Takım Ekle
-          </Button>
+          {/* ── Bulk tool picker ── */}
+          <div className="rounded-lg border bg-card">
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              disabled={tools.length === 0 || rows.length >= tools.length}
+              className={cn(
+                "w-full flex items-center justify-between gap-2 px-3 py-2.5",
+                "text-sm font-medium transition",
+                "hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed",
+                pickerOpen && "border-b",
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <Plus className="size-4" />
+                {pickerOpen ? "Takım Ekle Paneli Açık" : "+ Takım Ekle (Toplu)"}
+              </span>
+              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                {rows.length >= tools.length && tools.length > 0
+                  ? "Tüm takımlar eklendi"
+                  : `${tools.length - rows.length} eklenebilir`}
+                <ChevronDown
+                  className={cn(
+                    "size-4 transition-transform",
+                    pickerOpen && "rotate-180",
+                  )}
+                />
+              </span>
+            </button>
+
+            {pickerOpen && (
+              <div className="p-3 space-y-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    value={pickerSearch}
+                    onChange={(e) => setPickerSearch(e.target.value)}
+                    placeholder="Takım ara: ad, kod, ölçü, konum…"
+                    className="pl-9 h-9"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground tabular-nums">
+                    {pickerList.length} sonuç ·{" "}
+                    <span className="font-bold text-foreground">
+                      {pickerSelected.size}
+                    </span>{" "}
+                    seçili
+                  </span>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={selectAllPickerVisible}
+                      disabled={pickerList.length === 0}
+                      className="text-primary hover:underline disabled:opacity-40 disabled:no-underline"
+                    >
+                      Görünür hepsini seç
+                    </button>
+                    <span className="text-muted-foreground">·</span>
+                    <button
+                      type="button"
+                      onClick={clearPickerSelection}
+                      disabled={pickerSelected.size === 0}
+                      className="text-muted-foreground hover:underline disabled:opacity-40 disabled:no-underline"
+                    >
+                      Temizle
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-md border max-h-72 overflow-y-auto divide-y">
+                  {pickerList.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      {pickerSearch
+                        ? "Aramayla eşleşen takım yok."
+                        : "Eklenebilecek takım yok."}
+                    </div>
+                  ) : (
+                    pickerList.map((t) => {
+                      const checked = pickerSelected.has(t.id);
+                      return (
+                        <label
+                          key={t.id}
+                          className={cn(
+                            "flex items-center gap-3 px-3 py-2 cursor-pointer",
+                            "transition hover:bg-muted/60",
+                            checked && "bg-primary/5",
+                          )}
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => togglePickerOne(t.id)}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium truncate">
+                              {t.name}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5">
+                              {t.code && (
+                                <span className="font-mono">{t.code}</span>
+                              )}
+                              {t.size && <span>· {t.size}</span>}
+                              {t.type && <span>· {t.type}</span>}
+                              {t.location && (
+                                <Badge
+                                  variant="outline"
+                                  className="font-normal h-4 px-1.5"
+                                >
+                                  {t.location}
+                                </Badge>
+                              )}
+                              <span>Stok: {t.quantity}</span>
+                            </div>
+                          </div>
+                          {checked && (
+                            <Check className="size-4 text-primary shrink-0" />
+                          )}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setPickerOpen(false)}
+                  >
+                    Kapat
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={addSelected}
+                    disabled={pickerSelected.size === 0}
+                  >
+                    <Plus className="size-4" />
+                    Seçilenleri Ekle ({pickerSelected.size})
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
