@@ -241,90 +241,9 @@ export function ChatPanel({
     void markConversationRead(conversation.id);
   }, [conversation.id, messages.length]);
 
-  // ── Realtime: listen for INSERT/UPDATE on messages within this conv.
-  useEffect(() => {
-    const ch = supabase
-      .channel(`chat-${conversation.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${conversation.id}`,
-        },
-        async (payload) => {
-          const m = payload.new as Message;
-          // Fetch attachments (RT broadcast doesn't include joined rows)
-          const { data: atts } = await supabase
-            .from("message_attachments")
-            .select("*")
-            .eq("message_id", m.id);
-          const author = m.author_id
-            ? profileById.get(m.author_id) ?? null
-            : null;
-          setMessages((prev) =>
-            prev.some((x) => x.id === m.id)
-              ? prev
-              : [
-                  ...prev,
-                  {
-                    ...m,
-                    author,
-                    attachments: (atts ?? []) as MessageAttachment[],
-                  },
-                ],
-          );
-          // If this is our own message landing from the server, drop the
-          // matching optimistic placeholder (FIFO — earliest first).
-          if (m.author_id === currentUserId) {
-            setOptimistic((prev) => prev.slice(1));
-          }
-          // Refresh sidebar list (last_message_*)
-          router.refresh();
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${conversation.id}`,
-        },
-        (payload) => {
-          const m = payload.new as Message;
-          setMessages((prev) =>
-            prev.map((x) =>
-              x.id === m.id
-                ? {
-                    ...x,
-                    body: m.body,
-                    edited_at: m.edited_at,
-                    deleted_at: m.deleted_at,
-                  }
-                : x,
-            ),
-          );
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "conversation_participants",
-          filter: `conversation_id=eq.${conversation.id}`,
-        },
-        () => {
-          router.refresh();
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [conversation.id, supabase, profileById, router, currentUserId]);
+  // Realtime listening for messages + participants is handled centrally by
+  // MessagesClient — it owns the per-conversation cache and keeps every
+  // open thread up-to-date. ChatPanel just renders whatever props arrive.
 
   // ── Typing indicator: separate broadcast channel.
   // Composer sends `{ type: "broadcast", event: "typing", payload: { userId } }`

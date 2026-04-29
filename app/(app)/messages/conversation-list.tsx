@@ -1,9 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -55,6 +53,7 @@ interface Props {
   currentUserId: string;
   activeId: string | null;
   people: Array<Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">>;
+  onSelect: (id: string) => void;
 }
 
 type TabKey = "inbox" | "archive" | string; // arbitrary tag key
@@ -97,52 +96,13 @@ export function ConversationList({
   currentUserId,
   activeId,
   people,
+  onSelect,
 }: Props) {
   const router = useRouter();
+  void router;
   const [q, setQ] = useState("");
   const [tab, setTab] = useState<TabKey>("inbox");
-
-  // Realtime: keep the list fresh when messages land in any of my
-  // conversations or my participant row changes (last_read, archive,
-  // pin, tags). We just trigger a server refresh — the page is a server
-  // component so this rebuilds the items array with the latest state.
-  useEffect(() => {
-    const supabase = createClient();
-    const ch = supabase
-      .channel("convo-list")
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
-        () => {
-          router.refresh();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "messages" },
-        () => {
-          router.refresh();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "conversation_participants" },
-        () => {
-          router.refresh();
-        },
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "conversations" },
-        () => {
-          router.refresh();
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [router]);
+  // Realtime is now centralised in MessagesClient — no per-list channel.
 
   // Build a list of tag keys actually used by this user (so the tabs reflect
   // what the user has, not the static palette).
@@ -282,6 +242,7 @@ export function ConversationList({
                 item={it}
                 currentUserId={currentUserId}
                 active={it.conversation.id === activeId}
+                onSelect={onSelect}
               />
             ))}
           </ul>
@@ -336,12 +297,15 @@ function ConvoRow({
   item,
   currentUserId,
   active,
+  onSelect,
 }: {
   item: Item;
   currentUserId: string;
   active: boolean;
+  onSelect: (id: string) => void;
 }) {
   const router = useRouter();
+  void router;
   const [pending, startTransition] = useTransition();
   const [menuOpen, setMenuOpen] = useState(false);
   const [tagPickerOpen, setTagPickerOpen] = useState(false);
@@ -399,10 +363,11 @@ function ConvoRow({
 
   return (
     <li className="relative group/row">
-      <Link
-        href={`/messages?c=${c.id}`}
+      <button
+        type="button"
+        onClick={() => onSelect(c.id)}
         className={cn(
-          "flex items-center gap-3 px-3 py-2.5 transition-colors",
+          "w-full flex items-center gap-3 px-3 py-2.5 transition-colors text-left",
           "hover:bg-muted/60",
           active && "bg-primary/8 hover:bg-primary/8",
         )}
@@ -484,7 +449,7 @@ function ConvoRow({
             </div>
           )}
         </div>
-      </Link>
+      </button>
 
       {/* Hover quick-actions (Outlook-style) */}
       <div
