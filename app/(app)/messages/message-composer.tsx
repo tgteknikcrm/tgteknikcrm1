@@ -201,11 +201,15 @@ export function MessageComposer({
     });
   }
 
+  // Auto-grow textarea — min ~3 lines so the input feels generous,
+  // max ~10 lines before it scrolls.
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = Math.min(160, ta.scrollHeight) + "px";
+    const minH = 72;
+    const maxH = 220;
+    ta.style.height = Math.min(maxH, Math.max(minH, ta.scrollHeight)) + "px";
   }, [text]);
 
   useEffect(() => {
@@ -591,13 +595,14 @@ export function MessageComposer({
           }}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
-          placeholder={editing ? "Mesajı düzenle…" : "Mesaj yaz…"}
-          rows={1}
+          placeholder={editing ? "Mesajı düzenle…" : "Mesajını yaz…"}
+          rows={3}
           className={cn(
-            "flex-1 resize-none rounded-2xl border px-3 py-2 text-sm",
-            "bg-background min-h-9 max-h-40 leading-snug",
+            "flex-1 resize-none rounded-2xl border px-4 py-3 text-sm",
+            "bg-background leading-relaxed",
             "focus:outline-none focus:ring-2 focus:ring-ring",
             "transition-shadow",
+            "tg-thin-scroll",
           )}
         />
         <Button

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ConversationList } from "./conversation-list";
 import { ChatPanel } from "./chat-panel";
@@ -15,6 +15,29 @@ import type {
   MessageWithRelations,
   Profile,
 } from "@/lib/supabase/types";
+
+// Bound the in-memory message cache so a long-lived tab doesn't
+// accumulate every conversation's history. 30 × ~200 msgs is plenty
+// while keeping the working set well under a few MB.
+const MAX_CACHED_CONVOS = 30;
+
+function setBounded<T>(
+  prev: Map<string, T>,
+  key: string,
+  value: T,
+  pinKey: string | null,
+): Map<string, T> {
+  const next = new Map(prev);
+  // Map preserves insertion order — re-set to bump to "most recent".
+  next.delete(key);
+  next.set(key, value);
+  while (next.size > MAX_CACHED_CONVOS) {
+    const oldest = next.keys().next().value;
+    if (!oldest || oldest === pinKey) break;
+    next.delete(oldest);
+  }
+  return next;
+}
 
 interface ConvoListItem {
   conversation: Conversation;
@@ -91,6 +114,13 @@ export function MessagesClient({
     return m;
   });
 
+  // Mirror the live activeId in a ref so non-reactive callbacks (cache
+  // eviction, realtime handlers) can read it without re-subscribing.
+  const activeIdRef = useRef<string | null>(activeId);
+  useEffect(() => {
+    activeIdRef.current = activeId;
+  }, [activeId]);
+
   // Per-conversation unread counts (derived locally; no server roundtrip).
   const [unreadByConv, setUnreadByConv] = useState<Map<string, number>>(
     new Map(),
@@ -131,16 +161,15 @@ export function MessagesClient({
             : null,
         };
       });
-      setMessageCache((prev) => {
-        const next = new Map(prev);
-        next.set(convId, msgs);
-        return next;
-      });
-      setParticipantsCache((prev) => {
-        const next = new Map(prev);
-        next.set(convId, (pRes.data ?? []) as ConversationParticipant[]);
-        return next;
-      });
+      setMessageCache((prev) => setBounded(prev, convId, msgs, activeIdRef.current));
+      setParticipantsCache((prev) =>
+        setBounded(
+          prev,
+          convId,
+          (pRes.data ?? []) as ConversationParticipant[],
+          activeIdRef.current,
+        ),
+      );
     },
     [supabase, profileById],
   );
@@ -487,9 +516,6 @@ export function MessagesClient({
       <section className="overflow-hidden flex flex-col bg-background">
         {activeConversation ? (
           <ChatPanel
-            // Use the conversation id as the React key so the panel
-            // resets composer/scroll when the user switches threads.
-            key={activeConversation.id}
             conversation={activeConversation}
             participants={activeParticipantsForChat}
             myParticipant={myActiveParticipant}

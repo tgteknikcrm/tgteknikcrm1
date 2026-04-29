@@ -123,9 +123,9 @@ function formatDayLabel(iso: string): string {
 
 export function ChatPanel({
   conversation,
-  participants: initialParticipants,
+  participants,
   myParticipant,
-  initialMessages,
+  initialMessages: messages,
   currentUserId,
   people,
 }: Props) {
@@ -136,12 +136,11 @@ export function ChatPanel({
     [people],
   );
 
-  const [messages, setMessages] = useState<MessageWithRelations[]>(initialMessages);
-  const [participants, setParticipants] = useState(initialParticipants);
-  // Optimistic messages — pushed instantly when the user taps Send so the
-  // bubble appears with no perceived delay. They live alongside the
-  // server-confirmed `messages` array, keyed by a `temp_*` id. Realtime
-  // INSERT replaces them by content match (or we drop them on success).
+  // `messages` and `participants` come straight from props now —
+  // MessagesClient owns the cache and keeps them up to date via
+  // Realtime. We only own the small UI state below.
+  // Optimistic messages live in the composer's parent here, scoped
+  // per-conversation.
   const [optimistic, setOptimistic] = useState<MessageWithRelations[]>([]);
   const [replyTo, setReplyTo] = useState<MessageWithRelations | null>(null);
   const [editing, setEditing] = useState<MessageWithRelations | null>(null);
@@ -150,16 +149,36 @@ export function ChatPanel({
   // userId → expiresAt timestamp for "is currently typing"
   const [typingMap, setTypingMap] = useState<Map<string, number>>(new Map());
 
-  // Reset state whenever the active conversation changes (route change → key
-  // changes via parent re-render). The arrays come from props.
+  // Drop the optimistic queue + per-thread UI state when the user
+  // switches conversations. (Keyed off the conversation id so the
+  // reset doesn't fire on every render.)
   useEffect(() => {
-    setMessages(initialMessages);
-    setParticipants(initialParticipants);
     setOptimistic([]);
     setReplyTo(null);
     setEditing(null);
     setTagPickerOpen(false);
-  }, [conversation.id, initialMessages, initialParticipants]);
+    setTypingMap(new Map());
+  }, [conversation.id]);
+
+  // When my own message lands from the server (realtime → cache → props),
+  // pop the oldest optimistic placeholder so we don't show duplicates.
+  useEffect(() => {
+    setOptimistic((prev) => {
+      if (prev.length === 0) return prev;
+      const myConfirmed = messages.filter(
+        (m) => m.author_id === currentUserId,
+      );
+      // Match the oldest optimistic to the newest confirmed by body —
+      // good enough for our case since we send sequentially.
+      const last = myConfirmed[myConfirmed.length - 1];
+      if (!last) return prev;
+      const idx = prev.findIndex((p) => (p.body ?? "") === (last.body ?? ""));
+      if (idx === -1) return prev;
+      const next = [...prev];
+      next.splice(idx, 1);
+      return next;
+    });
+  }, [messages, currentUserId]);
 
   // ── Optimistic helpers (passed to the composer) ─────────────────
   function pushOptimistic(msg: MessageWithRelations) {
@@ -520,10 +539,13 @@ export function ChatPanel({
                     new Date(prev.created_at).getTime() <
                     60 * 1000;
                 const fromMe = m.author_id === currentUserId;
+                const isOptimistic = m.id.startsWith("temp_");
                 // Read receipt: if any other participant's last_read_at is
                 // after this message's created_at, treat it as "seen".
-                let receipt: "sent" | "delivered" | "seen" = "sent";
-                if (fromMe) {
+                let receipt: "sending" | "sent" | "delivered" | "seen" = "sent";
+                if (isOptimistic) {
+                  receipt = "sending";
+                } else if (fromMe) {
                   const others = participants.filter(
                     (p) => p.user_id !== currentUserId,
                   );
@@ -628,7 +650,7 @@ function MessageBubble({
   message: MessageWithRelations;
   fromMe: boolean;
   consecutive: boolean;
-  receipt: "sent" | "delivered" | "seen";
+  receipt: "sending" | "sent" | "delivered" | "seen";
   showAuthorName: boolean;
   accent: string;
   accentText: string;
@@ -636,6 +658,7 @@ function MessageBubble({
   onEdit: () => void;
   repliedToMessage: MessageWithRelations | null;
 }) {
+  const isOptimistic = m.id.startsWith("temp_");
   const [menuOpen, setMenuOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const supabase = useMemo(() => createClient(), []);
@@ -724,6 +747,7 @@ function MessageBubble({
                 ? "rounded-br-sm"
                 : "rounded-bl-sm bg-card border",
               isDeleted && "italic opacity-60",
+              isOptimistic && "opacity-75",
             )}
             style={
               fromMe
@@ -857,9 +881,17 @@ function ReadReceipt({
   receipt,
   accentText,
 }: {
-  receipt: "sent" | "delivered" | "seen";
+  receipt: "sending" | "sent" | "delivered" | "seen";
   accentText: string;
 }) {
+  if (receipt === "sending") {
+    return (
+      <Loader2
+        className="size-3 animate-spin"
+        style={{ color: accentText }}
+      />
+    );
+  }
   if (receipt === "seen") {
     return (
       <CheckCheck
@@ -893,25 +925,57 @@ function BubbleActionMenu({
   onOpenChange: (v: boolean) => void;
   pending: boolean;
 }) {
-  if (isDeleted) return <div className="size-7" />;
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  // Click-outside closes the menu. We don't rely on onMouseLeave because
+  // the cursor easily slips off and the menu would close before the user
+  // clicks an option (the original "buttons don't work" complaint).
+  useEffect(() => {
+    if (!open) return;
+    function onDoc(e: MouseEvent) {
+      const r = ref.current;
+      if (r && !r.contains(e.target as Node)) onOpenChange(false);
+    }
+    function onEsc(e: KeyboardEvent) {
+      if (e.key === "Escape") onOpenChange(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onEsc);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onEsc);
+    };
+  }, [open, onOpenChange]);
+
+  if (isDeleted) return <div className="size-8" />;
   return (
-    <div className="relative opacity-0 group-hover/msg:opacity-100 transition">
+    <div ref={ref} className="relative">
       <Button
         variant="ghost"
         size="icon"
-        className="size-7"
-        onClick={() => onOpenChange(!open)}
+        // Always visible (not hover-gated) so users can find the menu.
+        // A subtle background tint signals it's interactive.
+        className={cn(
+          "size-8 rounded-full bg-background/70 backdrop-blur-sm border shadow-sm",
+          "opacity-70 hover:opacity-100 hover:bg-background transition",
+          open && "opacity-100 bg-background ring-2 ring-primary/40",
+        )}
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpenChange(!open);
+        }}
         aria-label="Mesaj eylemleri"
+        title="Mesaj eylemleri"
       >
-        <MoreVertical className="size-3.5" />
+        <MoreVertical className="size-4" />
       </Button>
       {open && (
         <div
           className={cn(
-            "absolute z-20 top-full mt-1 min-w-32 rounded-md border bg-popover shadow-lg p-1",
+            "absolute z-30 top-full mt-1 min-w-40 rounded-lg border bg-popover shadow-xl p-1",
+            "animate-tg-fade-in",
             fromMe ? "right-0" : "left-0",
           )}
-          onMouseLeave={() => onOpenChange(false)}
         >
           <button
             type="button"
@@ -919,9 +983,9 @@ function BubbleActionMenu({
               onReply();
               onOpenChange(false);
             }}
-            className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-accent"
+            className="flex items-center gap-2 w-full px-2.5 py-2 text-sm rounded hover:bg-accent transition"
           >
-            <Reply className="size-3.5" /> Yanıtla
+            <Reply className="size-4" /> Yanıtla
           </button>
           {fromMe && (
             <>
@@ -931,20 +995,20 @@ function BubbleActionMenu({
                   onEdit();
                   onOpenChange(false);
                 }}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-accent"
+                className="flex items-center gap-2 w-full px-2.5 py-2 text-sm rounded hover:bg-accent transition"
               >
-                <Pencil className="size-3.5" /> Düzenle
+                <Pencil className="size-4" /> Düzenle
               </button>
               <button
                 type="button"
                 onClick={onDelete}
                 disabled={pending}
-                className="flex items-center gap-2 w-full px-2 py-1.5 text-sm rounded hover:bg-red-500/10 text-red-600"
+                className="flex items-center gap-2 w-full px-2.5 py-2 text-sm rounded hover:bg-red-500/10 text-red-600 transition"
               >
                 {pending ? (
-                  <Loader2 className="size-3.5 animate-spin" />
+                  <Loader2 className="size-4 animate-spin" />
                 ) : (
-                  <Trash2 className="size-3.5" />
+                  <Trash2 className="size-4" />
                 )}
                 Sil
               </button>
@@ -1050,65 +1114,103 @@ const RawAttachmentPreview = function AttachmentPreview({
   if (isImage && signedUrl) {
     // Use Supabase image transform for the inline thumb (resize to 600px wide,
     // re-encode as webp). Click-through link points to the original URL so
-    // users can still see the full-size file.
+    // users can still see the full-size file. The download button uses
+    // `download` to force a save dialog.
     const sep = signedUrl.includes("?") ? "&" : "?";
     const thumbUrl = `${signedUrl}${sep}width=600&resize=contain&quality=80`;
     return (
-      <a
-        href={signedUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block rounded-lg overflow-hidden max-w-xs"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={thumbUrl}
-          alt={a.file_name}
-          loading="lazy"
-          decoding="async"
-          className="block max-h-64 w-auto"
-        />
-      </a>
+      <div className="relative inline-block group/att rounded-lg overflow-hidden max-w-xs">
+        <a
+          href={signedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={thumbUrl}
+            alt={a.file_name}
+            loading="lazy"
+            decoding="async"
+            className="block max-h-64 w-auto"
+          />
+        </a>
+        {/* Always-visible download button on the image */}
+        <a
+          href={signedUrl}
+          download={a.file_name}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            "absolute top-1.5 right-1.5 size-8 rounded-full bg-black/60 text-white",
+            "flex items-center justify-center backdrop-blur-sm shadow-md",
+            "opacity-80 group-hover/att:opacity-100 hover:scale-110 transition",
+          )}
+          title="İndir"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Download className="size-4" />
+        </a>
+      </div>
     );
   }
 
   return (
-    <a
-      href={signedUrl ?? undefined}
-      target="_blank"
-      rel="noopener noreferrer"
+    <div
       className={cn(
-        "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
-        "hover:bg-black/5 transition max-w-xs",
+        "flex items-center gap-2 rounded-md border px-2.5 py-1.5 max-w-xs",
         onDark ? "bg-black/10 border-white/20" : "bg-card border-muted",
       )}
     >
-      <div
-        className={cn(
-          "size-8 rounded-md flex items-center justify-center shrink-0",
-          isImage ? "bg-blue-500/15" : "bg-amber-500/15",
-        )}
+      <a
+        href={signedUrl ?? undefined}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition"
       >
-        {isImage ? (
-          <ImageIcon className="size-4" />
-        ) : (
-          <FileText className="size-4" />
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-xs font-semibold truncate">{a.file_name}</div>
-        <div className="text-[10px] opacity-70 tabular-nums">
-          {sizeKb} KB · {a.mime_type.split("/")[1] ?? a.mime_type}
+        <div
+          className={cn(
+            "size-9 rounded-md flex items-center justify-center shrink-0",
+            isImage ? "bg-blue-500/15" : "bg-amber-500/15",
+          )}
+        >
+          {isImage ? (
+            <ImageIcon className="size-4" />
+          ) : (
+            <FileText className="size-4" />
+          )}
         </div>
-      </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-xs font-semibold truncate">{a.file_name}</div>
+          <div className="text-[10px] opacity-70 tabular-nums">
+            {sizeKb} KB · {a.mime_type.split("/")[1] ?? a.mime_type}
+          </div>
+        </div>
+      </a>
+      {/* Dedicated download button — always visible, forces "save as" */}
       {signedUrl ? (
-        <Download className="size-4 opacity-70 shrink-0" />
+        <a
+          href={signedUrl}
+          download={a.file_name}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={cn(
+            "size-7 rounded-md flex items-center justify-center shrink-0",
+            "border transition hover:scale-105",
+            onDark
+              ? "bg-white/10 border-white/20 hover:bg-white/20"
+              : "bg-background hover:bg-muted",
+          )}
+          title="İndir"
+        >
+          <Download className="size-3.5" />
+        </a>
       ) : error ? (
-        <X className="size-4 text-red-500" />
+        <X className="size-4 text-red-500 shrink-0" />
       ) : (
-        <Loader2 className="size-4 animate-spin opacity-70" />
+        <Loader2 className="size-4 animate-spin opacity-70 shrink-0" />
       )}
-    </a>
+    </div>
   );
 };
 

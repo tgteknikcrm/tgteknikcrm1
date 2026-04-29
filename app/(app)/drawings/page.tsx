@@ -19,6 +19,7 @@ import {
 import { FileImage, FileText, Image as ImageIcon, FileQuestion } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { UploadDialog } from "./upload-dialog";
+import { DrawingsDropShell } from "./drawings-drop-shell";
 import { DownloadButton, DeleteDrawingButton } from "./drawing-actions";
 import { ViewerDialog } from "./viewer-dialog";
 import { EditorDialog } from "./editor-dialog";
@@ -67,10 +68,10 @@ export default async function DrawingsPage() {
   }
 
   return (
-    <>
+    <DrawingsDropShell jobs={jobs}>
       <PageHeader
         title="Teknik Resimler"
-        description="Parça teknik resimleri ve çizimler (PDF, görsel, DWG/DXF)"
+        description="Parça teknik resimleri ve çizimler (PDF, görsel, DWG/DXF) · Dosyaları sayfaya sürükleyebilirsin"
         actions={<UploadDialog jobs={jobs} />}
       />
 
@@ -158,6 +159,6 @@ export default async function DrawingsPage() {
           )}
         </CardContent>
       </Card>
-    </>
+    </DrawingsDropShell>
   );
 }

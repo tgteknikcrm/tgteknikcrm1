@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   Dialog,
   DialogContent,
@@ -25,9 +25,39 @@ import { uploadDrawing } from "./actions";
 import type { Job } from "@/lib/supabase/types";
 import { Loader2, Upload } from "lucide-react";
 
-export function UploadDialog({ jobs }: { jobs: Job[] }) {
-  const [open, setOpen] = useState(false);
+interface Props {
+  jobs: Job[];
+  /** When set, dialog opens automatically with this file pre-selected.
+   *  Used by the page-level drag-drop overlay. */
+  prefillFile?: File | null;
+  /** Imperative trigger from a parent (e.g. page-level drop). */
+  externalOpen?: boolean;
+  onExternalOpenChange?: (v: boolean) => void;
+}
+
+export function UploadDialog({
+  jobs,
+  prefillFile = null,
+  externalOpen,
+  onExternalOpenChange,
+}: Props) {
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = externalOpen ?? internalOpen;
+  const setOpen = (v: boolean) => {
+    if (externalOpen !== undefined) onExternalOpenChange?.(v);
+    else setInternalOpen(v);
+  };
   const [pending, startTransition] = useTransition();
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  // When the page-level drop hands us a file, mirror it into the file
+  // input so the form submission picks it up automatically.
+  useEffect(() => {
+    if (!prefillFile || !fileRef.current) return;
+    const dt = new DataTransfer();
+    dt.items.add(prefillFile);
+    fileRef.current.files = dt.files;
+  }, [prefillFile]);
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -57,6 +87,7 @@ export function UploadDialog({ jobs }: { jobs: Job[] }) {
           <div className="space-y-1.5">
             <Label htmlFor="file">Dosya (PDF / Görsel) *</Label>
             <Input
+              ref={fileRef}
               id="file"
               name="file"
               type="file"

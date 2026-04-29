@@ -192,6 +192,32 @@ main > * {
   animation: tg-fade-in 220ms ease-out both;
 }
 
+/* Slim, themed scrollbar without the OS spinner arrows on the ends.
+   Used on the message composer textarea (and reusable elsewhere). */
+.tg-thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 120, 120, 0.35) transparent;
+}
+.tg-thin-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.tg-thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.tg-thin-scroll::-webkit-scrollbar-thumb {
+  background: rgba(120, 120, 120, 0.35);
+  border-radius: 9999px;
+}
+.tg-thin-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 120, 120, 0.55);
+}
+.tg-thin-scroll::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* Stagger list items inside .tg-stagger > * children — used by the
    conversation list so rows don't all flash in at once. */
 .tg-stagger > * {
