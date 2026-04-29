@@ -846,6 +846,69 @@ export function formatWallpaper(p: ChatWallpaperPattern, color: string): string 
   return `pattern:${p}${color}`;
 }
 
+// ── Calendar ────────────────────────────────────────────────────────
+export type CalendarEventColor =
+  | "blue"
+  | "cyan"
+  | "green"
+  | "amber"
+  | "orange"
+  | "red"
+  | "pink"
+  | "violet"
+  | "gray";
+
+export type CalendarAttendeeStatus =
+  | "pending"
+  | "accepted"
+  | "declined"
+  | "tentative";
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  description: string | null;
+  location: string | null;
+  starts_at: string;
+  ends_at: string;
+  all_day: boolean;
+  color: CalendarEventColor;
+  job_id: string | null;
+  machine_id: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CalendarEventAttendee {
+  event_id: string;
+  user_id: string;
+  status: CalendarAttendeeStatus;
+  responded_at: string | null;
+}
+
+export const CALENDAR_COLOR_MAP: Record<
+  CalendarEventColor,
+  { bg: string; bgSoft: string; border: string; dot: string; name: string }
+> = {
+  blue:   { bg: "bg-blue-500",   bgSoft: "bg-blue-500/15",   border: "border-blue-500",   dot: "bg-blue-500",   name: "Mavi" },
+  cyan:   { bg: "bg-cyan-500",   bgSoft: "bg-cyan-500/15",   border: "border-cyan-500",   dot: "bg-cyan-500",   name: "Cyan" },
+  green:  { bg: "bg-emerald-500",bgSoft: "bg-emerald-500/15",border: "border-emerald-500",dot: "bg-emerald-500",name: "Yeşil" },
+  amber:  { bg: "bg-amber-500",  bgSoft: "bg-amber-500/15",  border: "border-amber-500",  dot: "bg-amber-500",  name: "Sarı" },
+  orange: { bg: "bg-orange-500", bgSoft: "bg-orange-500/15", border: "border-orange-500", dot: "bg-orange-500", name: "Turuncu" },
+  red:    { bg: "bg-red-500",    bgSoft: "bg-red-500/15",    border: "border-red-500",    dot: "bg-red-500",    name: "Kırmızı" },
+  pink:   { bg: "bg-pink-500",   bgSoft: "bg-pink-500/15",   border: "border-pink-500",   dot: "bg-pink-500",   name: "Pembe" },
+  violet: { bg: "bg-violet-500", bgSoft: "bg-violet-500/15", border: "border-violet-500", dot: "bg-violet-500", name: "Mor" },
+  gray:   { bg: "bg-zinc-500",   bgSoft: "bg-zinc-500/15",   border: "border-zinc-500",   dot: "bg-zinc-500",   name: "Gri" },
+};
+
+export const CALENDAR_ATTENDEE_LABEL: Record<CalendarAttendeeStatus, string> = {
+  pending: "Yanıt Bekleniyor",
+  accepted: "Katılıyor",
+  declined: "Katılmıyor",
+  tentative: "Belki",
+};
+
 // Predefined Outlook-style label palette (key + bg/text classes + name)
 export const CONVERSATION_TAG_PRESETS: ReadonlyArray<{
   key: string;

@@ -13,6 +13,7 @@ import {
   Truck,
   Code2,
   CalendarDays,
+  Calendar,
   AlertTriangle,
   MessageSquare,
   type LucideIcon,
@@ -28,6 +29,7 @@ export interface NavItem {
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/messages", label: "Mesajlar", icon: MessageSquare },
+  { href: "/calendar", label: "Takvim", icon: Calendar },
   { href: "/timeline", label: "Zaman Çizelgesi", icon: CalendarDays },
   { href: "/production", label: "Üretim Formları", icon: ClipboardList },
   { href: "/jobs", label: "İşler", icon: FileText },
