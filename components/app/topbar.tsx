@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Search,
-  MessageSquare,
   Factory,
   LogOut,
   Settings,
@@ -23,7 +22,7 @@ import Link from "next/link";
 import { signOut } from "@/app/(auth)/login/actions";
 import { formatPhoneForDisplay } from "@/lib/phone";
 import { NotificationBell } from "./notification-bell";
-import { toast } from "sonner";
+import { MessagesButton } from "./messages-button";
 
 interface TopbarProps {
   isAdmin: boolean;
@@ -86,20 +85,8 @@ export function Topbar({ isAdmin, profile }: TopbarProps) {
       </button>
 
       <div className="ml-auto flex items-center gap-1">
-        {/* Messages — placeholder until the messaging module ships */}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-9"
-          title="Mesajlar (yakında)"
-          onClick={() =>
-            toast.message("Mesajlar yakında", {
-              description: "Operatör/yönetici mesajlaşma modülü geliştirme aşamasında.",
-            })
-          }
-        >
-          <MessageSquare className="size-5" />
-        </Button>
+        {/* Messages — links to /messages with realtime unread badge */}
+        <MessagesButton />
 
         {/* Notifications */}
         <NotificationBell variant="icon" />

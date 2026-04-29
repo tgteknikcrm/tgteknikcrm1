@@ -14,6 +14,7 @@ import {
   Code2,
   CalendarDays,
   AlertTriangle,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 
@@ -26,6 +27,7 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/messages", label: "Mesajlar", icon: MessageSquare },
   { href: "/timeline", label: "Zaman Çizelgesi", icon: CalendarDays },
   { href: "/production", label: "Üretim Formları", icon: ClipboardList },
   { href: "/jobs", label: "İşler", icon: FileText },

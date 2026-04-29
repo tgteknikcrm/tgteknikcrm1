@@ -240,6 +240,7 @@ tgteknikcrm/
 | 0012 | qc_spec_bubble_coords.sql | quality_specs.bubble_x/bubble_y (0..1 normalize) — resim üzerinde balon konumlandırma |
 | 0013 | activity_events.sql | activity_events + activity_reads + activity_event_type enum (~32 değer) + measurement.nok fail-safe trigger + Realtime publication |
 | 0014 | qc_bubble_appearance.sql | quality_specs.bubble_size (sm/md/lg/xl) + bubble_shape (circle/square/diamond/triangle/hexagon/star) — balon görünüm özelleştirme |
+| 0015 | messaging.sql | conversations + conversation_participants + messages + message_attachments + RLS (is_conversation_participant helper) + Realtime publication + private `message-attachments` storage bucket |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz

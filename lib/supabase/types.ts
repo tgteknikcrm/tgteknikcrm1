@@ -748,3 +748,88 @@ export const CAD_FILE_KIND_LABEL: Record<CadFileKind, string> = {
 // Common CNC/CAD extensions to advertise in the file picker.
 export const CAD_ACCEPT_EXTENSIONS =
   ".nc,.tap,.gcode,.ngc,.iso,.eia,.cnc,.mpf,.step,.stp,.stl,.iges,.igs,.dxf,.dwg,.x_t,.sldprt,.pdf,.txt,.log";
+
+// ── Messaging ──────────────────────────────────────────────────────
+export type ConversationKind = "direct" | "group";
+
+export interface Conversation {
+  id: string;
+  kind: ConversationKind;
+  title: string | null;
+  color: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  last_message_at: string | null;
+  last_message_preview: string | null;
+}
+
+export interface ConversationParticipant {
+  conversation_id: string;
+  user_id: string;
+  role: "admin" | "member";
+  joined_at: string;
+  last_read_at: string | null;
+}
+
+export interface Message {
+  id: string;
+  conversation_id: string;
+  author_id: string | null;
+  body: string | null;
+  reply_to: string | null;
+  created_at: string;
+  edited_at: string | null;
+  deleted_at: string | null;
+}
+
+export interface MessageAttachment {
+  id: string;
+  message_id: string;
+  storage_path: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+// Convenience type for message lists rendered in the UI — joins author profile
+// and any attachments.
+export interface MessageWithRelations extends Message {
+  author?: {
+    id: string;
+    full_name: string | null;
+    phone: string | null;
+  } | null;
+  attachments?: MessageAttachment[];
+}
+
+// Curated palette for conversation accent colors.
+export const CONVERSATION_COLOR_PRESETS: ReadonlyArray<{
+  hex: string;
+  name: string;
+}> = [
+  { hex: "#3b82f6", name: "Mavi" },
+  { hex: "#06b6d4", name: "Cyan" },
+  { hex: "#10b981", name: "Yeşil" },
+  { hex: "#84cc16", name: "Limon" },
+  { hex: "#f59e0b", name: "Sarı" },
+  { hex: "#f97316", name: "Turuncu" },
+  { hex: "#ef4444", name: "Kırmızı" },
+  { hex: "#ec4899", name: "Pembe" },
+  { hex: "#8b5cf6", name: "Mor" },
+  { hex: "#6366f1", name: "İndigo" },
+  { hex: "#1f2937", name: "Siyah" },
+];
+
+export function readableTextOn(hex: string | null | undefined): string {
+  // Pick black or white text based on the perceived luminance of the bg.
+  if (!hex) return "white";
+  const m = hex.replace("#", "");
+  if (m.length !== 6) return "white";
+  const r = parseInt(m.slice(0, 2), 16);
+  const g = parseInt(m.slice(2, 4), 16);
+  const b = parseInt(m.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? "#0f172a" : "white";
+}
