@@ -467,7 +467,25 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (7c67fdb — 2026-04-30)
+## Son commit (b5a32d9 — 2026-04-30)
+
+**Hot-fix: /jobs runtime error + ProductForm sections görünür**
+
+### 1. `/jobs` runtime error
+`'use client'` dosyada export edilen `computeJobsRange()` server component'ten çağrılamadı:
+> Attempted to call computeJobsRange() from the server but computeJobsRange is on the client.
+
+**Next.js App Router kuralı:** `'use client'` dosyasından sadece React component export edebilirsin; saf utility fonksiyonlar bile server'dan çağrılamaz. Çözüm: yeni dosya `app/(app)/jobs/jobs-range.ts` (NO 'use client'); `computeJobsRange` + `JobsPeriod` + `JobsRange` buraya taşındı. `date-range-filter.tsx` sadece type re-export ediyor. Memory: `feedback_use_client_export.md`.
+
+### 2. ProductForm görünmüyordu
+Sadece "Tanımlama" `defaultOpen` idi → kullanıcı **diğer 8 bölümün** açıldığından habersizdi (özellikle Takım Listesi). Hepsi `defaultOpen=true` yapıldı.
+
+### 3. `/products/new` onboarding hint
+"Kaydettikten sonra detay sayfasından eklenecekler" kartı eklendi: 4 tile (Görseller / Teknik Resim / CAD/CAM / Takımlar) + açıklama. Form save → `/products/[id]` redirect olunca kullanıcı tab'larda neyi nereye yükleyeceğini anında biliyor.
+
+---
+
+## Önceki commit (7c67fdb — 2026-04-30)
 
 **İşler: makine bazlı kart grid + 4-step + tahmini bitiş + tarih filtresi**
 
