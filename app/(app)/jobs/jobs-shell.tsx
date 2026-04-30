@@ -335,7 +335,7 @@ export function JobsShell({
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="space-y-4">
           {groups.map((g) => {
             // Calculate per-machine remaining minutes
             let machineRemaining = 0;

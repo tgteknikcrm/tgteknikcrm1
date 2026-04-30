@@ -1,7 +1,7 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/app/page-header";
 import { createClient } from "@/lib/supabase/server";
-import { AlertCircle, Wrench } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import type { Machine } from "@/lib/supabase/types";
 import { formatDate } from "@/lib/utils";
 import { MachinesGrid, type MachineCardData } from "./machines-grid";
@@ -23,19 +23,12 @@ type EntryRow = {
   operator: { full_name: string } | null;
 };
 
-type LowToolRow = {
-  id: string;
-  name: string;
-  quantity: number;
-  min_quantity: number;
-};
-
 async function getDashboardData() {
   try {
     const supabase = await createClient();
     const today = new Date().toISOString().slice(0, 10);
 
-    const [machinesRes, todayEntriesRes, toolsLowRes] = await Promise.all([
+    const [machinesRes, todayEntriesRes] = await Promise.all([
       supabase.from("machines").select("*").order("name"),
       supabase
         .from("production_entries")
@@ -46,10 +39,6 @@ async function getDashboardData() {
         )
         .eq("entry_date", today)
         .order("created_at", { ascending: false }),
-      supabase
-        .from("tools")
-        .select("id, name, quantity, min_quantity")
-        .order("quantity"),
     ]);
 
     const machines: Machine[] = machinesRes.data ?? [];
@@ -96,15 +85,10 @@ async function getDashboardData() {
       };
     });
 
-    const toolsLow = ((toolsLowRes.data ?? []) as LowToolRow[]).filter(
-      (t) => (t.quantity ?? 0) <= (t.min_quantity ?? 0),
-    );
-
-    return { machineCards, toolsLow, configured: true };
+    return { machineCards, configured: true };
   } catch {
     return {
       machineCards: [] as MachineCardData[],
-      toolsLow: [] as LowToolRow[],
       configured: false,
     };
   }
@@ -170,40 +154,6 @@ export default async function DashboardPage() {
       />
 
       <MachinesGrid cards={data.machineCards} />
-
-      <Card className="mt-8">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Wrench className="size-4" /> Stokta Azalan Takımlar
-            {data.toolsLow.length > 0 && (
-              <span className="ml-1 inline-flex items-center justify-center h-5 min-w-5 px-1.5 rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[11px] font-bold tabular-nums">
-                {data.toolsLow.length}
-              </span>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {data.toolsLow.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Tüm takımlar stok seviyesinin üstünde.
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {data.toolsLow.slice(0, 12).map((t) => (
-                <div
-                  key={t.id}
-                  className="flex items-center justify-between text-sm p-2 rounded bg-muted/50 border border-amber-500/20"
-                >
-                  <span className="font-medium truncate">{t.name}</span>
-                  <span className="text-amber-600 font-mono shrink-0 ml-2">
-                    {t.quantity} / min {t.min_quantity}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </>
   );
 }

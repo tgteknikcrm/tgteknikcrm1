@@ -165,6 +165,13 @@ export function ChatPanel({
   const [pendingHeaderAction, startHeaderAction] = useTransition();
   // userId → expiresAt timestamp for "is currently typing"
   const [typingMap, setTypingMap] = useState<Map<string, number>>(new Map());
+  // Optimistic delete set. The server soft-deletes (sets deleted_at)
+  // and we wait for Realtime UPDATE to flow back into the cache, but
+  // websockets are flaky over LAN/cellular — without an optimistic
+  // overlay the user clicks "Sil" and nothing visible happens.
+  const [optimisticDeletedIds, setOptimisticDeletedIds] = useState<Set<string>>(
+    new Set(),
+  );
 
   // Drop the optimistic queue + per-thread UI state when the user
   // switches conversations. (Keyed off the conversation id so the
@@ -175,7 +182,42 @@ export function ChatPanel({
     setEditing(null);
     setTagPickerOpen(false);
     setTypingMap(new Map());
+    setOptimisticDeletedIds(new Set());
   }, [conversation.id]);
+
+  // Drop optimistic-deleted ids the moment the server prop reports
+  // the same id with a deleted_at — drag-fix style sync, no timing.
+  useEffect(() => {
+    if (optimisticDeletedIds.size === 0) return;
+    setOptimisticDeletedIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of prev) {
+        const serverMsg = messages.find((m) => m.id === id);
+        if (!serverMsg || serverMsg.deleted_at) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [messages, optimisticDeletedIds]);
+
+  function markOptimisticDeleted(id: string) {
+    setOptimisticDeletedIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }
+  function unmarkOptimisticDeleted(id: string) {
+    setOptimisticDeletedIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
 
   // When my own message lands from the server (realtime → cache → props),
   // pop the oldest optimistic placeholder so we don't show duplicates.
@@ -662,6 +704,9 @@ export function ChatPanel({
                         ? profileById.get(m.author_id) ?? null
                         : null
                     }
+                    optimisticDeleted={optimisticDeletedIds.has(m.id)}
+                    onOptimisticDelete={markOptimisticDeleted}
+                    onOptimisticDeleteRollback={unmarkOptimisticDeleted}
                   />
                 );
               })}
@@ -732,6 +777,9 @@ function MessageBubble({
   onEdit,
   repliedToMessage,
   authorProfile,
+  optimisticDeleted,
+  onOptimisticDelete,
+  onOptimisticDeleteRollback,
 }: {
   message: MessageWithRelations;
   fromMe: boolean;
@@ -744,18 +792,38 @@ function MessageBubble({
   onEdit: () => void;
   repliedToMessage: MessageWithRelations | null;
   authorProfile: Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at"> | null;
+  optimisticDeleted: boolean;
+  onOptimisticDelete: (id: string) => void;
+  onOptimisticDeleteRollback: (id: string) => void;
 }) {
+  const router = useRouter();
   const isOptimistic = m.id.startsWith("temp_");
   const [pending, startTransition] = useTransition();
-  const isDeleted = !!m.deleted_at;
+  const isDeleted = !!m.deleted_at || optimisticDeleted;
   const authorLabel =
     m.author?.full_name || formatPhoneForDisplay(m.author?.phone ?? null) || "?";
 
   function onDelete() {
+    // Don't try to soft-delete a message that hasn't been saved yet.
+    if (isOptimistic) {
+      toast.error("Mesaj henüz gönderilmedi, biraz bekle.");
+      return;
+    }
     if (!confirm("Bu mesaj silinsin mi?")) return;
+    // Optimistic mark — bubble flips to "Bu mesaj silindi" instantly,
+    // even if Realtime websocket is flaky. The shell's sync effect
+    // clears the override the moment the server prop catches up.
+    onOptimisticDelete(m.id);
     startTransition(async () => {
       const r = await deleteMessage(m.id);
-      if (r.error) toast.error(r.error);
+      if (r.error) {
+        toast.error(r.error);
+        onOptimisticDeleteRollback(m.id);
+        return;
+      }
+      // Pull fresh server data so the deleted_at lands even if the
+      // Realtime event got dropped (best-effort).
+      router.refresh();
     });
   }
 
