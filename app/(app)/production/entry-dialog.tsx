@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import {
   Dialog,
   DialogContent,
@@ -46,9 +46,16 @@ export function EntryDialog({ entry, machines, operators, jobs, trigger }: Props
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const today = new Date().toISOString().slice(0, 10);
-
-  const [entryDate, setEntryDate] = useState(entry?.entry_date ?? today);
+  // SSR-safe: initial value matches server (empty string), filled
+  // post-hydration. new Date() in useState initializer drifts across
+  // server/client clocks → hydration mismatch.
+  const [entryDate, setEntryDate] = useState(entry?.entry_date ?? "");
+  useEffect(() => {
+    if (!entry?.entry_date && !entryDate) {
+      setEntryDate(new Date().toISOString().slice(0, 10));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [shift, setShift] = useState<Shift>(entry?.shift ?? "sabah");
   const [machineId, setMachineId] = useState(entry?.machine_id ?? machines[0]?.id ?? "");
   const [operatorId, setOperatorId] = useState(entry?.operator_id ?? "none");

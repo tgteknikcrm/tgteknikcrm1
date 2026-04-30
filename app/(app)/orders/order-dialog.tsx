@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -45,10 +45,6 @@ interface Props {
   defaultDescription?: string;
 }
 
-function rowKey() {
-  return Math.random().toString(36).slice(2);
-}
-
 type Row = OrderItemInput & { _key: string };
 
 export function OrderDialog({
@@ -61,18 +57,26 @@ export function OrderDialog({
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
+  // SSR-safe row key generator — useRef counter is deterministic
+  // across server/client (always starts at 0), so initial useState
+  // values match. New rows added during the session can keep using
+  // the counter — Math.random was triggering hydration mismatches.
+  const keyCounter = useRef(0);
+  const nextRowKey = () => `r-${++keyCounter.current}`;
+
   const [supplierId, setSupplierId] = useState<string>(order?.supplier_id ?? "none");
   const [status, setStatus] = useState<PoStatus>(order?.status ?? "taslak");
-  const [orderDate, setOrderDate] = useState<string>(
-    order?.order_date ?? new Date().toISOString().slice(0, 10),
-  );
+  // Date initial state must NOT call new Date() during SSR — server
+  // and client clocks can disagree across midnight / TZ. Initialize
+  // empty, fill on mount via useEffect below.
+  const [orderDate, setOrderDate] = useState<string>(order?.order_date ?? "");
   const [expectedDate, setExpectedDate] = useState<string>(order?.expected_date ?? "");
   const [orderNo, setOrderNo] = useState<string>(order?.order_no ?? "");
   const [notes, setNotes] = useState<string>(order?.notes ?? "");
   const [rows, setRows] = useState<Row[]>(
     order?.items?.length
       ? order.items.map((it) => ({
-          _key: rowKey(),
+          _key: nextRowKey(),
           id: it.id,
           category: it.category,
           description: it.description,
@@ -83,6 +87,14 @@ export function OrderDialog({
         }))
       : [],
   );
+
+  // Backfill orderDate post-hydration for new orders.
+  useEffect(() => {
+    if (!order && !orderDate) {
+      setOrderDate(new Date().toISOString().slice(0, 10));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Pre-fill an item row if the dialog was opened with a default (e.g. from
   // the Tools page's "Sipariş Oluştur" button).
@@ -98,7 +110,7 @@ export function OrderDialog({
     setRows((prev) => [
       ...prev,
       {
-        _key: rowKey(),
+        _key: nextRowKey(),
         category,
         description,
         quantity: 1,

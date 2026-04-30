@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -52,9 +52,9 @@ interface Row {
   notes: string;
 }
 
-function newRow(): Row {
+function makeRow(key: string): Row {
   return {
-    _key: Math.random().toString(36).slice(2),
+    _key: key,
     jobId: "none",
     startTime: "",
     endTime: "",
@@ -81,15 +81,28 @@ export function MultiEntryDialog({ machines, operators, jobs, trigger }: Props) 
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  const today = new Date().toISOString().slice(0, 10);
-  const [entryDate, setEntryDate] = useState(today);
+  // SSR-safe row keys: deterministic counter, not Math.random.
+  const keyCounter = useRef(0);
+  const nextKey = () => `r-${++keyCounter.current}`;
+
+  // Defer new Date() to post-hydration so server/client renders match.
+  const [entryDate, setEntryDate] = useState("");
   const [shift, setShift] = useState<Shift>("sabah");
   const [machineId, setMachineId] = useState(machines[0]?.id ?? "");
   const [operatorId, setOperatorId] = useState<string>("none");
-  const [rows, setRows] = useState<Row[]>([newRow()]);
+  const [rows, setRows] = useState<Row[]>(() => [makeRow(`r-1`)]);
+
+  // Backfill today's date once mounted (and bump counter to align).
+  useEffect(() => {
+    if (!entryDate) {
+      setEntryDate(new Date().toISOString().slice(0, 10));
+    }
+    if (keyCounter.current === 0) keyCounter.current = 1;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function addRow() {
-    setRows((p) => [...p, newRow()]);
+    setRows((p) => [...p, makeRow(nextKey())]);
   }
   function removeRow(key: string) {
     setRows((p) => (p.length === 1 ? p : p.filter((r) => r._key !== key)));
@@ -99,11 +112,12 @@ export function MultiEntryDialog({ machines, operators, jobs, trigger }: Props) 
   }
 
   function reset() {
-    setEntryDate(today);
+    keyCounter.current = 1;
+    setEntryDate(new Date().toISOString().slice(0, 10));
     setShift("sabah");
     setMachineId(machines[0]?.id ?? "");
     setOperatorId("none");
-    setRows([newRow()]);
+    setRows([makeRow("r-1")]);
   }
 
   function onSubmit(e: React.FormEvent) {
