@@ -465,7 +465,37 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (5ad5961 — 2026-04-30)
+## Son commit (454639e — 2026-04-30)
+
+**Dialog'larda Math.random + new Date hydration fix**
+
+User /orders'da hydration error aldı: `aria-controls` farkı. Kök neden — `'use client'` component Next.js App Router'da hem server'da (SSR) hem client'ta (hydration) render olur, `useState` initializer her iki render'da çalışır. `Math.random()` ve `new Date()` initializer içinde çağrılınca server/client farklı değer üretir → React tree ayrışır → `useId()` farklı id döndürür → aria mismatch.
+
+**Düzeltilen:**
+- `orders/order-dialog.tsx` — `rowKey()` Math.random'dan `useRef` counter'a; `orderDate` `useEffect` post-mount backfill
+- `production/entry-dialog.tsx` — `today` post-mount backfill
+- `production/multi-entry-dialog.tsx` — row `_key` counter ref, `entryDate` post-mount backfill, `reset()` aynı disipline uydu
+
+**Pattern (gelecekte yeni dialog yazarken):** Client component `useState` initializer'larında non-deterministic değer (Math.random, Date.now, new Date, crypto.randomUUID) çağırma. Stabil seed (counter ref ya da prop'taki id) kullan; gerçekten bir tarih veya rastgelelik gerekiyorsa boş başlat + `useEffect` ile mount sonrası doldur. Memory'de `feedback_ssr_useState_init.md`.
+
+---
+
+## Önceki commit (a64d5be — 2026-04-30)
+
+**Tasks: yeni görev oluşturma artık ANINDA görünüyor (optimistic insert)**
+
+Önceden "Oluştur" tıklayınca dialog kapanıyor → server roundtrip → router.refresh → ~500-800ms sonra kart görünüyordu ("düşmüyor" hissi). Optimistic insert + race-free reconciliation eklendi:
+
+1. **TaskDialog** "Oluştur"a basınca client-side temp Task üretiyor (`id="temp-…"`, form değerleri, `created_at=now`). `onOptimisticCreate()` ile shell'e veriyor, dialog ANINDA kapanıyor. Server `saveTask` arka planda fire-and-forget.
+2. **TasksShell** `pendingCreates: Task[]` state'i, `tasksWithOverride` memo'sunda `livePending` olarak server tasks'ın başına ekleniyor → kart o anda kolonda görünüyor.
+3. **Resolve** — server başarılı dönünce dialog `onOptimisticResolve(tempId, realId)` çağırıyor, shell mapping'i tutuyor, `router.refresh`.
+4. **Sync effect** (`tasks` prop değişince) — pendingCreates'i tarar, resolved temp için real id artık server'da varsa temp row'u bırakır. Status-override sync ile aynı pattern, race-condition free.
+5. **Reject** — server hata dönerse `onOptimisticReject(tempId)` → temp row hemen silinir, toast.error.
+6. Temp row görsel olarak farklı: `ring-2 ring-primary/40` pulse, drag ve click disabled.
+
+---
+
+## Önceki commit (5ad5961 — 2026-04-30)
 
 **Tasks drag-drop kalıcı fix: RLS gevşetme + server-data sync override**
 
