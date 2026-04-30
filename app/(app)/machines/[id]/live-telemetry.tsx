@@ -18,7 +18,6 @@ import {
   Wrench as WrenchIcon,
   Zap,
   Flame,
-  Wifi,
   WifiOff,
   AlertTriangle,
   Droplet,
@@ -389,17 +388,6 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
               {alarmMode ? <Bell className="size-3.5" /> : <BellOff className="size-3.5" />}
               Mock Alarm: {alarmMode ? "AÇIK" : "KAPALI"}
             </Button>
-            <Badge
-              variant="outline"
-              className="font-bold text-[10px] tracking-wider gap-1 bg-amber-500/10 text-amber-700 border-amber-500/40"
-            >
-              DEMO VERİ
-            </Badge>
-            <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1 tabular-nums">
-              <Wifi className="size-3" />
-              {Math.max(0, Math.round((Date.now() - telem.lastHeartbeatMs) / 1000))} sn
-              önce
-            </span>
           </div>
         </div>
 

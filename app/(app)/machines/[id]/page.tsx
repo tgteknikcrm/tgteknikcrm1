@@ -60,6 +60,7 @@ import {
 import { MachineDialog } from "../machine-dialog";
 import { StatusButton } from "../status-button";
 import { LiveTelemetry } from "./live-telemetry";
+import { MachineInfoDialog } from "./machine-info-dialog";
 // MachineTimeline removed from this page (2026-04-29) — kept available
 // in components for future use elsewhere.
 import { getProfile } from "@/lib/supabase/server";
@@ -263,31 +264,6 @@ export default async function MachineDetailPage({
   const uptimePct =
     shiftMinutes > 0 ? Math.max(0, 1 - weekDown / shiftMinutes) * 100 : 100;
 
-  // 7-day series
-  const weekByDate = new Map<string, number>();
-  for (const e of weekEntries) {
-    weekByDate.set(e.entry_date, (weekByDate.get(e.entry_date) ?? 0) + (e.produced_qty ?? 0));
-  }
-  const days: { date: string; label: string; weekday: string; qty: number }[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(Date.now() - i * 864e5);
-    const iso = d.toISOString().slice(0, 10);
-    days.push({
-      date: iso,
-      label: d.toLocaleDateString("tr-TR", {
-        day: "numeric",
-        month: "short",
-        timeZone: "Europe/Istanbul",
-      }),
-      weekday: d.toLocaleDateString("tr-TR", {
-        weekday: "short",
-        timeZone: "Europe/Istanbul",
-      }),
-      qty: weekByDate.get(iso) ?? 0,
-    });
-  }
-  const maxQty = Math.max(1, ...days.map((d) => d.qty));
-
   const tone = MACHINE_STATUS_TONE[machine.status];
   const operatorInitials = currentEntry?.operators?.full_name
     ? currentEntry.operators.full_name
@@ -338,6 +314,7 @@ export default async function MachineDetailPage({
                 <h1 className="text-3xl font-bold tracking-tight">
                   {machine.name}
                 </h1>
+                <MachineInfoDialog machine={machine} />
                 <Badge
                   variant="outline"
                   className={cn("border gap-1.5 font-semibold", tone.badge)}
@@ -381,53 +358,58 @@ export default async function MachineDetailPage({
         </div>
       </Card>
 
-      {/* LIVE TELEMETRY — mock, swappable for real MTConnect/FOCAS later */}
-      <LiveTelemetry
-        machineId={machine.id}
-        status={machine.status}
-        toolHints={currentJobTools.map((jt) => ({
-          name: jt.tool?.name ?? "",
-          code: jt.tool?.code ?? null,
-          size: jt.tool?.size ?? null,
-        }))}
-      />
+      {/* LIVE TELEMETRY (left) + KPI strip (right) — split 2-column on lg */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* SOL — Canlı Durum (mock, swappable for real MTConnect/FOCAS) */}
+        <div className="min-w-0">
+          <LiveTelemetry
+            machineId={machine.id}
+            status={machine.status}
+            toolHints={currentJobTools.map((jt) => ({
+              name: jt.tool?.name ?? "",
+              code: jt.tool?.code ?? null,
+              size: jt.tool?.size ?? null,
+            }))}
+          />
+        </div>
 
-      {/* Machine detail — single column (timeline removed 2026-04-29) */}
-      <div className="space-y-4">
-
-      {/* KPI STRIP — 2x2 in narrow left column */}
-      <div className="grid grid-cols-2 gap-3">
-        <KpiTile
-          icon={TrendingUp}
-          label="Bugün Üretilen"
-          value={todayTotal}
-          unit="adet"
-          accent="emerald"
-        />
-        <KpiTile
-          icon={Target}
-          label="7 Günlük Toplam"
-          value={weekTotal}
-          unit="adet"
-          accent="blue"
-          sub={`fire: ${weekScrap}`}
-        />
-        <KpiTile
-          icon={AlertTriangle}
-          label="Fire Oranı (7g)"
-          value={`%${scrapPct.toFixed(1)}`}
-          unit=""
-          accent={scrapPct > 5 ? "red" : "amber"}
-        />
-        <KpiTile
-          icon={Percent}
-          label="Çalışma Verimi (7g)"
-          value={`%${uptimePct.toFixed(0)}`}
-          unit=""
-          accent={uptimePct < 80 ? "amber" : "emerald"}
-          sub={`duruş: ${weekDown}dk`}
-        />
+        {/* SAĞ — KPI 2x2 */}
+        <div className="grid grid-cols-2 gap-3 content-start">
+          <KpiTile
+            icon={TrendingUp}
+            label="Bugün Üretilen"
+            value={todayTotal}
+            unit="adet"
+            accent="emerald"
+          />
+          <KpiTile
+            icon={Target}
+            label="7 Günlük Toplam"
+            value={weekTotal}
+            unit="adet"
+            accent="blue"
+            sub={`fire: ${weekScrap}`}
+          />
+          <KpiTile
+            icon={AlertTriangle}
+            label="Fire Oranı (7g)"
+            value={`%${scrapPct.toFixed(1)}`}
+            unit=""
+            accent={scrapPct > 5 ? "red" : "amber"}
+          />
+          <KpiTile
+            icon={Percent}
+            label="Çalışma Verimi (7g)"
+            value={`%${uptimePct.toFixed(0)}`}
+            unit=""
+            accent={uptimePct < 80 ? "amber" : "emerald"}
+            sub={`duruş: ${weekDown}dk`}
+          />
+        </div>
       </div>
+
+      {/* Machine detail content below (full width) */}
+      <div className="space-y-4">
 
       {/* CURRENTLY PRODUCING — full-width visual hero */}
       <Card
@@ -655,149 +637,51 @@ export default async function MachineDetailPage({
         </Card>
       )}
 
-      {/* TREND CHART + TOOLS — stacked vertically inside narrow column */}
-      <div className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2">
-              <TrendingUp className="size-4 text-muted-foreground" />
-              Son 7 Gün Üretim
-              {weekTotal > 0 && (
-                <Badge variant="outline" className="ml-auto font-normal tabular-nums">
-                  Toplam: {weekTotal}
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {weekTotal === 0 ? (
-              <div className="h-40 flex flex-col items-center justify-center text-muted-foreground">
-                <TrendingUp className="size-8 opacity-30 mb-2" />
-                <p className="text-sm">Son 7 günde üretim kaydı yok.</p>
-              </div>
-            ) : (
-              <div className="flex items-end gap-2 h-44 pt-4">
-                {days.map((d) => {
-                  const h = Math.max(6, (d.qty / maxQty) * 150);
-                  const isToday = d.date === today;
-                  return (
-                    <div
-                      key={d.date}
-                      className="flex-1 flex flex-col items-center gap-1.5 group"
-                    >
-                      <span
-                        className={cn(
-                          "text-xs tabular-nums font-semibold transition",
-                          isToday
-                            ? "text-foreground"
-                            : "text-muted-foreground group-hover:text-foreground",
-                        )}
-                      >
-                        {d.qty || "—"}
-                      </span>
-                      <div
-                        className={cn(
-                          "w-full rounded-md transition-all relative",
-                          isToday
-                            ? "bg-gradient-to-t from-primary to-primary/70"
-                            : "bg-muted-foreground/30 group-hover:bg-muted-foreground/50",
-                        )}
-                        style={{ height: `${h}px` }}
-                        title={`${d.weekday} ${d.label}: ${d.qty} adet`}
-                      />
-                      <div className="text-center">
-                        <div
-                          className={cn(
-                            "text-[10px] font-medium leading-tight",
-                            isToday ? "text-foreground" : "text-muted-foreground",
-                          )}
-                        >
-                          {d.weekday}
-                        </div>
-                        <div className="text-[9px] text-muted-foreground/60 tabular-nums">
-                          {d.label}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm flex items-center gap-2">
-              <WrenchIcon className="size-4 text-muted-foreground" />
-              Aktif İş Takımları
-              {currentJobTools.length > 0 && (
-                <Badge variant="outline" className="ml-auto font-normal">
-                  {currentJobTools.length}
-                </Badge>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!currentJob ? (
-              <div className="py-6 text-center text-sm text-muted-foreground">
-                <WrenchIcon className="size-6 mx-auto opacity-30 mb-2" />
-                Aktif iş yok.
-              </div>
-            ) : currentJobTools.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                Bu iş için takım atanmamış.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {currentJobTools.map((jt, i) => (
-                  <li
-                    key={jt.tool?.id ?? i}
-                    className="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/50 transition"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-sm truncate">
-                        {jt.tool?.name ?? "—"}
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate font-mono">
-                        {jt.tool?.code ?? ""}
-                        {jt.tool?.size ? ` · ${jt.tool.size}` : ""}
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="tabular-nums shrink-0">
-                      {jt.quantity_used}x
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* MACHINE INFO + NOTES */}
+      {/* ACTIVE JOB TOOLS — full width */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Makine Bilgileri</CardTitle>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <WrenchIcon className="size-4 text-muted-foreground" />
+            Aktif İş Takımları
+            {currentJobTools.length > 0 && (
+              <Badge variant="outline" className="ml-auto font-normal">
+                {currentJobTools.length}
+              </Badge>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Field label="Tip" value={machine.type} icon={Factory} />
-            <Field label="Seri No" value={machine.serial_no} icon={Hash} />
-            <Field label="Konum" value={machine.location} icon={MapPin} />
-            <Field
-              label="Son Güncelleme"
-              value={formatDate(machine.updated_at)}
-              icon={Calendar}
-            />
-          </div>
-          {machine.notes && (
-            <div className="pt-4 mt-4 border-t">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1.5">
-                Notlar
-              </div>
-              <p className="text-sm whitespace-pre-wrap">{machine.notes}</p>
+          {!currentJob ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              <WrenchIcon className="size-6 mx-auto opacity-30 mb-2" />
+              Aktif iş yok.
             </div>
+          ) : currentJobTools.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              Bu iş için takım atanmamış.
+            </p>
+          ) : (
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {currentJobTools.map((jt, i) => (
+                <li
+                  key={jt.tool?.id ?? i}
+                  className="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/50 transition border"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-sm truncate">
+                      {jt.tool?.name ?? "—"}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate font-mono">
+                      {jt.tool?.code ?? ""}
+                      {jt.tool?.size ? ` · ${jt.tool.size}` : ""}
+                    </div>
+                  </div>
+                  <Badge variant="outline" className="tabular-nums shrink-0">
+                    {jt.quantity_used}x
+                  </Badge>
+                </li>
+              ))}
+            </ul>
           )}
         </CardContent>
       </Card>
@@ -962,30 +846,6 @@ function MiniStat({
         )}
       >
         {value}
-      </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  icon: Icon,
-}: {
-  label: string;
-  value: string | null | undefined;
-  icon: typeof Factory;
-}) {
-  return (
-    <div className="flex items-center gap-2.5">
-      <div className="size-9 rounded-lg bg-muted flex items-center justify-center shrink-0">
-        <Icon className="size-4 text-muted-foreground" />
-      </div>
-      <div className="min-w-0">
-        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-          {label}
-        </div>
-        <div className="text-sm font-medium truncate">{value || "—"}</div>
       </div>
     </div>
   );
