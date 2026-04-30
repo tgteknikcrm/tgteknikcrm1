@@ -467,7 +467,24 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (b5a32d9 — 2026-04-30)
+## Son commit (768607a — 2026-04-30)
+
+**3 küçük düzeltme: mesaj silme + jobs alt alta + dashboard temizlik**
+
+1. **Mesaj silme UI yansıması** — deleteMessage server'da `deleted_at` set ediyor, Realtime UPDATE event'i messages-client cache'ini güncelliyor. Ama websocket flaky olunca UI hiç güncellenmiyordu, kullanıcı "hata alıyorum" sanıyordu. Optimistic delete eklendi:
+   - Chat-panel'de `optimisticDeletedIds: Set<string>` state
+   - MessageBubble `onDelete`: önce optimistic mark (bubble hemen "Bu mesaj silindi"), sonra server action; hata olursa rollback
+   - Sync `useEffect`: server prop deleted_at döndürünce Set'ten çıkar (drag-fix ile aynı race-free pattern)
+   - `deleteMessage` success'inde `router.refresh()` (websocket drop olsa bile çekiyor)
+   - Optimistic mesaj (id "temp_") silme engellendi: "Mesaj henüz gönderilmedi" toast
+
+2. **Jobs layout single-column** — `grid-cols-1 lg:grid-cols-2` → `space-y-4`. Makineler alt alta, full-width.
+
+3. **Dashboard temizlik** — "Stokta Azalan Takımlar" kartı kaldırıldı + toolsLow query/type/filter cleanup + Wrench/CardHeader/CardTitle gereksiz import'lar silindi. Dashboard sadece MachinesGrid gösteriyor.
+
+---
+
+## Önceki commit (b5a32d9 — 2026-04-30)
 
 **Hot-fix: /jobs runtime error + ProductForm sections görünür**
 
