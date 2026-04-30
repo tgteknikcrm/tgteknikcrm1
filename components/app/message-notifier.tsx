@@ -19,16 +19,21 @@ const STORAGE_KEY = "tg.notifications.enabled";
  * The toggle button lives in the topbar so users can mute easily.
  */
 export function MessageNotifier() {
-  const [enabled, setEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(STORAGE_KEY) === "1";
-  });
+  // Initial state MUST match what the server renders (no localStorage
+  // access here) — otherwise the icon flips between server (BellOff)
+  // and client (Bell) on hydration, the tree shifts, and Radix
+  // `useId()` values drift in every dialog mounted later in the page,
+  // throwing aria-controls hydration mismatches across the app.
+  // We hydrate the real value from localStorage in the effect below.
+  const [enabled, setEnabled] = useState<boolean>(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const myUserIdRef = useRef<string | null>(null);
 
-  // Stash my user id once so the realtime callback can filter out my
-  // own messages without an extra fetch each time.
+  // Read persisted preference + stash user id once mounted.
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      setEnabled(localStorage.getItem(STORAGE_KEY) === "1");
+    }
     const supabase = createClient();
     void supabase.auth.getUser().then(({ data }) => {
       myUserIdRef.current = data.user?.id ?? null;
