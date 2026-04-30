@@ -466,7 +466,39 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (111e871 — 2026-04-30)
+## Son commit (7c65bd0 — 2026-04-30)
+
+**Ürün detayı modernize: 7 tab full CRUD + modern hero + sticky tabs**
+
+User isteği: ürün hakkında **her şey tek sayfada** — takım ekleme/silme/düzenleme, CAD ve teknik resim inline yükleme, kalite görünümü.
+
+### Yeni tab'lar (4 yeni component, hepsi inline CRUD)
+
+1. **Teknik Resim** (`product-drawings-tab.tsx`) — Yükle dialog'undan PDF/görsel atılır (`uploadDrawing` action'a `product_id` pre-fill). Hover'da İndir + Sil. Empty state büyük dashed-border CTA.
+2. **CAD/CAM** (`product-cad-tab.tsx`) — Aynı pattern, dialog'da makine de seçilebilir. kindKey rengine göre ikon kutusu (G-code yeşil / CAD mavi).
+3. **Takımlar** (`product-tools-tab.tsx`) — **Full CRUD inline:** thumbnail + ad + adet input (onBlur'da kayıt) + Sil. Yeni server actions: `addProductTool`, `removeProductTool`, `updateProductToolQty` (`.select().maybeSingle()` defansif). Picker dialog'unda arama + checkbox + selected badge.
+4. **Kalite** (`product-quality-tab.tsx`) — Bu üründen açılan işlerin `quality_specs` + `quality_measurements` aggregation. 4 KPI strip (Spec / Ölçüm / OK% / NOK) + iş bazında detay tablosu, `/quality/[jobId]`'ye link.
+
+### Modern hero (page.tsx redesign)
+
+- Full-width gradient hero (`from-primary/5` + radial highlight)
+- Sol: 256px aspect-square hero görsel + "+N görsel" overlay
+- Sağ: kod chip + rev/durum badge + 3xl başlık + müşteri/parça no
+- Quick stats: 8 alan (kategori/malzeme/boyut/ağırlık/tolerans/sertlik/proses/fiyat) — backdrop-blur kartlar
+- Meta strip: makine + cycle time + yüzey işlemi + tags
+
+### Sticky tabs
+
+`TabsList` sticky top-0 backdrop-blur. 7 tab: Bilgiler · Görseller · Teknik Resim · CAD/CAM · Takımlar · Kalite · İşler — her birinde count badge.
+
+### Defansif
+
+- Tool CRUD actions `.select().maybeSingle()` (silent RLS trap)
+- `onConflict: "product_id,tool_id"` upsert ile idempotent add
+
+---
+
+## Önceki commit (111e871 — 2026-04-30)
 
 **Ürün master kütüğü: ayrı sayfa + kapsamlı detay (popup kaldırıldı)**
 
