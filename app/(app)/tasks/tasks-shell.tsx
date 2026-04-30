@@ -90,6 +90,17 @@ export function TasksShell({
   // pulsing border on the card so the user knows their change is
   // saving. Doesn't block further drags.
   const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  // Optimistic task creates. Populated the instant the user clicks
+  // "Oluştur" so the new card lands in the column immediately, before
+  // the server roundtrip completes. Each entry has a `temp-…` id; once
+  // the server replies with the real id, we store the mapping in
+  // `resolvedTempIds` and drop the optimistic row the moment the next
+  // server render brings the real one. Same race-free strategy as the
+  // status-override sync below.
+  const [pendingCreates, setPendingCreates] = useState<Task[]>([]);
+  const [resolvedTempIds, setResolvedTempIds] = useState<Map<string, string>>(
+    new Map(),
+  );
   // Optimistic status overrides (taskId → desired status). The override
   // wins over the server prop so the card jumps to the new column on
   // drop. We DON'T clear it on a timer (race-prone — a slow refresh
@@ -121,6 +132,43 @@ export function TasksShell({
       return changed ? next : prev;
     });
   }, [tasks]);
+
+  // Same pattern for optimistic creates: drop the temp row as soon as
+  // the resolved real id appears in the server prop. If the action
+  // failed (no resolution recorded) we just leave the temp row visible
+  // until the dialog explicitly rejects it.
+  useEffect(() => {
+    if (pendingCreates.length === 0) return;
+    setPendingCreates((prev) => {
+      const filtered = prev.filter((t) => {
+        const realId = resolvedTempIds.get(t.id);
+        if (!realId) return true; // not yet resolved → keep the temp row
+        // Resolved — drop as soon as the real row exists in the server prop.
+        return !tasks.some((s) => s.id === realId);
+      });
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [tasks, resolvedTempIds, pendingCreates.length]);
+
+  function addOptimisticCreate(t: Task) {
+    setPendingCreates((prev) => [t, ...prev]);
+  }
+  function resolveOptimisticCreate(tempId: string, realId: string) {
+    setResolvedTempIds((prev) => {
+      const next = new Map(prev);
+      next.set(tempId, realId);
+      return next;
+    });
+  }
+  function rejectOptimisticCreate(tempId: string) {
+    setPendingCreates((prev) => prev.filter((t) => t.id !== tempId));
+    setResolvedTempIds((prev) => {
+      if (!prev.has(tempId)) return prev;
+      const next = new Map(prev);
+      next.delete(tempId);
+      return next;
+    });
+  }
 
   // Realtime: refresh on any task change. Debounced just enough to
   // batch a burst (drop + status touch + checklist tick) into one
@@ -163,16 +211,28 @@ export function TasksShell({
   );
 
   const today = todayISO();
-  // Apply optimistic status overrides on top of server data.
-  const tasksWithOverride = useMemo(
-    () =>
-      tasks.map((t) =>
-        statusOverrides.has(t.id)
-          ? { ...t, status: statusOverrides.get(t.id)! }
-          : t,
-      ),
-    [tasks, statusOverrides],
-  );
+  // Apply optimistic status overrides on top of server data, then
+  // prepend any pending creates that the server hasn't acknowledged
+  // yet. The temp rows have unique `temp-…` ids so they never clash
+  // with server rows; once the resolved real id appears in `tasks`,
+  // the sync effect drops them.
+  const tasksWithOverride = useMemo(() => {
+    const withOverrides = tasks.map((t) =>
+      statusOverrides.has(t.id)
+        ? { ...t, status: statusOverrides.get(t.id)! }
+        : t,
+    );
+    if (pendingCreates.length === 0) return withOverrides;
+    // Hide pending entries whose resolved real id is already in the
+    // server prop — avoids a brief duplicate while React commits the
+    // sync-effect drop on the next tick.
+    const realIds = new Set(tasks.map((t) => t.id));
+    const livePending = pendingCreates.filter((p) => {
+      const realId = resolvedTempIds.get(p.id);
+      return !realId || !realIds.has(realId);
+    });
+    return [...livePending, ...withOverrides];
+  }, [tasks, statusOverrides, pendingCreates, resolvedTempIds]);
   const filtered = useMemo(() => {
     const term = q.trim().toLocaleLowerCase("tr");
     return tasksWithOverride.filter((t) => {
@@ -398,18 +458,32 @@ export function TasksShell({
                       Boş
                     </div>
                   ) : (
-                    items.map((t) => (
-                      <TaskCard
-                        key={t.id}
-                        task={t}
-                        people={peopleMap}
-                        checklist={checklistByTask.get(t.id) ?? []}
-                        commentsCount={commentsByTask.get(t.id)?.length ?? 0}
-                        onClick={() => setEditTask(t)}
-                        onDragStart={(e) => onDragStart(t.id, e)}
-                        isPending={pendingIds.has(t.id)}
-                      />
-                    ))
+                    items.map((t) => {
+                      const isTempRow = t.id.startsWith("temp-");
+                      return (
+                        <TaskCard
+                          key={t.id}
+                          task={t}
+                          people={peopleMap}
+                          checklist={checklistByTask.get(t.id) ?? []}
+                          commentsCount={
+                            commentsByTask.get(t.id)?.length ?? 0
+                          }
+                          // Temp rows can't be opened (no server record yet)
+                          // and can't be dragged (would orphan the optimistic
+                          // entry). Once the server confirms, the real row
+                          // takes over and supports both.
+                          onClick={
+                            isTempRow ? () => undefined : () => setEditTask(t)
+                          }
+                          onDragStart={
+                            isTempRow ? () => undefined : (e) => onDragStart(t.id, e)
+                          }
+                          isPending={isTempRow || pendingIds.has(t.id)}
+                          draggable={!isTempRow}
+                        />
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -453,6 +527,9 @@ export function TasksShell({
               setEditTask(null);
             }
           }}
+          onOptimisticCreate={addOptimisticCreate}
+          onOptimisticResolve={resolveOptimisticCreate}
+          onOptimisticReject={rejectOptimisticCreate}
         />
       )}
     </>
@@ -563,6 +640,7 @@ function TaskCard({
   onClick,
   onDragStart,
   isPending = false,
+  draggable = true,
 }: {
   task: Task;
   people: Map<string, Pick<Profile, "id" | "full_name" | "phone">>;
@@ -571,6 +649,7 @@ function TaskCard({
   onClick: () => void;
   onDragStart: (e: React.DragEvent) => void;
   isPending?: boolean;
+  draggable?: boolean;
 }) {
   const today = todayISO();
   const overdue =
@@ -586,14 +665,17 @@ function TaskCard({
     <button
       type="button"
       onClick={onClick}
-      draggable
+      draggable={draggable}
       onDragStart={onDragStart}
       className={cn(
         "group/card w-full text-left rounded-lg border bg-background p-2.5",
-        "hover:shadow-md hover:scale-[1.01] transition cursor-grab active:cursor-grabbing",
-        "animate-tg-fade-in",
+        "hover:shadow-md transition animate-tg-fade-in",
+        draggable
+          ? "hover:scale-[1.01] cursor-grab active:cursor-grabbing"
+          : "cursor-default",
         overdue && "border-red-500/40",
-        isPending && "ring-2 ring-primary/40 ring-offset-1 ring-offset-background",
+        isPending &&
+          "ring-2 ring-primary/40 ring-offset-1 ring-offset-background",
       )}
     >
       <div className="flex items-start gap-2 mb-1.5">

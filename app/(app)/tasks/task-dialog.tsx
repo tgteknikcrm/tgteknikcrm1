@@ -69,6 +69,12 @@ interface Props {
   comments: TaskComment[];
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  // Optimistic create plumbing — only used for the "new task" flow.
+  // Lets us close the dialog and drop the temp card into the kanban
+  // before the server roundtrip completes.
+  onOptimisticCreate?: (task: Task) => void;
+  onOptimisticResolve?: (tempId: string, realId: string) => void;
+  onOptimisticReject?: (tempId: string) => void;
 }
 
 const STATUSES: TaskStatus[] = ["todo", "in_progress", "done", "cancelled"];
@@ -95,6 +101,9 @@ export function TaskDialog({
   comments,
   open,
   onOpenChange,
+  onOptimisticCreate,
+  onOptimisticResolve,
+  onOptimisticReject,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -147,7 +156,8 @@ export function TaskDialog({
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!title.trim()) {
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
       toast.error("Başlık gerekli");
       return;
     }
@@ -155,24 +165,75 @@ export function TaskDialog({
       .split(/[,\s]+/)
       .map((t) => t.trim())
       .filter(Boolean);
-    startTransition(async () => {
-      const r = await saveTask({
-        id: task?.id,
-        title,
-        description: description || null,
+
+    const payload = {
+      id: task?.id,
+      title: trimmedTitle,
+      description: description || null,
+      status,
+      priority,
+      due_date: dueDate || null,
+      assigned_to: assignedTo || null,
+      job_id: jobId || null,
+      machine_id: machineId || null,
+      tags,
+    };
+
+    // CREATE flow — optimistic. Drop a temp card into the kanban,
+    // close the dialog immediately, persist in the background, then
+    // resolve the temp id to the server's real id. The shell's sync
+    // effect drops the temp row the moment the real row appears in
+    // the server prop. No spinner-and-wait UX.
+    if (!task && onOptimisticCreate) {
+      const tempId = `temp-${
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : Date.now() + "-" + Math.random().toString(36).slice(2)
+      }`;
+      const nowIso = new Date().toISOString();
+      const optimisticTask: Task = {
+        id: tempId,
+        title: trimmedTitle,
+        description: payload.description,
         status,
         priority,
-        due_date: dueDate || null,
-        assigned_to: assignedTo || null,
-        job_id: jobId || null,
-        machine_id: machineId || null,
+        due_date: payload.due_date,
+        assigned_to: payload.assigned_to,
+        job_id: payload.job_id,
+        machine_id: payload.machine_id,
         tags,
+        created_by: currentUserId,
+        completed_at: null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+      onOptimisticCreate(optimisticTask);
+      onOpenChange(false);
+      // Fire-and-forget — UI is already updated.
+      void saveTask(payload).then((r) => {
+        if ("error" in r && r.error) {
+          toast.error(r.error);
+          onOptimisticReject?.(tempId);
+          return;
+        }
+        if ("id" in r && r.id) {
+          onOptimisticResolve?.(tempId, r.id);
+        }
+        toast.success("Görev oluşturuldu");
+        router.refresh();
       });
+      return;
+    }
+
+    // EDIT flow — keep the dialog open until the server confirms so
+    // the user sees the spinner and can correct on error.
+    startTransition(async () => {
+      const r = await saveTask(payload);
       if ("error" in r && r.error) {
         toast.error(r.error);
         return;
       }
-      toast.success(task ? "Görev güncellendi" : "Görev oluşturuldu");
+      toast.success("Görev güncellendi");
       onOpenChange(false);
       router.refresh();
     });
