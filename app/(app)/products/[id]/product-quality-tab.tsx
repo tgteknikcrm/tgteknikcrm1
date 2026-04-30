@@ -42,6 +42,7 @@ const STATUS_VARIANT: Record<
   "default" | "secondary" | "outline" | "destructive"
 > = {
   beklemede: "secondary",
+  ayar: "secondary",
   uretimde: "default",
   tamamlandi: "outline",
   iptal: "destructive",

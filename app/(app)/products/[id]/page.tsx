@@ -320,6 +320,33 @@ export default async function ProductDetailPage({
                   }
                   mono
                 />
+                <Stat
+                  label="Cycle Time"
+                  value={
+                    product.cycle_time_minutes != null
+                      ? `${product.cycle_time_minutes} dk/parça`
+                      : "—"
+                  }
+                  mono
+                />
+                <Stat
+                  label="Ayar Süresi"
+                  value={
+                    product.setup_time_minutes != null
+                      ? `${product.setup_time_minutes} dk`
+                      : "—"
+                  }
+                  mono
+                />
+                <Stat
+                  label="Bağlanan Adet"
+                  value={
+                    product.parts_per_setup != null
+                      ? `${product.parts_per_setup}`
+                      : "—"
+                  }
+                  mono
+                />
               </div>
 
               {/* Tags + extra meta */}

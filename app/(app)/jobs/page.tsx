@@ -1,126 +1,105 @@
-import { PageHeader } from "@/components/app/page-header";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import {
-  type Job,
-  type Machine,
-  type Operator,
-  type Product,
+import type {
+  Job,
+  Machine,
+  Operator,
+  Product,
+  ProductionEntry,
 } from "@/lib/supabase/types";
-import { Plus, FileText } from "lucide-react";
-import Link from "next/link";
-import { EmptyState } from "@/components/app/empty-state";
-import { SearchInput } from "@/components/app/search-input";
-import { JobDialog } from "./job-dialog";
-import { JobsTable } from "./jobs-table";
+import { JobsShell } from "./jobs-shell";
+import {
+  computeJobsRange,
+  type JobsPeriod,
+  type JobsRange,
+} from "./date-range-filter";
 
 export const metadata = { title: "İşler / Siparişler" };
+
+const VALID_PERIODS: JobsPeriod[] = [
+  "day",
+  "week",
+  "month",
+  "year",
+  "all",
+  "custom",
+];
 
 export default async function JobsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; status?: string }>;
+  searchParams: Promise<{
+    period?: string;
+    from?: string;
+    to?: string;
+  }>;
 }) {
-  const { q, status } = await searchParams;
+  const sp = await searchParams;
+  const period: JobsPeriod = VALID_PERIODS.includes(sp.period as JobsPeriod)
+    ? (sp.period as JobsPeriod)
+    : "all";
 
-  let jobs: Array<Job & { machine_name?: string; operator_name?: string }> = [];
+  const range: JobsRange = {
+    period,
+    from: sp.from ?? null,
+    to: sp.to ?? null,
+  };
+  const { fromIso, toIso } = computeJobsRange(range);
+
+  let jobs: Job[] = [];
   let machines: Machine[] = [];
   let operators: Operator[] = [];
   let products: Product[] = [];
+  let productionEntries: Pick<
+    ProductionEntry,
+    "id" | "job_id" | "produced_qty" | "scrap_qty" | "entry_date" | "created_at"
+  >[] = [];
 
   try {
     const supabase = await createClient();
+
     let jq = supabase
       .from("jobs")
-      .select("*, machines(name), operators(full_name)")
+      .select("*")
       .order("created_at", { ascending: false });
+    if (fromIso) jq = jq.gte("created_at", fromIso);
+    if (toIso) jq = jq.lte("created_at", toIso);
 
-    if (q) {
-      jq = jq.or(`job_no.ilike.%${q}%,customer.ilike.%${q}%,part_name.ilike.%${q}%`);
-    }
-    if (status && status !== "all") {
-      jq = jq.eq("status", status);
-    }
-
-    const [jobsRes, mRes, oRes, pRes] = await Promise.all([
+    const [jRes, mRes, oRes, pRes] = await Promise.all([
       jq,
       supabase.from("machines").select("*").order("name"),
-      supabase.from("operators").select("*").eq("active", true).order("full_name"),
+      supabase.from("operators").select("*").order("full_name"),
       supabase.from("products").select("*").order("code"),
     ]);
+
+    jobs = (jRes.data ?? []) as Job[];
+    machines = (mRes.data ?? []) as Machine[];
+    operators = (oRes.data ?? []) as Operator[];
     products = (pRes.data ?? []) as Product[];
 
-    type JobRow = Job & {
-      machines?: { name: string } | null;
-      operators?: { full_name: string } | null;
-    };
-    jobs = (jobsRes.data ?? []).map((j: JobRow) => ({
-      ...j,
-      machine_name: j.machines?.name,
-      operator_name: j.operators?.full_name,
-    }));
-    machines = mRes.data ?? [];
-    operators = oRes.data ?? [];
+    // Pull production entries only for the visible jobs to keep the
+    // payload tight. Done counts come from sum(produced_qty).
+    if (jobs.length > 0) {
+      const jobIds = jobs.map((j) => j.id);
+      const peRes = await supabase
+        .from("production_entries")
+        .select(
+          "id, job_id, produced_qty, scrap_qty, entry_date, created_at",
+        )
+        .in("job_id", jobIds);
+      productionEntries = (peRes.data ?? []) as typeof productionEntries;
+    }
   } catch {
     /* not configured */
   }
 
   return (
-    <>
-      <PageHeader
-        title="İşler / Siparişler"
-        description="Tüm müşteri işleri ve üretim siparişleri"
-        actions={
-          <>
-            <SearchInput placeholder="İş no, müşteri, parça..." />
-            <JobDialog
-              machines={machines}
-              operators={operators}
-              products={products}
-              trigger={
-                <Button>
-                  <Plus className="size-4" /> Yeni İş
-                </Button>
-              }
-            />
-          </>
-        }
-      />
-
-      <div className="flex gap-2 mb-4 flex-wrap">
-        <FilterLink label="Tümü" href="/jobs" active={!status || status === "all"} />
-        <FilterLink label="Beklemede" href="/jobs?status=beklemede" active={status === "beklemede"} />
-        <FilterLink label="Üretimde" href="/jobs?status=uretimde" active={status === "uretimde"} />
-        <FilterLink label="Tamamlandı" href="/jobs?status=tamamlandi" active={status === "tamamlandi"} />
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          {jobs.length === 0 ? (
-            <EmptyState
-              icon={FileText}
-              title={q || status ? "Eşleşen iş yok" : "Henüz iş yok"}
-              description="Yeni iş ekleyerek başlayın."
-            />
-          ) : (
-            <JobsTable
-              jobs={jobs}
-              machines={machines}
-              operators={operators}
-              products={products}
-            />
-          )}
-        </CardContent>
-      </Card>
-    </>
-  );
-}
-
-function FilterLink({ label, href, active }: { label: string; href: string; active: boolean }) {
-  return (
-    <Button asChild variant={active ? "default" : "outline"} size="sm">
-      <Link href={href}>{label}</Link>
-    </Button>
+    <JobsShell
+      jobs={jobs}
+      machines={machines}
+      operators={operators}
+      products={products}
+      productionEntries={productionEntries}
+      initialRange={range}
+    />
   );
 }

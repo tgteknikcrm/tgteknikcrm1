@@ -162,6 +162,9 @@ export function ProductForm({
       ? String(product.setup_time_minutes)
       : "",
   );
+  const [partsPerSetup, setPartsPerSetup] = useState(
+    product?.parts_per_setup != null ? String(product.parts_per_setup) : "",
+  );
   const [defaultMachineId, setDefaultMachineId] = useState(
     product?.default_machine_id ?? "none",
   );
@@ -289,6 +292,7 @@ export function ProductForm({
       process_type: (processType || null) as ProductProcess | null,
       cycle_time_minutes: parseNumber(cycleTime),
       setup_time_minutes: parseNumber(setupTime),
+      parts_per_setup: parseNumber(partsPerSetup),
       default_machine_id: defaultMachineId === "none" ? null : defaultMachineId,
       default_quantity: parseNumber(defaultQty),
       min_order_qty: parseNumber(minOrderQty),
@@ -514,7 +518,7 @@ export function ProductForm({
       <Section
         icon={Cog}
         title="İmalat"
-        description="Proses tipi, cycle time, setup time, varsayılan makine"
+        description="Proses, makine, ayar süresi, parça başı süre, bağlama adedi"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Field label="Proses Tipi">
@@ -556,15 +560,30 @@ export function ProductForm({
             </Select>
           </Field>
           <NumberField
-            label="Setup Süresi (dk)"
+            label="Ayar Süresi (dk)"
             value={setupTime}
             onChange={setSetupTime}
+            hint="bir bağlama"
           />
           <NumberField
             label="Cycle Time (dk)"
             value={cycleTime}
             onChange={setCycleTime}
+            step="0.1"
+            hint="parça başı"
           />
+          <NumberField
+            label="Bağlanan Adet"
+            value={partsPerSetup}
+            onChange={setPartsPerSetup}
+            hint="aynı anda"
+          />
+        </div>
+        <div className="rounded-lg bg-muted/40 border border-dashed p-3 text-[11px] text-muted-foreground">
+          <span className="font-semibold text-foreground">Hesap:</span> 1000
+          adet için <strong>ayar</strong> = ⌈1000 / bağlama⌉ × ayar süresi ·{" "}
+          <strong>üretim</strong> = 1000 × cycle. İş kartında otomatik
+          gösterilir.
         </div>
       </Section>
 

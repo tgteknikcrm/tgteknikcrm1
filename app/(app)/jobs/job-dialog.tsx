@@ -41,7 +41,13 @@ interface Props {
   trigger: React.ReactNode;
 }
 
-const STATUSES: JobStatus[] = ["beklemede", "uretimde", "tamamlandi", "iptal"];
+const STATUSES: JobStatus[] = [
+  "beklemede",
+  "ayar",
+  "uretimde",
+  "tamamlandi",
+  "iptal",
+];
 
 export function JobDialog({
   job,

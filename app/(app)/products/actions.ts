@@ -50,6 +50,7 @@ export interface SaveProductInput {
   process_type?: ProductProcess | null;
   cycle_time_minutes?: number | null;
   setup_time_minutes?: number | null;
+  parts_per_setup?: number | null;
   default_machine_id?: string | null;
   // Commercial
   default_quantity?: number | null;
@@ -108,6 +109,7 @@ export async function saveProduct(input: SaveProductInput) {
     process_type: input.process_type ?? null,
     cycle_time_minutes: nullableNumber(input.cycle_time_minutes),
     setup_time_minutes: nullableNumber(input.setup_time_minutes),
+    parts_per_setup: nullableNumber(input.parts_per_setup),
     default_machine_id: input.default_machine_id || null,
     default_quantity: nullableNumber(input.default_quantity),
     min_order_qty: nullableNumber(input.min_order_qty),

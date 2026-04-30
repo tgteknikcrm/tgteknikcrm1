@@ -26,6 +26,20 @@ export async function saveJob(input: {
     data: { user },
   } = await supabase.auth.getUser();
 
+  const nowIso = new Date().toISOString();
+  // Sync timeline timestamps with the chosen status so create-with-status
+  // also lights up the correct step on the Jobs page.
+  const stampStartedAt =
+    input.status === "ayar" ||
+    input.status === "uretimde" ||
+    input.status === "tamamlandi"
+      ? nowIso
+      : null;
+  const stampSetupDone =
+    input.status === "uretimde" || input.status === "tamamlandi"
+      ? nowIso
+      : null;
+
   const payload = {
     job_no: input.job_no || null,
     customer: input.customer,
@@ -39,7 +53,9 @@ export async function saveJob(input: {
     priority: input.priority,
     start_date: input.start_date || null,
     due_date: input.due_date || null,
-    completed_at: input.status === "tamamlandi" ? new Date().toISOString() : null,
+    started_at: input.id ? undefined : stampStartedAt,
+    setup_completed_at: input.id ? undefined : stampSetupDone,
+    completed_at: input.status === "tamamlandi" ? nowIso : null,
     notes: input.notes || null,
     created_by: input.id ? undefined : user?.id,
   };
@@ -169,6 +185,78 @@ export async function setJobTools(jobId: string, items: JobToolInput[]) {
   });
 
   revalidatePath("/jobs");
+  revalidatePath("/machines");
+  return { success: true };
+}
+
+/**
+ * Move a job to a specific step. Stamps started_at /
+ * setup_completed_at / completed_at as appropriate so the timeline UI
+ * has actual wall-clock anchors.
+ *
+ * Defansif: .select().maybeSingle() ile RLS-bloklu / wrong id sessiz
+ * success'ı yakalar (Supabase silent RLS trap pattern).
+ */
+export async function setJobStep(jobId: string, step: JobStatus) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Giriş gerekli" };
+
+  const nowIso = new Date().toISOString();
+  const updates: Record<string, unknown> = { status: step };
+
+  if (step === "ayar") {
+    // Starting setup. Stamp started_at if not yet set; clear setup_completed_at.
+    const { data: cur } = await supabase
+      .from("jobs")
+      .select("started_at")
+      .eq("id", jobId)
+      .single();
+    if (!cur?.started_at) updates.started_at = nowIso;
+    updates.setup_completed_at = null;
+    updates.completed_at = null;
+  } else if (step === "uretimde") {
+    // Setup done, production starts.
+    const { data: cur } = await supabase
+      .from("jobs")
+      .select("started_at")
+      .eq("id", jobId)
+      .single();
+    if (!cur?.started_at) updates.started_at = nowIso;
+    updates.setup_completed_at = nowIso;
+    updates.completed_at = null;
+  } else if (step === "tamamlandi") {
+    updates.completed_at = nowIso;
+  } else if (step === "beklemede") {
+    // Reset to queue — clear timing so the indicator returns to step 0.
+    updates.started_at = null;
+    updates.setup_completed_at = null;
+    updates.completed_at = null;
+  } else if (step === "iptal") {
+    updates.completed_at = nowIso;
+  }
+
+  const { data, error } = await supabase
+    .from("jobs")
+    .update(updates)
+    .eq("id", jobId)
+    .select("id, customer, part_name")
+    .maybeSingle();
+  if (error) return { error: error.message };
+  if (!data) return { error: "İş güncellenemedi (yetki yok ya da silinmiş)" };
+
+  await recordEvent({
+    type: "job.status_changed",
+    entity_type: "job",
+    entity_id: jobId,
+    entity_label: `${data.customer} – ${data.part_name}`,
+    metadata: { status: step },
+  });
+
+  revalidatePath("/jobs");
+  revalidatePath("/dashboard");
   revalidatePath("/machines");
   return { success: true };
 }

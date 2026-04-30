@@ -25,6 +25,8 @@ export const metadata = { title: "Kalite Kontrol" };
 
 const STATUS_CLS: Record<JobStatus, string> = {
   beklemede: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300 border-zinc-500/30",
+  ayar:
+    "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
   uretimde:
     "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
   tamamlandi:

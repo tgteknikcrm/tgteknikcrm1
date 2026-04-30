@@ -2,7 +2,12 @@ export type UserRole = "admin" | "operator";
 export type MachineType = "Fanuc" | "Tekna" | "BWX" | "Diger";
 export type MachineStatus = "aktif" | "durus" | "bakim" | "ariza";
 export type Shift = "sabah" | "aksam" | "gece";
-export type JobStatus = "beklemede" | "uretimde" | "tamamlandi" | "iptal";
+export type JobStatus =
+  | "beklemede"
+  | "ayar"
+  | "uretimde"
+  | "tamamlandi"
+  | "iptal";
 export type ToolCondition = "yeni" | "iyi" | "kullanilabilir" | "degistirilmeli";
 export type PoStatus =
   | "taslak"
@@ -143,6 +148,105 @@ export interface Job {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Linked product (migration 0025)
+  product_id?: string | null;
+  // Step timing (migration 0028)
+  started_at?: string | null;
+  setup_completed_at?: string | null;
+}
+
+// Step indicator: index 0..3 (Beklemede / Ayar / Üretimde / Tamamlandı)
+// for the 4-step progress on the Jobs page. Cancelled jobs return null
+// (rendered as a single grey "İptal" pill instead of a stepper).
+export const JOB_STEPS: Array<{ key: JobStatus; label: string }> = [
+  { key: "beklemede", label: "Beklemede" },
+  { key: "ayar", label: "Ayar" },
+  { key: "uretimde", label: "Üretimde" },
+  { key: "tamamlandi", label: "Tamamlandı" },
+];
+
+export function jobStepIndex(status: JobStatus): number {
+  switch (status) {
+    case "beklemede":
+      return 0;
+    case "ayar":
+      return 1;
+    case "uretimde":
+      return 2;
+    case "tamamlandi":
+      return 3;
+    default:
+      return -1;
+  }
+}
+
+/**
+ * Job timeline math — drives the "X parça, ~Y saat" estimates on the
+ * Jobs page card. Pure function so we can reuse it from the detail
+ * page later without an extra round trip.
+ */
+export function calcJobTimeline(input: {
+  quantity: number;
+  produced: number;
+  cycleMinutes: number | null | undefined;
+  setupMinutes: number | null | undefined;
+  partsPerSetup: number | null | undefined;
+}): {
+  remaining: number;
+  setupsLeft: number;
+  remainingSetupMinutes: number;
+  remainingProductionMinutes: number;
+  remainingTotalMinutes: number;
+  totalSetupMinutes: number;
+  totalProductionMinutes: number;
+  totalMinutes: number;
+  progressPct: number; // 0–100
+} {
+  const quantity = Math.max(0, input.quantity ?? 0);
+  const produced = Math.max(0, Math.min(input.produced ?? 0, quantity));
+  const cycle = Math.max(0, input.cycleMinutes ?? 0);
+  const setup = Math.max(0, input.setupMinutes ?? 0);
+  const pps = input.partsPerSetup && input.partsPerSetup > 0 ? input.partsPerSetup : 1;
+
+  const remaining = Math.max(0, quantity - produced);
+  const setupsLeft = remaining > 0 ? Math.ceil(remaining / pps) : 0;
+  const totalSetups = quantity > 0 ? Math.ceil(quantity / pps) : 0;
+
+  const remainingSetupMinutes = setupsLeft * setup;
+  const remainingProductionMinutes = remaining * cycle;
+  const remainingTotalMinutes = remainingSetupMinutes + remainingProductionMinutes;
+
+  const totalSetupMinutes = totalSetups * setup;
+  const totalProductionMinutes = quantity * cycle;
+  const totalMinutes = totalSetupMinutes + totalProductionMinutes;
+
+  const progressPct = quantity > 0 ? (produced / quantity) * 100 : 0;
+
+  return {
+    remaining,
+    setupsLeft,
+    remainingSetupMinutes,
+    remainingProductionMinutes,
+    remainingTotalMinutes,
+    totalSetupMinutes,
+    totalProductionMinutes,
+    totalMinutes,
+    progressPct,
+  };
+}
+
+/** Friendly "2 sa 30 dk" / "45 dk" / "1 g 4 sa" formatter. */
+export function formatMinutes(mins: number): string {
+  if (!mins || mins <= 0) return "0 dk";
+  const total = Math.round(mins);
+  const days = Math.floor(total / (60 * 24));
+  const hours = Math.floor((total % (60 * 24)) / 60);
+  const minutes = total % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days} g`);
+  if (hours > 0) parts.push(`${hours} sa`);
+  if (minutes > 0 || parts.length === 0) parts.push(`${minutes} dk`);
+  return parts.join(" ");
 }
 
 export interface ProductionEntry {
@@ -239,9 +343,48 @@ export const SHIFT_LABEL: Record<Shift, string> = {
 
 export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
   beklemede: "Beklemede",
+  ayar: "Ayar Yapılıyor",
   uretimde: "Üretimde",
   tamamlandi: "Tamamlandı",
   iptal: "İptal",
+};
+
+// Tone classes for the 4-step indicator on the Jobs page (and other
+// JobStatus badges). Each step gets a distinct accent.
+export const JOB_STATUS_TONE: Record<
+  JobStatus,
+  { bg: string; text: string; dot: string; ring: string }
+> = {
+  beklemede: {
+    bg: "bg-zinc-500/10",
+    text: "text-zinc-700 dark:text-zinc-300",
+    dot: "bg-zinc-500",
+    ring: "ring-zinc-500/40",
+  },
+  ayar: {
+    bg: "bg-amber-500/15",
+    text: "text-amber-700 dark:text-amber-300",
+    dot: "bg-amber-500",
+    ring: "ring-amber-500/40",
+  },
+  uretimde: {
+    bg: "bg-emerald-500/15",
+    text: "text-emerald-700 dark:text-emerald-300",
+    dot: "bg-emerald-500",
+    ring: "ring-emerald-500/40",
+  },
+  tamamlandi: {
+    bg: "bg-blue-500/15",
+    text: "text-blue-700 dark:text-blue-300",
+    dot: "bg-blue-500",
+    ring: "ring-blue-500/40",
+  },
+  iptal: {
+    bg: "bg-rose-500/15",
+    text: "text-rose-700 dark:text-rose-300",
+    dot: "bg-rose-500",
+    ring: "ring-rose-500/40",
+  },
 };
 
 export const TOOL_CONDITION_LABEL: Record<ToolCondition, string> = {
@@ -1055,6 +1198,7 @@ export interface Product {
   process_type: ProductProcess | null;
   cycle_time_minutes: number | null;
   setup_time_minutes: number | null;
+  parts_per_setup: number | null;
   default_machine_id: string | null;
   min_order_qty: number | null;
   unit_price: number | null;
