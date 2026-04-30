@@ -254,6 +254,7 @@ tgteknikcrm/
 | 0026 | tasks_rls_relax.sql | tasks/task_checklist/task_comments UPDATE+DELETE policy `using(true) with check(true)` — atölyede herkes herkesin kartını taşıyabilsin (kanban drag-drop revert bug fix) |
 | 0027 | product_master_extended.sql | products tablosuna 24 yeni kolon (kategori, malzeme, yüzey/ısıl işlem, boyutlar, tolerans, proses, ticari) + product_images tablosu + 'product-images' public storage bucket + 3 enum (product_status / product_process / product_currency) |
 | 0028 | jobs_setup_steps.sql | job_status'a 'ayar' eklendi (beklemede ↔ uretimde arası) + jobs.started_at/setup_completed_at + products.parts_per_setup (aynı anda bağlanan adet, setup-count math'i için) |
+| 0029 | production_workflow_and_schedule.sql | products.cleanup_time_minutes (parça başı kapı açma+swap+temizlik) + production_entries.setup_minutes (ayar dakikası ayrı kolonda) + app_settings (key text PK, value jsonb) — work_schedule default seed (Pzt-Cum 540 dk + 60 dk yemek) + machine_timeline_entries.production_entry_id + production_entries UNIQUE INDEX (machine,date,shift,job_id) |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -467,7 +468,52 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (768607a — 2026-04-30)
+## Son commit (a3befa6 — 2026-04-30)
+
+**İş akışı: auto-create üretim formu + cleanup time + takvim-bilinçli ETA + çalışma saatleri ayarı**
+
+User isteği: "Üretime başla dediğimde üretim formu kendi oluşmalı. Ayar 20 dk, cycle 2 dk + temizlik (kapı açma + parça swap) 1 dk. Pzt-Cum 10 saat / 9 net, Cmt-Pzr bazen mesai. ETA hesabı bunlara uymalı."
+
+### Migration 0029
+- `products.cleanup_time_minutes` — operatör tarafı per-piece (kapı açma + parça koy/al + temizlik). `effective_cycle = cycle + cleanup`
+- `production_entries.setup_minutes` — ayar dakikası ayrı kolon (downtime'dan ayrı)
+- `app_settings (key text PK, value jsonb)` — generic settings store. `work_schedule` default seed (Pzt-Cum 540 dk + 60 dk yemek, Cmt-Pzr kapalı)
+- `machine_timeline_entries.production_entry_id` — açık arıza bugünkü entry'ye linklenebilsin
+- `production_entries` partial UNIQUE INDEX (machine, date, shift, job_id) — UPSERT-friendly auto-create
+
+### Yeni hesap mantığı
+```
+effective_cycle = cycle + cleanup
+remaining_total_min = ⌈remaining/pps⌉ × setup + remaining × effective_cycle
+ETA = calcEtaCalendarAware(remaining, schedule, now)
+       (yemek + hafta sonu + custom days bilen wall-clock walk)
+```
+
+### Yeni server actions
+- `openTodayEntryForJob({machine, job, operator, shift?})` — bugünkü açık entry'yi bul/aç (UPSERT semantics partial unique index ile). `setJobStep`'in `ayar`/`uretimde` transition'ında otomatik çağrılır.
+- `appendProduction({machine, job, produced, scrap, downtime, setup_minutes})` — bugünkü entry'ye additif (UPSERT idempotent)
+- `closeShiftForMachine(machineId)` — bugünkü açık entry'leri `end_time` stamp ile kapat
+
+### `/settings/work-hours` (admin-only)
+- 7 günlük çizelge formu: Switch toggle + shift_start time input + work_minutes (net) + lunch_minutes
+- Her gün ayrı kart, toplam vardiya hesabı + yemek rozet
+- Haftalık net çalışma KPI üstte
+- `saveWorkSchedule` action sanitize + upsert
+- Yeni shadcn component: `components/ui/switch.tsx`
+- `/settings` ana sayfasına link kart eklendi
+
+### Job Card UI
+- "Bugün" mini-stat satırı: parça/fire/ayar/duruş (sadece ayar/üretimde iken)
+- Yeni butonlar: **+ Üretim** (modal — appendProduction), **Arıza** (/breakdowns linki), **Vardiya Kapat** (closeShiftForMachine)
+- ETA artık `calcEtaCalendarAware` kullanıyor — yemek/hafta sonu skipping
+
+### Product Form
+- "Temizlik (dk)" alanı (manufacturing section)
+- Hesap açıklama kutusu güncellendi: "Etkin cycle = cycle + temizlik" + "ETA çalışma çizelgesini bilir"
+
+---
+
+## Önceki commit (768607a — 2026-04-30)
 
 **3 küçük düzeltme: mesaj silme + jobs alt alta + dashboard temizlik**
 
