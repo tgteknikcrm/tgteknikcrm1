@@ -465,7 +465,31 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (454639e — 2026-04-30)
+## Son commit (3719b56 — 2026-04-30)
+
+**Hydration kalıcı fix: MessageNotifier localStorage useState init**
+
+`454639e`'de dialog initializer'larındaki `Math.random` + `new Date`'leri düzelttik — ama hydration error /products'ta tekrar çıktı. **Asıl kök neden bu değildi:** topbar'da mount edilen `components/app/message-notifier.tsx` `useState` lazy initializer'ı doğrudan localStorage okuyordu:
+
+```tsx
+// ❌ HATALI
+const [enabled, setEnabled] = useState(() => {
+  if (typeof window === "undefined") return false;
+  return localStorage.getItem(STORAGE_KEY) === "1";
+});
+```
+
+Server'da `window` yok → `enabled=false` → BellOff render. Client'ta localStorage "1" ise → `enabled=true` → Bell render. **İkon farklı = React tree shape farklı → useId() offset → ardından mount edilen TÜM Radix Dialog trigger'larında `aria-controls` mismatch.**
+
+MessageNotifier topbar'da, topbar (app)/layout.tsx'te → her sayfada mount → her sayfada hydration error tetikleniyordu. Bu yüzden /orders'ta ve /products'ta aynı semptom çıkıyordu.
+
+**Fix:** `useState(false)` ile başla (server ile birebir aynı), `useEffect` içinde localStorage oku + setEnabled. Standart deferred hydration. İlk frame'de BellOff görünür, sonra duruma sıçrar — ama hydration başarılı.
+
+**Önemli ders:** Sadece dialog/form içlerini değil, **global mount edilen component'lerin** initial state'lerini de SSR-safe yap. Aksi halde bir component'teki tek bir hydration mismatch alttaki TÜM dialog'ları kırar.
+
+---
+
+## Önceki commit (454639e — 2026-04-30)
 
 **Dialog'larda Math.random + new Date hydration fix**
 
