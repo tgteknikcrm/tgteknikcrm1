@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -57,8 +57,14 @@ export function ProductDialog({
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
 
+  // Guard so we only initialize the form once per open.
+  // Without this, parent re-renders (router.refresh, realtime pushes,
+  // bulk-select state, etc.) hand a fresh `existingTools` array every
+  // render → effect re-runs → user input is wiped mid-typing.
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpenRef.current) {
+      wasOpenRef.current = true;
       if (product) {
         setCode(product.code);
         setName(product.name);
@@ -88,6 +94,8 @@ export function ProductDialog({
       setPickerOpen(false);
       setPickerSearch("");
       setPickerSelected(new Set());
+    } else if (!open) {
+      wasOpenRef.current = false;
     }
   }, [open, product, existingTools]);
 

@@ -378,13 +378,21 @@ function MonthView({
           const visible = dayEvents.slice(0, 3);
           const more = dayEvents.length - visible.length;
           return (
-            <button
+            <div
               key={iso}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => onDayClick(iso)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onDayClick(iso);
+                }
+              }}
               className={cn(
-                "border-r border-b p-1 text-left flex flex-col gap-1 min-w-0 overflow-hidden",
+                "border-r border-b p-1 text-left flex flex-col gap-1 min-w-0 overflow-hidden cursor-pointer",
                 "hover:bg-muted/40 transition group/day",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                 !isCurrentMonth && "bg-muted/10 text-muted-foreground/60",
               )}
             >
@@ -415,7 +423,7 @@ function MonthView({
                   />
                 ))}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>

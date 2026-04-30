@@ -220,8 +220,10 @@ export function TasksShell({
       next.set(id, status);
       return next;
     });
-    // 2. Fire-and-forget — Realtime + the server-side revalidate will
-    //    bring the canonical state back; we just clean up the override.
+    // 2. Fire-and-forget — push the canonical state via router.refresh(),
+    //    then clean up the override after the new server data lands.
+    //    Realtime might not always be connected (websocket flaky over LAN),
+    //    so we don't rely on it here.
     void setTaskStatus(id, status).then((r) => {
       if (r.error) {
         toast.error(r.error);
@@ -232,9 +234,10 @@ export function TasksShell({
         });
         return;
       }
-      // Drop the override after a short delay so the realtime row
-      // (or next refresh) has time to land. If they collide, the
-      // canonical row wins (same value anyway).
+      // Pull fresh server data, then drop the override. Without an
+      // explicit refresh the override clears before tasks prop updates
+      // and the card snaps back to its old column.
+      router.refresh();
       setTimeout(() => {
         setStatusOverrides((prev) => {
           const next = new Map(prev);
