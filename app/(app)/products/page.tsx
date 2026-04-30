@@ -45,6 +45,16 @@ export default async function ProductsPage() {
               icon={Boxes}
               title="Henüz ürün yok"
               description="Tekrar eden parçaları burada tanımla. İş açarken bu üründen seçince teknik resim, takım, CAD/CAM otomatik atanır."
+              action={
+                <ProductDialog
+                  tools={tools}
+                  trigger={
+                    <Button>
+                      <Plus className="size-4" /> İlk Ürünü Ekle
+                    </Button>
+                  }
+                />
+              }
             />
           ) : (
             <ProductsTable
