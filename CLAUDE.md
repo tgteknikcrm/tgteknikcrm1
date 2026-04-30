@@ -252,6 +252,7 @@ tgteknikcrm/
 | 0024 | delete_constraints_relax.sql | `production_entries.machine_id` ve `quality_reviews.reviewer_id` FK'larını RESTRICT → SET NULL (makine/operatör silmek artık geçmişi yok etmiyor) |
 | 0025 | product_master.sql | products + product_tools junction + jobs/drawings/cad_programs.product_id + production_entries.notes (multi-entry için) |
 | 0026 | tasks_rls_relax.sql | tasks/task_checklist/task_comments UPDATE+DELETE policy `using(true) with check(true)` — atölyede herkes herkesin kartını taşıyabilsin (kanban drag-drop revert bug fix) |
+| 0027 | product_master_extended.sql | products tablosuna 24 yeni kolon (kategori, malzeme, yüzey/ısıl işlem, boyutlar, tolerans, proses, ticari) + product_images tablosu + 'product-images' public storage bucket + 3 enum (product_status / product_process / product_currency) |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -465,7 +466,53 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (9715b10 — 2026-04-30)
+## Son commit (111e871 — 2026-04-30)
+
+**Ürün master kütüğü: ayrı sayfa + kapsamlı detay (popup kaldırıldı)**
+
+Önceki popup ProductDialog yetersizdi (kullanıcı "aşırı kapsamlı bir ürün ekleme alanı" istedi). Manufacturing master data seviyesinde tam kütük kuruldu.
+
+### Yeni sayfa yapısı
+- **`/products`** — liste (kapak görsel + kod + ad + kategori + müşteri + malzeme + durum + takım sayısı kolonları)
+- **`/products/new`** — ayrı oluşturma sayfası (ProductForm)
+- **`/products/[id]`** — detay sayfası: hero card + 6 tab (Bilgiler · Görseller · Teknik Resimler · CAD/CAM · Takımlar · İşler)
+
+### Migration 0027 — products tablosu büyütüldü
+- 3 enum: `product_status` (aktif/taslak/pasif), `product_process` (tornalama/frezeleme/kombinasyon/taşlama/erozyon/lazer/diğer), `product_currency` (TRY/USD/EUR)
+- 24 yeni kolon (kategori, müşteri parça no, çizim ref, status, revision, tags, malzeme, yüzey/ısıl işlem, sertlik, boyutlar 5 alan, tolerans, Ra, proses, makine FK, setup/cycle time, min sipariş, fiyat, currency)
+- `product_images` tablosu (multi-image gallery, primary unique partial index)
+- `product-images` public storage bucket + 4 RLS policy (select/insert/update/delete)
+- Realtime publication eklendi
+
+### Yeni component'ler
+
+**`ProductForm`** (`product-form.tsx`) — 9 collapsible bölüm:
+1. Tanımlama, 2. Sınıflandırma, 3. Malzeme & Yüzey, 4. Boyutlar, 5. İmalat, 6. Ticari, 7. Takım Listesi, 8. Notlar
+- ComboBox (Input + datalist) preset autocomplete; SSR-safe (datalist id useRef + post-mount stamping)
+- Sticky Save/İptal footer
+- Tek form hem create hem edit; create sonrası `/products/[id]`'ye redirect
+
+**`ProductImageGallery`** — multi-upload, drag-drop, primary toggle, delete, hover overlay actions, animate-pulse loading
+
+### Detay sayfası tabları
+- **Bilgiler** — ProductForm in-place edit
+- **Görseller** — ImageGallery (multi-image)
+- **Teknik Resimler** / **CAD/CAM** — `drawings` / `cad_programs` tabloları product_id ile filtrelenir; "+" buton sayfaya `?product=<id>` ile atlatır
+- **Takımlar** — read-only liste
+- **İşler** — bu üründen açılmış jobs tablosu
+
+### Kaldırıldı
+`product-dialog.tsx` — popup completely removed. Tüm "Düzenle" / "Yeni" tıklamaları artık page navigation.
+
+### Defansif
+`saveProduct` + `deleteProduct` `.select().maybeSingle()` ile 0-row fallback (Supabase silent RLS trap pattern).
+
+### Pattern öğrenmesi
+`PageHeader.description: string → ReactNode` — Badge/span karma description için type genişletildi. Bu pattern detail sayfaları için tekrar kullanılabilir.
+
+---
+
+## Önceki commit (9715b10 — 2026-04-30)
 
 **Mesajlar: konuşma sil + yazar info popover + jitter fix + loading skeleton**
 
