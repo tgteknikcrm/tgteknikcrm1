@@ -19,6 +19,7 @@ import {
   Check,
   MoreHorizontal,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { NewConversationDialog } from "./new-conversation-dialog";
 import {
@@ -31,6 +32,7 @@ import {
 } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 import {
+  leaveConversation,
   setConversationArchived,
   setConversationPinned,
   setConversationTags,
@@ -361,6 +363,21 @@ function ConvoRow({
     });
   }
 
+  function doDelete(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setMenuOpen(false);
+    if (!confirm(`"${title}" konuşmasını listenden çıkar — emin misin?`)) return;
+    startTransition(async () => {
+      const r = await leaveConversation(c.id);
+      if (r.error) toast.error(r.error);
+      else {
+        toast.success("Konuşma listenden kaldırıldı");
+        router.refresh();
+      }
+    });
+  }
+
   return (
     <li className="relative group/row">
       <button
@@ -498,6 +515,15 @@ function ConvoRow({
           className="size-7 rounded hover:bg-muted flex items-center justify-center"
         >
           <Tag className="size-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={doDelete}
+          disabled={pending}
+          title="Konuşmayı listenden sil"
+          className="size-7 rounded hover:bg-red-500/10 flex items-center justify-center text-red-600"
+        >
+          <Trash2 className="size-3.5" />
         </button>
       </div>
 

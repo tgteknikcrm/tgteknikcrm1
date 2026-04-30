@@ -113,6 +113,10 @@ export function MessagesClient({
     if (initialActiveId) m.set(initialActiveId, initialActiveParticipants);
     return m;
   });
+  // Conversations whose detail fetch is currently in flight. Used to
+  // drive a skeleton state in ChatPanel — same UX as the sidebar route
+  // navigation loading.
+  const [loadingConvIds, setLoadingConvIds] = useState<Set<string>>(new Set());
 
   // Mirror the live activeId in a ref so non-reactive callbacks (cache
   // eviction, realtime handlers) can read it without re-subscribing.
@@ -130,46 +134,65 @@ export function MessagesClient({
 
   const fetchConversationDetail = useCallback(
     async (convId: string) => {
-      const [mRes, pRes] = await Promise.all([
-        supabase
-          .from("messages")
-          .select(
-            "*, message_attachments(id, message_id, storage_path, file_name, mime_type, size_bytes, provider, created_at)",
-          )
-          .eq("conversation_id", convId)
-          .order("created_at", { ascending: true })
-          .limit(200),
-        supabase
-          .from("conversation_participants")
-          .select("*")
-          .eq("conversation_id", convId),
-      ]);
-      type MsgRow = MessageWithRelations & {
-        message_attachments?: MessageAttachment[];
-      };
-      const msgs = ((mRes.data ?? []) as MsgRow[]).map((m) => {
-        const author = m.author_id ? profileById.get(m.author_id) ?? null : null;
-        return {
-          ...m,
-          attachments: m.message_attachments ?? [],
-          author: author
-            ? {
-                id: author.id,
-                full_name: author.full_name,
-                phone: author.phone,
-              }
-            : null,
-        };
+      setLoadingConvIds((prev) => {
+        if (prev.has(convId)) return prev;
+        const next = new Set(prev);
+        next.add(convId);
+        return next;
       });
-      setMessageCache((prev) => setBounded(prev, convId, msgs, activeIdRef.current));
-      setParticipantsCache((prev) =>
-        setBounded(
-          prev,
-          convId,
-          (pRes.data ?? []) as ConversationParticipant[],
-          activeIdRef.current,
-        ),
-      );
+      try {
+        const [mRes, pRes] = await Promise.all([
+          supabase
+            .from("messages")
+            .select(
+              "*, message_attachments(id, message_id, storage_path, file_name, mime_type, size_bytes, provider, created_at)",
+            )
+            .eq("conversation_id", convId)
+            .order("created_at", { ascending: true })
+            .limit(200),
+          supabase
+            .from("conversation_participants")
+            .select("*")
+            .eq("conversation_id", convId),
+        ]);
+        type MsgRow = MessageWithRelations & {
+          message_attachments?: MessageAttachment[];
+        };
+        const msgs = ((mRes.data ?? []) as MsgRow[]).map((m) => {
+          const author = m.author_id
+            ? profileById.get(m.author_id) ?? null
+            : null;
+          return {
+            ...m,
+            attachments: m.message_attachments ?? [],
+            author: author
+              ? {
+                  id: author.id,
+                  full_name: author.full_name,
+                  phone: author.phone,
+                }
+              : null,
+          };
+        });
+        setMessageCache((prev) =>
+          setBounded(prev, convId, msgs, activeIdRef.current),
+        );
+        setParticipantsCache((prev) =>
+          setBounded(
+            prev,
+            convId,
+            (pRes.data ?? []) as ConversationParticipant[],
+            activeIdRef.current,
+          ),
+        );
+      } finally {
+        setLoadingConvIds((prev) => {
+          if (!prev.has(convId)) return prev;
+          const next = new Set(prev);
+          next.delete(convId);
+          return next;
+        });
+      }
     },
     [supabase, profileById],
   );
@@ -522,6 +545,11 @@ export function MessagesClient({
             initialMessages={activeMessages}
             currentUserId={currentUserId}
             people={people}
+            isLoading={
+              !!activeId &&
+              loadingConvIds.has(activeId) &&
+              activeMessages.length === 0
+            }
           />
         ) : (
           <div className="flex-1 flex items-center justify-center p-8">

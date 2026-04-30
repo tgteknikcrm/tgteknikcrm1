@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,11 @@ import { createClient } from "@/lib/supabase/client";
 import { formatPhoneForDisplay } from "@/lib/phone";
 import { cn } from "@/lib/utils";
 import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import {
   deleteMessage,
   editMessage,
   leaveConversation,
@@ -89,6 +94,10 @@ interface Props {
   people: Array<
     Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">
   >;
+  // Set while messages-client is loading this conversation's
+  // messages from Supabase (cache miss). Drives a skeleton overlay
+  // in the message feed — same UX as sidebar route navigation.
+  isLoading?: boolean;
 }
 
 function initials(s: string | null | undefined): string {
@@ -135,6 +144,7 @@ export function ChatPanel({
   initialMessages: messages,
   currentUserId,
   people,
+  isLoading = false,
 }: Props) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -320,60 +330,68 @@ export function ChatPanel({
         !!p,
     );
 
-  // ── Scroll management ──
-  // Three rules:
-  //   1. Conversation switch → INSTANT jump to bottom (no animation
-  //      bleed across threads, no leftover scroll position from the
-  //      previous conversation).
-  //   2. New message in current thread → SMOOTH scroll to bottom IF
-  //      the user is already at (or near) bottom. If they scrolled
-  //      up to read older messages we leave their position alone.
-  //   3. New optimistic message I just sent → ALWAYS scroll, even if
-  //      the user happened to be scrolled up — they intentionally
-  //      acted, the latest message must be visible.
+  // ── Scroll management (single useLayoutEffect — no jitter) ──
+  //
+  // Why useLayoutEffect over useEffect+rAF:
+  //   useEffect runs AFTER the browser paints. So the user briefly
+  //   sees the new conversation rendered with scroll at top before
+  //   our scroll-to-bottom kicks in — that's the "scroll yukarı
+  //   gidip alta dönüyor" jitter the user reported.
+  //   useLayoutEffect runs synchronously AFTER the DOM mutation but
+  //   BEFORE paint, so the scroll position is correct on the very
+  //   first frame the user sees. No rAF needed.
+  //
+  // Three rules in one place so they stay consistent:
+  //   1. Conversation switched (id changed) → INSTANT jump to bottom
+  //      (no animation bleed, no leftover scroll from the previous
+  //      thread). Stamp lastOptimisticLenRef so rule 2 doesn't also
+  //      fire on the same render.
+  //   2. New message in CURRENT thread → smooth scroll if the user is
+  //      already near bottom (120px tolerance). If they scrolled up
+  //      to read older messages, leave their position alone.
+  //   3. New optimistic message I just sent → ALWAYS scroll (instant,
+  //      so the input stays glued to the latest content even with
+  //      rapid typing). The user intentionally acted; the new line
+  //      must be visible.
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastConvIdRef = useRef<string | null>(null);
   const atBottomRef = useRef(true);
   const lastOptimisticLenRef = useRef(0);
 
-  // Rule 1: instant jump when conversation id changes.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+
+    // Rule 1: conversation switch.
     if (lastConvIdRef.current !== conversation.id) {
       lastConvIdRef.current = conversation.id;
-      // Use rAF so the DOM has committed the new message list before we measure scrollHeight.
-      requestAnimationFrame(() => {
-        el.scrollTop = el.scrollHeight;
-        atBottomRef.current = true;
-      });
-    }
-  }, [conversation.id, messages.length]);
-
-  // Rule 2 + 3: react to message count changes within the current thread.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const optimisticGrew = optimistic.length > lastOptimisticLenRef.current;
-    lastOptimisticLenRef.current = optimistic.length;
-    // I just sent something → force scroll regardless of position.
-    if (optimisticGrew) {
-      requestAnimationFrame(() => {
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-        atBottomRef.current = true;
-      });
+      lastOptimisticLenRef.current = optimistic.length;
+      el.scrollTop = el.scrollHeight;
+      atBottomRef.current = true;
       return;
     }
-    // Server message landed → only scroll if I'm already at bottom.
-    if (atBottomRef.current) {
-      requestAnimationFrame(() => {
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-      });
-    }
-  }, [messages.length, optimistic.length]);
 
-  // Track whether the user is at-bottom (within 120px tolerance —
-  // covers a half-typed line of preview content and small toolbars).
+    // Same thread — observe content updates.
+    const optimisticGrew = optimistic.length > lastOptimisticLenRef.current;
+    lastOptimisticLenRef.current = optimistic.length;
+
+    // Rule 3: I just sent something (instant; smooth would lag behind
+    // fast typing where the next message lands before the animation
+    // finishes).
+    if (optimisticGrew) {
+      el.scrollTop = el.scrollHeight;
+      atBottomRef.current = true;
+      return;
+    }
+
+    // Rule 2: server message landed. Smooth only if at bottom.
+    if (atBottomRef.current) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+  }, [conversation.id, messages.length, optimistic.length]);
+
+  // Track whether the user is at-bottom (120px tolerance covers a
+  // half-typed line of preview content and small toolbars).
   function onScrollFeed() {
     const el = scrollRef.current;
     if (!el) return;
@@ -578,7 +596,8 @@ export function ChatPanel({
         )}
         style={wallpaperStyle ?? undefined}
       >
-        {grouped.length === 0 && (
+        {isLoading && grouped.length === 0 && <FeedSkeleton />}
+        {!isLoading && grouped.length === 0 && (
           <div className="text-center text-sm text-muted-foreground py-12">
             İlk mesajı sen yaz. 👋
           </div>
@@ -636,6 +655,11 @@ export function ChatPanel({
                     repliedToMessage={
                       m.reply_to
                         ? messages.find((x) => x.id === m.reply_to) ?? null
+                        : null
+                    }
+                    authorProfile={
+                      m.author_id
+                        ? profileById.get(m.author_id) ?? null
                         : null
                     }
                   />
@@ -707,6 +731,7 @@ function MessageBubble({
   onReply,
   onEdit,
   repliedToMessage,
+  authorProfile,
 }: {
   message: MessageWithRelations;
   fromMe: boolean;
@@ -718,6 +743,7 @@ function MessageBubble({
   onReply: () => void;
   onEdit: () => void;
   repliedToMessage: MessageWithRelations | null;
+  authorProfile: Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at"> | null;
 }) {
   const isOptimistic = m.id.startsWith("temp_");
   const [pending, startTransition] = useTransition();
@@ -743,11 +769,13 @@ function MessageBubble({
       {!fromMe && (
         <div className="w-8 shrink-0">
           {!consecutive && (
-            <Avatar className="size-7">
-              <AvatarFallback className="text-[10px] font-semibold bg-muted">
-                {initials(authorLabel)}
-              </AvatarFallback>
-            </Avatar>
+            <AuthorHoverCard profile={authorProfile} fallbackLabel={authorLabel}>
+              <Avatar className="size-7 cursor-pointer">
+                <AvatarFallback className="text-[10px] font-semibold bg-muted">
+                  {initials(authorLabel)}
+                </AvatarFallback>
+              </Avatar>
+            </AuthorHoverCard>
           )}
         </div>
       )}
@@ -758,9 +786,11 @@ function MessageBubble({
         )}
       >
         {showAuthorName && (
-          <span className="text-[10px] font-semibold text-muted-foreground px-2 mb-0.5">
-            {authorLabel}
-          </span>
+          <AuthorHoverCard profile={authorProfile} fallbackLabel={authorLabel}>
+            <span className="text-[10px] font-semibold text-muted-foreground px-2 mb-0.5 cursor-pointer hover:underline">
+              {authorLabel}
+            </span>
+          </AuthorHoverCard>
         )}
         {repliedToMessage && (
           <div
@@ -861,6 +891,98 @@ function MessageBubble({
         </div>
       </div>
     </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   FeedSkeleton — shown while messages-client is fetching this
+   conversation's history (cache miss). Same UX as the sidebar route
+   navigation loading: a few placeholder bubbles to telegraph that
+   content is on its way without flashing an empty white pane.
+   ────────────────────────────────────────────────────────────────── */
+function FeedSkeleton() {
+  // Hand-tuned widths so the skeleton feels like a real conversation,
+  // not a uniform stripe.
+  const rows: Array<{ side: "left" | "right"; w: string }> = [
+    { side: "left", w: "60%" },
+    { side: "right", w: "45%" },
+    { side: "left", w: "75%" },
+    { side: "right", w: "55%" },
+    { side: "left", w: "40%" },
+    { side: "right", w: "65%" },
+  ];
+  return (
+    <div className="space-y-3 py-2">
+      {rows.map((r, i) => (
+        <div
+          key={i}
+          className={cn("flex", r.side === "right" ? "justify-end" : "justify-start")}
+        >
+          <div
+            className="h-9 rounded-2xl bg-muted/60 animate-pulse"
+            style={{ width: r.w }}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   AuthorHoverCard — wraps an avatar / author-name with a tooltip-like
+   popover showing the author's full name, phone, and last-seen.
+   Triggered on hover (Radix HoverCard, 200ms open delay).
+   ────────────────────────────────────────────────────────────────── */
+function AuthorHoverCard({
+  profile,
+  fallbackLabel,
+  children,
+}: {
+  profile: Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at"> | null;
+  fallbackLabel: string;
+  children: React.ReactNode;
+}) {
+  if (!profile) {
+    // Unknown author — just render the trigger without a popover.
+    return <>{children}</>;
+  }
+  const [, presence] = presenceLabel(profile.last_seen_at ?? null);
+  const phone = formatPhoneForDisplay(profile.phone);
+  const display = profile.full_name || phone || fallbackLabel;
+  return (
+    <HoverCard openDelay={200} closeDelay={120}>
+      <HoverCardTrigger asChild>{children}</HoverCardTrigger>
+      <HoverCardContent align="start" className="w-60">
+        <div className="flex items-start gap-3">
+          <Avatar className="size-10 shrink-0">
+            <AvatarFallback className="text-xs font-bold bg-primary/15 text-primary">
+              {initials(display)}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold leading-tight truncate">
+              {display}
+            </div>
+            {phone && profile.full_name && (
+              <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                {phone}
+              </div>
+            )}
+            <div className="text-[11px] text-muted-foreground mt-1.5 flex items-center gap-1.5">
+              <span
+                className={cn(
+                  "size-1.5 rounded-full shrink-0",
+                  presence === "Online"
+                    ? "bg-emerald-500"
+                    : "bg-muted-foreground/60",
+                )}
+              />
+              <span>{presence}</span>
+            </div>
+          </div>
+        </div>
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 
