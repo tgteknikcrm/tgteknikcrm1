@@ -24,6 +24,7 @@ import { CadUploadDialog } from "./upload-dialog";
 import { DownloadButton } from "./program-actions";
 import { DeleteButton } from "../operators/delete-button";
 import { deleteCadProgram } from "./actions";
+import { ProductFilter } from "@/components/app/product-filter";
 import { formatDate } from "@/lib/utils";
 
 export const metadata = { title: "CAD/CAM" };
@@ -59,9 +60,9 @@ function KindIcon({ kind }: { kind: ReturnType<typeof detectCadFileKind> }) {
 export default async function CadCamPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; product?: string }>;
 }) {
-  const { q } = await searchParams;
+  const { q, product: productFilter } = await searchParams;
 
   let programs: ProgramRow[] = [];
   let machines: Pick<Machine, "id" | "name">[] = [];
@@ -77,6 +78,9 @@ export default async function CadCamPage({
 
     if (q) {
       pq = pq.or(`title.ilike.%${q}%,revision.ilike.%${q}%,notes.ilike.%${q}%`);
+    }
+    if (productFilter) {
+      pq = pq.eq("product_id", productFilter);
     }
 
     const [pRes, mRes, jRes, prRes] = await Promise.all([
@@ -105,6 +109,7 @@ export default async function CadCamPage({
         actions={
           <>
             <SearchInput placeholder="Başlık, revizyon, not..." />
+            <ProductFilter products={products} />
             <CadUploadDialog machines={machines} jobs={jobs} products={products} />
           </>
         }

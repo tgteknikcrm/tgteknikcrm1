@@ -166,6 +166,7 @@ export interface ProductionEntry {
 export interface Drawing {
   id: string;
   job_id: string | null;
+  product_id: string | null;
   title: string;
   file_path: string;
   file_type: string | null;
@@ -718,6 +719,7 @@ export interface CadProgram {
   title: string;
   machine_id: string | null;
   job_id: string | null;
+  product_id: string | null;
   file_path: string;
   file_type: string | null;
   file_size: number | null;

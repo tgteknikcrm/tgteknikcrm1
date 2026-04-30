@@ -53,32 +53,35 @@ export function ToolsTable({ tools }: { tools: Tool[] }) {
             <TableHead className="w-10">
               <Checkbox
                 checked={
-                  sel.allSelected ? true : sel.someSelected ? "indeterminate" : false
+                  sel.allSelected
+                    ? true
+                    : sel.someSelected
+                      ? "indeterminate"
+                      : false
                 }
                 onCheckedChange={(v) => (v ? sel.selectAll() : sel.clear())}
                 aria-label="Tümünü seç"
               />
             </TableHead>
-            <TableHead className="w-14"></TableHead>
+            <TableHead className="w-16">Görsel</TableHead>
             <TableHead>Kod</TableHead>
-            <TableHead>İsim</TableHead>
-            <TableHead>Tip / Ölçü</TableHead>
+            <TableHead>Ad</TableHead>
+            <TableHead>Tip</TableHead>
             <TableHead>Konum</TableHead>
-            <TableHead className="text-right">Stok</TableHead>
+            <TableHead className="text-right">Adet</TableHead>
             <TableHead>Durum</TableHead>
             <TableHead className="text-right">İşlem</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {tools.map((t) => {
-            const low = t.quantity <= t.min_quantity;
-            const imgUrl = toolImagePublicUrl(t.image_path);
+            const low =
+              t.min_quantity > 0 && t.quantity <= t.min_quantity;
+            const url = toolImagePublicUrl(t.image_path);
             return (
               <TableRow
                 key={t.id}
-                className={
-                  sel.has(t.id) ? "bg-primary/5" : "hover:bg-muted/40"
-                }
+                className={sel.has(t.id) ? "bg-primary/5" : undefined}
               >
                 <TableCell>
                   <Checkbox
@@ -93,48 +96,45 @@ export function ToolsTable({ tools }: { tools: Tool[] }) {
                   />
                 </TableCell>
                 <TableCell>
-                  <div className="size-10 rounded-md border bg-muted/40 overflow-hidden flex items-center justify-center shrink-0">
-                    {imgUrl ? (
+                  <div className="size-10 rounded-md border bg-muted/40 flex items-center justify-center overflow-hidden">
+                    {url ? (
                       <Image
-                        src={imgUrl}
+                        src={url}
                         alt={t.name}
                         width={40}
                         height={40}
                         className="size-full object-cover"
+                        unoptimized
                       />
                     ) : (
-                      <Wrench className="size-4 text-muted-foreground/50" />
+                      <Wrench className="size-4 text-muted-foreground" />
                     )}
                   </div>
                 </TableCell>
-                <TableCell className="font-mono text-xs">{t.code || "—"}</TableCell>
-                <TableCell className="font-medium">{t.name}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {[t.type, t.size, t.material].filter(Boolean).join(" · ") || "—"}
+                <TableCell className="font-mono text-xs">
+                  {t.code || "—"}
                 </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
+                <TableCell className="font-medium">{t.name}</TableCell>
+                <TableCell className="text-muted-foreground">
+                  {t.type || "—"}
+                </TableCell>
+                <TableCell className="text-muted-foreground">
                   {t.location || "—"}
                 </TableCell>
-                <TableCell className="text-right font-mono">
+                <TableCell className="text-right tabular-nums">
                   <span
                     className={
-                      low
-                        ? "text-amber-600 font-semibold flex items-center justify-end gap-1"
-                        : ""
+                      low ? "text-amber-700 font-semibold" : undefined
                     }
                   >
-                    {low && <AlertTriangle className="size-3.5" />}
-                    {t.quantity} / {t.min_quantity}
+                    {t.quantity}
                   </span>
+                  {low && (
+                    <AlertTriangle className="inline size-3.5 ml-1 text-amber-600" />
+                  )}
                 </TableCell>
                 <TableCell>
-                  <Badge
-                    variant={
-                      t.condition === "degistirilmeli"
-                        ? "destructive"
-                        : "outline"
-                    }
-                  >
+                  <Badge variant="outline">
                     {TOOL_CONDITION_LABEL[t.condition]}
                   </Badge>
                 </TableCell>
@@ -149,10 +149,7 @@ export function ToolsTable({ tools }: { tools: Tool[] }) {
                       }
                     />
                     <DeleteButton
-                      action={async () => {
-                        "use server";
-                        return deleteTool(t.id);
-                      }}
+                      action={() => deleteTool(t.id)}
                       confirmText={`'${t.name}' silinsin mi?`}
                     />
                   </div>

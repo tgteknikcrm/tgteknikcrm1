@@ -1,29 +1,15 @@
-import Link from "next/link";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
 import {
-  PO_STATUS_LABEL,
-  PO_STATUS_TONE,
   type PurchaseOrder,
   type Supplier,
 } from "@/lib/supabase/types";
 import { Plus, ShoppingCart } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { OrderDialog } from "./order-dialog";
-import { DeleteButton } from "../operators/delete-button";
-import { deleteOrder } from "./actions";
-import { formatDate, cn } from "@/lib/utils";
+import { OrdersTable } from "./orders-table";
 
 export const metadata = { title: "Siparişler" };
 
@@ -94,82 +80,7 @@ export default async function OrdersPage() {
               }
             />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Sipariş No</TableHead>
-                  <TableHead>Tedarikçi</TableHead>
-                  <TableHead>Tarih</TableHead>
-                  <TableHead>Beklenen</TableHead>
-                  <TableHead className="text-right">Kalem</TableHead>
-                  <TableHead className="text-right">Toplam</TableHead>
-                  <TableHead>Durum</TableHead>
-                  <TableHead className="text-right">İşlem</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {orders.map((o) => {
-                  const total = o.items.reduce(
-                    (s, it) =>
-                      s + Number(it.quantity ?? 0) * Number(it.unit_price ?? 0),
-                    0,
-                  );
-                  return (
-                    <TableRow key={o.id}>
-                      <TableCell className="font-mono text-sm font-medium">
-                        <Link
-                          href={`/orders/${o.id}`}
-                          className="hover:underline"
-                        >
-                          {o.order_no || "—"}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{o.supplier?.name || "—"}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {formatDate(o.order_date)}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {o.expected_date ? formatDate(o.expected_date) : "—"}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums text-sm">
-                        {o.items.length}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums font-medium">
-                        {total > 0
-                          ? total.toLocaleString("tr-TR", {
-                              style: "currency",
-                              currency: "TRY",
-                              maximumFractionDigits: 2,
-                            })
-                          : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={cn("border", PO_STATUS_TONE[o.status])}
-                        >
-                          {PO_STATUS_LABEL[o.status]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex gap-1 justify-end">
-                          <Button asChild variant="ghost" size="sm">
-                            <Link href={`/orders/${o.id}`}>Aç</Link>
-                          </Button>
-                          <DeleteButton
-                            action={async () => {
-                              "use server";
-                              return deleteOrder(o.id);
-                            }}
-                            confirmText={`'${o.order_no ?? "sipariş"}' silinsin mi?`}
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <OrdersTable orders={orders} />
           )}
         </CardContent>
       </Card>

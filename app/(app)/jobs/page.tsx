@@ -1,41 +1,21 @@
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
 import {
-  JOB_STATUS_LABEL,
   type Job,
-  type JobStatus,
   type Machine,
   type Operator,
   type Product,
 } from "@/lib/supabase/types";
-import { Plus, FileText, ClipboardCheck, Wrench } from "lucide-react";
+import { Plus, FileText } from "lucide-react";
 import Link from "next/link";
 import { EmptyState } from "@/components/app/empty-state";
 import { SearchInput } from "@/components/app/search-input";
 import { JobDialog } from "./job-dialog";
-import { JobToolsDialog } from "./job-tools-dialog";
-import { DeleteButton } from "../operators/delete-button";
-import { deleteJob } from "./actions";
+import { JobsTable } from "./jobs-table";
 
 export const metadata = { title: "İşler / Siparişler" };
-
-const STATUS_VARIANT: Record<JobStatus, "default" | "secondary" | "outline" | "destructive"> = {
-  beklemede: "secondary",
-  uretimde: "default",
-  tamamlandi: "outline",
-  iptal: "destructive",
-};
 
 export default async function JobsPage({
   searchParams,
@@ -124,82 +104,12 @@ export default async function JobsPage({
               description="Yeni iş ekleyerek başlayın."
             />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>İş No</TableHead>
-                  <TableHead>Müşteri</TableHead>
-                  <TableHead>Parça</TableHead>
-                  <TableHead className="text-right">Adet</TableHead>
-                  <TableHead>Makine</TableHead>
-                  <TableHead>Operatör</TableHead>
-                  <TableHead>Teslim</TableHead>
-                  <TableHead>Durum</TableHead>
-                  <TableHead className="text-right">İşlem</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {jobs.map((j) => (
-                  <TableRow key={j.id}>
-                    <TableCell className="font-mono text-xs">{j.job_no || "—"}</TableCell>
-                    <TableCell className="font-medium">{j.customer}</TableCell>
-                    <TableCell>
-                      {j.part_name}
-                      {j.part_no && (
-                        <span className="text-muted-foreground text-xs"> · {j.part_no}</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right font-mono">{j.quantity}</TableCell>
-                    <TableCell>{j.machine_name || "—"}</TableCell>
-                    <TableCell>{j.operator_name || "—"}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {j.due_date || "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={STATUS_VARIANT[j.status]}>
-                        {JOB_STATUS_LABEL[j.status]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex gap-1 justify-end">
-                        <JobToolsDialog
-                          jobId={j.id}
-                          jobLabel={j.part_name}
-                          trigger={
-                            <Button variant="ghost" size="sm" title="Takım Ata">
-                              <Wrench className="size-4" /> Takım
-                            </Button>
-                          }
-                        />
-                        <Button asChild variant="ghost" size="sm" title="Kalite Kontrol">
-                          <Link href={`/quality/${j.id}`}>
-                            <ClipboardCheck className="size-4" /> Kalite
-                          </Link>
-                        </Button>
-                        <JobDialog
-                          job={j}
-                          machines={machines}
-                          operators={operators}
-                          products={products}
-                          trigger={
-                            <Button variant="ghost" size="sm">
-                              Düzenle
-                            </Button>
-                          }
-                        />
-                        <DeleteButton
-                          action={async () => {
-                            "use server";
-                            return deleteJob(j.id);
-                          }}
-                          confirmText={`'${j.part_name}' işi silinsin mi?`}
-                        />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <JobsTable
+              jobs={jobs}
+              machines={machines}
+              operators={operators}
+              products={products}
+            />
           )}
         </CardContent>
       </Card>

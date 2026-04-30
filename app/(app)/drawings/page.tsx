@@ -23,6 +23,7 @@ import { DrawingsDropShell } from "./drawings-drop-shell";
 import { DownloadButton, DeleteDrawingButton } from "./drawing-actions";
 import { ViewerDialog } from "./viewer-dialog";
 import { EditorDialog } from "./editor-dialog";
+import { ProductFilter } from "@/components/app/product-filter";
 import { formatDateTime } from "@/lib/utils";
 
 export const metadata = { title: "Teknik Resimler" };
@@ -39,18 +40,28 @@ function fileNameFromPath(path: string) {
   return base.replace(/^\d+_/, "");
 }
 
-export default async function DrawingsPage() {
+export default async function DrawingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ product?: string }>;
+}) {
+  const { product: productFilter } = await searchParams;
+
   let drawings: Array<Drawing & { job_label?: string }> = [];
   let jobs: Job[] = [];
   let products: import("@/lib/supabase/types").Product[] = [];
 
   try {
     const supabase = await createClient();
+    let dq = supabase
+      .from("drawings")
+      .select("*, jobs(job_no, customer, part_name)")
+      .order("created_at", { ascending: false });
+    if (productFilter) {
+      dq = dq.eq("product_id", productFilter);
+    }
     const [dRes, jRes, pRes] = await Promise.all([
-      supabase
-        .from("drawings")
-        .select("*, jobs(job_no, customer, part_name)")
-        .order("created_at", { ascending: false }),
+      dq,
       supabase.from("jobs").select("*").order("created_at", { ascending: false }),
       supabase.from("products").select("*").order("code"),
     ]);
@@ -75,7 +86,12 @@ export default async function DrawingsPage() {
       <PageHeader
         title="Teknik Resimler"
         description="Parça teknik resimleri ve çizimler (PDF, görsel, DWG/DXF) · Dosyaları sayfaya sürükleyebilirsin"
-        actions={<UploadDialog jobs={jobs} products={products} />}
+        actions={
+          <>
+            <ProductFilter products={products} />
+            <UploadDialog jobs={jobs} products={products} />
+          </>
+        }
       />
 
       <Card>
