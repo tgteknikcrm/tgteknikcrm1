@@ -465,7 +465,23 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (ff6dfa9 — 2026-04-30)
+## Son commit (9715b10 — 2026-04-30)
+
+**Mesajlar: konuşma sil + yazar info popover + jitter fix + loading skeleton**
+
+4 UX iyileştirmesi:
+
+1. **Konuşma satırı hover'da "Sil" butonu** — Pin/Archive yanına kırmızı çöp kutusu. `leaveConversation` çağırır → kullanıcı `conversation_participants`'tan çıkar, listeden düşer. Confirm + toast.
+
+2. **Mesaj yazarı info popover** — Avatar / isim hover'da 200ms sonra açılan HoverCard: ad, telefon, online/last-seen. Yeni `components/ui/hover-card.tsx` (Radix HoverCard sarmalı) — gelecekteki tüm hover-tooltip'lar için reusable.
+
+3. **Scroll jitter kalıcı fix** — Geçen turda `useEffect + requestAnimationFrame` denemiştim ama rAF paint'ten SONRA çalışıyor → kullanıcı bir frame için scroll-üstte yeni mesaj listesini görüp sonra alta atılmayı izliyordu (raporlanan "yukarı gidip alta dönüyor" titreme). Çözüm: `useLayoutEffect` (synchronous, paint'ten ÖNCE). Tek effect, 3 kural (conv switch instant / kendi gönderdiğim instant / dipte ise smooth). rAF tamamen kaldırıldı.
+
+4. **Konuşma değişiminde loading skeleton** — sidebar navigation loading'i ile aynı UX. `messages-client.tsx`'te `loadingConvIds: Set<string>` state'i (`fetchConversationDetail` başlangıç/bitişinde update). ChatPanel `isLoading` prop'u + `<FeedSkeleton />` (6 placeholder bubble, animate-pulse). Boş white pane flash'ı yok.
+
+---
+
+## Önceki commit (ff6dfa9 — 2026-04-30)
 
 **Mesajlar: scroll davranışı + silme UX + defansif delete action**
 
