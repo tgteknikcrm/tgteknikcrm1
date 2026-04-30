@@ -325,6 +325,67 @@ export async function deleteProductImage(imageId: string) {
   return { success: true };
 }
 
+// ── Inline tool CRUD (used by the product detail Tools tab) ───────
+
+export async function addProductTool(
+  productId: string,
+  toolId: string,
+  qty: number,
+) {
+  const { supabase, error } = await requireUser();
+  if (error) return { error };
+  if (qty < 1 || !Number.isFinite(qty)) qty = 1;
+  const { error: e } = await supabase
+    .from("product_tools")
+    .upsert(
+      {
+        product_id: productId,
+        tool_id: toolId,
+        quantity_used: Math.floor(qty),
+      },
+      { onConflict: "product_id,tool_id" },
+    );
+  if (e) return { error: e.message };
+  revalidatePath(`/products/${productId}`);
+  return { success: true };
+}
+
+export async function removeProductTool(productId: string, toolId: string) {
+  const { supabase, error } = await requireUser();
+  if (error) return { error };
+  const { error: e } = await supabase
+    .from("product_tools")
+    .delete()
+    .eq("product_id", productId)
+    .eq("tool_id", toolId);
+  if (e) return { error: e.message };
+  revalidatePath(`/products/${productId}`);
+  return { success: true };
+}
+
+export async function updateProductToolQty(
+  productId: string,
+  toolId: string,
+  qty: number,
+) {
+  const { supabase, error } = await requireUser();
+  if (error) return { error };
+  if (qty < 1 || !Number.isFinite(qty)) {
+    return { error: "Adet pozitif tam sayı olmalı" };
+  }
+  const { data, error: e } = await supabase
+    .from("product_tools")
+    .update({ quantity_used: Math.floor(qty) })
+    .eq("product_id", productId)
+    .eq("tool_id", toolId)
+    .select("tool_id")
+    .maybeSingle();
+  if (e) return { error: e.message };
+  if (!data) return { error: "Takım bulunamadı" };
+  revalidatePath(`/products/${productId}`);
+  return { success: true };
+}
+
 export async function setPrimaryProductImage(imageId: string) {
   const { supabase, error } = await requireUser();
   if (error) return { error };
