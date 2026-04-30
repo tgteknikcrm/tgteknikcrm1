@@ -17,6 +17,7 @@ import {
   type JobStatus,
   type Machine,
   type Operator,
+  type Product,
 } from "@/lib/supabase/types";
 import { Plus, FileText, ClipboardCheck, Wrench } from "lucide-react";
 import Link from "next/link";
@@ -46,6 +47,7 @@ export default async function JobsPage({
   let jobs: Array<Job & { machine_name?: string; operator_name?: string }> = [];
   let machines: Machine[] = [];
   let operators: Operator[] = [];
+  let products: Product[] = [];
 
   try {
     const supabase = await createClient();
@@ -61,11 +63,13 @@ export default async function JobsPage({
       jq = jq.eq("status", status);
     }
 
-    const [jobsRes, mRes, oRes] = await Promise.all([
+    const [jobsRes, mRes, oRes, pRes] = await Promise.all([
       jq,
       supabase.from("machines").select("*").order("name"),
       supabase.from("operators").select("*").eq("active", true).order("full_name"),
+      supabase.from("products").select("*").order("code"),
     ]);
+    products = (pRes.data ?? []) as Product[];
 
     type JobRow = Job & {
       machines?: { name: string } | null;
@@ -93,6 +97,7 @@ export default async function JobsPage({
             <JobDialog
               machines={machines}
               operators={operators}
+              products={products}
               trigger={
                 <Button>
                   <Plus className="size-4" /> Yeni İş
@@ -175,6 +180,7 @@ export default async function JobsPage({
                           job={j}
                           machines={machines}
                           operators={operators}
+                          products={products}
                           trigger={
                             <Button variant="ghost" size="sm">
                               Düzenle

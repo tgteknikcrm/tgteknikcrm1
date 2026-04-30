@@ -14,6 +14,7 @@ export async function saveJob(input: {
   quantity: number;
   machine_id?: string | null;
   operator_id?: string | null;
+  product_id?: string | null;
   status: JobStatus;
   priority: number;
   start_date?: string | null;
@@ -33,6 +34,7 @@ export async function saveJob(input: {
     quantity: input.quantity,
     machine_id: input.machine_id || null,
     operator_id: input.operator_id || null,
+    product_id: input.product_id || null,
     status: input.status,
     priority: input.priority,
     start_date: input.start_date || null,
@@ -91,11 +93,14 @@ export async function saveJob(input: {
         quantity: input.quantity,
       },
     });
+    revalidatePath("/jobs");
+    revalidatePath("/dashboard");
+    return { success: true, id: data.id as string };
   }
 
   revalidatePath("/jobs");
   revalidatePath("/dashboard");
-  return { success: true };
+  return { success: true, id: input.id! };
 }
 
 export async function deleteJob(id: string) {

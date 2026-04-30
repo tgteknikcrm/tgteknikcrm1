@@ -928,6 +928,27 @@ export const CALENDAR_ATTENDEE_LABEL: Record<CalendarAttendeeStatus, string> = {
   tentative: "Belki",
 };
 
+// ── Products (master) ──────────────────────────────────────────────
+export interface Product {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  customer: string | null;
+  default_quantity: number | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProductTool {
+  product_id: string;
+  tool_id: string;
+  quantity_used: number;
+  notes: string | null;
+}
+
 // ── Tasks ───────────────────────────────────────────────────────────
 export type TaskStatus = "todo" | "in_progress" | "done" | "cancelled";
 export type TaskPriority = "low" | "medium" | "high" | "urgent";

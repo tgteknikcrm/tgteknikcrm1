@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   MessageSquare,
   CheckSquare,
+  Boxes,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,6 +36,7 @@ export const navItems: NavItem[] = [
   { href: "/timeline", label: "Zaman Çizelgesi", icon: CalendarDays },
   { href: "/production", label: "Üretim Formları", icon: ClipboardList },
   { href: "/jobs", label: "İşler", icon: FileText },
+  { href: "/products", label: "Ürünler", icon: Boxes },
   { href: "/orders", label: "Siparişler", icon: ShoppingCart },
   { href: "/suppliers", label: "Tedarikçiler", icon: Truck },
   { href: "/machines", label: "Makineler", icon: Factory },
