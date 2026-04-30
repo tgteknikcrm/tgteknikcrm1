@@ -139,28 +139,51 @@ export function ProductDialog({
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    startTransition(async () => {
-      const r = await saveProduct({
-        id: product?.id,
-        code,
-        name,
-        description: description || null,
-        customer: customer || null,
-        default_quantity:
-          defaultQty.trim() === "" ? null : Math.max(0, Number(defaultQty)),
-        notes: notes || null,
-        tools: rows.map((r) => ({
-          tool_id: r.tool_id,
-          quantity_used: r.quantity_used,
-        })),
-      });
-      if ("error" in r && r.error) {
-        toast.error(r.error);
+    if (!code.trim()) {
+      toast.error("Ürün kodu gerekli");
+      return;
+    }
+    if (!name.trim()) {
+      toast.error("Ürün adı gerekli");
+      return;
+    }
+    // Sanitize default_quantity — only finite non-negative integers.
+    let qty: number | null = null;
+    if (defaultQty.trim() !== "") {
+      const parsed = Number(defaultQty);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        toast.error("Tipik adet sayısal olmalı");
         return;
       }
-      toast.success(product ? "Ürün güncellendi" : "Ürün oluşturuldu");
-      setOpen(false);
-      router.refresh();
+      qty = Math.floor(parsed);
+    }
+    startTransition(async () => {
+      try {
+        const r = await saveProduct({
+          id: product?.id,
+          code: code.trim(),
+          name: name.trim(),
+          description: description || null,
+          customer: customer || null,
+          default_quantity: qty,
+          notes: notes || null,
+          tools: rows.map((r) => ({
+            tool_id: r.tool_id,
+            quantity_used: r.quantity_used,
+          })),
+        });
+        if ("error" in r && r.error) {
+          toast.error(r.error);
+          return;
+        }
+        toast.success(product ? "Ürün güncellendi" : "Ürün oluşturuldu");
+        setOpen(false);
+        router.refresh();
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Beklenmeyen hata oluştu",
+        );
+      }
     });
   }
 

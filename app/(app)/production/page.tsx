@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { EntryDialog } from "./entry-dialog";
+import { MultiEntryDialog } from "./multi-entry-dialog";
 import { PeriodTabs } from "./period-tabs";
 import { DeleteButton } from "../operators/delete-button";
 import { deleteProductionEntry } from "./actions";
@@ -159,16 +160,31 @@ export default async function ProductionPage({
         title="Üretim Formları"
         description="Günlük vardiya bazlı üretim kayıtları · Tarih filtresiyle dönem özeti"
         actions={
-          <EntryDialog
-            machines={machines}
-            operators={operators}
-            jobs={jobs}
-            trigger={
-              <Button disabled={machines.length === 0}>
-                <Plus className="size-4" /> Yeni Form
-              </Button>
-            }
-          />
+          <div className="flex gap-2">
+            <MultiEntryDialog
+              machines={machines}
+              operators={operators}
+              jobs={jobs}
+              trigger={
+                <Button
+                  variant="outline"
+                  disabled={machines.length === 0}
+                >
+                  <Plus className="size-4" /> Çoklu Giriş
+                </Button>
+              }
+            />
+            <EntryDialog
+              machines={machines}
+              operators={operators}
+              jobs={jobs}
+              trigger={
+                <Button disabled={machines.length === 0}>
+                  <Plus className="size-4" /> Yeni Form
+                </Button>
+              }
+            />
+          </div>
         }
       />
 

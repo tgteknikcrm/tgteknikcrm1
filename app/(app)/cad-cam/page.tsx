@@ -66,6 +66,7 @@ export default async function CadCamPage({
   let programs: ProgramRow[] = [];
   let machines: Pick<Machine, "id" | "name">[] = [];
   let jobs: Pick<Job, "id" | "job_no" | "customer" | "part_name">[] = [];
+  let products: import("@/lib/supabase/types").Product[] = [];
 
   try {
     const supabase = await createClient();
@@ -78,7 +79,7 @@ export default async function CadCamPage({
       pq = pq.or(`title.ilike.%${q}%,revision.ilike.%${q}%,notes.ilike.%${q}%`);
     }
 
-    const [pRes, mRes, jRes] = await Promise.all([
+    const [pRes, mRes, jRes, prRes] = await Promise.all([
       pq,
       supabase.from("machines").select("id, name").order("name"),
       supabase
@@ -86,10 +87,12 @@ export default async function CadCamPage({
         .select("id, job_no, customer, part_name")
         .order("created_at", { ascending: false })
         .limit(100),
+      supabase.from("products").select("*").order("code"),
     ]);
     programs = (pRes.data ?? []) as ProgramRow[];
     machines = mRes.data ?? [];
     jobs = jRes.data ?? [];
+    products = prRes.data ?? [];
   } catch {
     /* not configured */
   }
@@ -102,7 +105,7 @@ export default async function CadCamPage({
         actions={
           <>
             <SearchInput placeholder="Başlık, revizyon, not..." />
-            <CadUploadDialog machines={machines} jobs={jobs} />
+            <CadUploadDialog machines={machines} jobs={jobs} products={products} />
           </>
         }
       />

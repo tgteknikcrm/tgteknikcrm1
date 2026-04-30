@@ -15,6 +15,7 @@ export async function uploadCadProgram(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   const machineId = String(formData.get("machine_id") ?? "").trim();
   const jobId = String(formData.get("job_id") ?? "").trim();
+  const productId = String(formData.get("product_id") ?? "").trim();
   const revision = String(formData.get("revision") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
 
@@ -41,6 +42,7 @@ export async function uploadCadProgram(formData: FormData) {
       title,
       machine_id: machineId || null,
       job_id: jobId || null,
+      product_id: productId || null,
       file_path: path,
       file_type: file.type || null,
       file_size: file.size,

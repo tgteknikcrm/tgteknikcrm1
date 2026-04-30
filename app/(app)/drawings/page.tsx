@@ -42,15 +42,17 @@ function fileNameFromPath(path: string) {
 export default async function DrawingsPage() {
   let drawings: Array<Drawing & { job_label?: string }> = [];
   let jobs: Job[] = [];
+  let products: import("@/lib/supabase/types").Product[] = [];
 
   try {
     const supabase = await createClient();
-    const [dRes, jRes] = await Promise.all([
+    const [dRes, jRes, pRes] = await Promise.all([
       supabase
         .from("drawings")
         .select("*, jobs(job_no, customer, part_name)")
         .order("created_at", { ascending: false }),
       supabase.from("jobs").select("*").order("created_at", { ascending: false }),
+      supabase.from("products").select("*").order("code"),
     ]);
 
     type DrawingRow = Drawing & {
@@ -63,16 +65,17 @@ export default async function DrawingsPage() {
         : undefined,
     }));
     jobs = jRes.data ?? [];
+    products = pRes.data ?? [];
   } catch {
     /* not configured */
   }
 
   return (
-    <DrawingsDropShell jobs={jobs}>
+    <DrawingsDropShell jobs={jobs} products={products}>
       <PageHeader
         title="Teknik Resimler"
         description="Parça teknik resimleri ve çizimler (PDF, görsel, DWG/DXF) · Dosyaları sayfaya sürükleyebilirsin"
-        actions={<UploadDialog jobs={jobs} />}
+        actions={<UploadDialog jobs={jobs} products={products} />}
       />
 
       <Card>

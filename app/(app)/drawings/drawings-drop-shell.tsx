@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { DropZone } from "@/components/app/drop-zone";
 import { UploadDialog } from "./upload-dialog";
-import type { Job } from "@/lib/supabase/types";
+import type { Job, Product } from "@/lib/supabase/types";
 
 /**
  * Wraps the drawings page in a full-page drop zone. Dropping a PDF or
@@ -15,9 +15,11 @@ import type { Job } from "@/lib/supabase/types";
  */
 export function DrawingsDropShell({
   jobs,
+  products = [],
   children,
 }: {
   jobs: Job[];
+  products?: Product[];
   children: React.ReactNode;
 }) {
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -53,6 +55,7 @@ export function DrawingsDropShell({
       {pendingFile && (
         <UploadDialog
           jobs={jobs}
+          products={products}
           prefillFile={pendingFile}
           externalOpen={dialogOpen}
           onExternalOpenChange={(v) => {

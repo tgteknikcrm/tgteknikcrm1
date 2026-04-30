@@ -14,6 +14,7 @@ export async function uploadDrawing(formData: FormData) {
   const file = formData.get("file") as File | null;
   const title = String(formData.get("title") ?? "").trim();
   const jobId = String(formData.get("job_id") ?? "").trim();
+  const productId = String(formData.get("product_id") ?? "").trim();
   const revision = String(formData.get("revision") ?? "").trim();
   const notes = String(formData.get("notes") ?? "").trim();
 
@@ -33,6 +34,7 @@ export async function uploadDrawing(formData: FormData) {
     .from("drawings")
     .insert({
       job_id: jobId || null,
+      product_id: productId || null,
       title,
       file_path: path,
       file_type: file.type,

@@ -1,29 +1,16 @@
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
 import {
-  TOOL_CONDITION_LABEL,
-  toolImagePublicUrl,
   type Tool,
   type Supplier,
 } from "@/lib/supabase/types";
-import { Plus, Wrench, AlertTriangle, Truck, ShoppingCart } from "lucide-react";
-import Image from "next/image";
+import { Plus, Wrench, Truck, ShoppingCart } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { SearchInput } from "@/components/app/search-input";
 import { ToolDialog } from "./tool-dialog";
-import { DeleteButton } from "../operators/delete-button";
-import { deleteTool } from "./actions";
+import { ToolsTable } from "./tools-table";
 import { SupplierDialog } from "../suppliers/supplier-dialog";
 import { OrderDialog } from "../orders/order-dialog";
 
@@ -100,81 +87,7 @@ export default async function ToolsPage({
               description={q ? "Arama terimini değiştirin." : "İlk takımı ekleyerek envanterini oluştur."}
             />
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-14"></TableHead>
-                  <TableHead>Kod</TableHead>
-                  <TableHead>İsim</TableHead>
-                  <TableHead>Tip / Ölçü</TableHead>
-                  <TableHead>Konum</TableHead>
-                  <TableHead className="text-right">Stok</TableHead>
-                  <TableHead>Durum</TableHead>
-                  <TableHead className="text-right">İşlem</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tools.map((t) => {
-                  const low = t.quantity <= t.min_quantity;
-                  const imgUrl = toolImagePublicUrl(t.image_path);
-                  return (
-                    <TableRow key={t.id} className="hover:bg-muted/40">
-                      <TableCell>
-                        <div className="size-10 rounded-md border bg-muted/40 overflow-hidden flex items-center justify-center shrink-0">
-                          {imgUrl ? (
-                            <Image
-                              src={imgUrl}
-                              alt={t.name}
-                              width={40}
-                              height={40}
-                              className="size-full object-cover"
-                            />
-                          ) : (
-                            <Wrench className="size-4 text-muted-foreground/50" />
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">{t.code || "—"}</TableCell>
-                      <TableCell className="font-medium">{t.name}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {[t.type, t.size, t.material].filter(Boolean).join(" · ") || "—"}
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{t.location || "—"}</TableCell>
-                      <TableCell className="text-right font-mono">
-                        <span className={low ? "text-amber-600 font-semibold flex items-center justify-end gap-1" : ""}>
-                          {low && <AlertTriangle className="size-3.5" />}
-                          {t.quantity} / {t.min_quantity}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={t.condition === "degistirilmeli" ? "destructive" : "outline"}>
-                          {TOOL_CONDITION_LABEL[t.condition]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex gap-1 justify-end">
-                          <ToolDialog
-                            tool={t}
-                            trigger={
-                              <Button variant="ghost" size="sm">
-                                Düzenle
-                              </Button>
-                            }
-                          />
-                          <DeleteButton
-                            action={async () => {
-                              "use server";
-                              return deleteTool(t.id);
-                            }}
-                            confirmText={`'${t.name}' silinsin mi?`}
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <ToolsTable tools={tools} />
           )}
         </CardContent>
       </Card>

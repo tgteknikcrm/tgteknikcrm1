@@ -22,21 +22,21 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { uploadDrawing } from "./actions";
-import type { Job } from "@/lib/supabase/types";
-import { Loader2, Upload } from "lucide-react";
+import type { Job, Product } from "@/lib/supabase/types";
+import { Boxes, Loader2, Upload } from "lucide-react";
 
 interface Props {
   jobs: Job[];
-  /** When set, dialog opens automatically with this file pre-selected.
-   *  Used by the page-level drag-drop overlay. */
+  products?: Product[];
+  /** When set, dialog opens automatically with this file pre-selected. */
   prefillFile?: File | null;
-  /** Imperative trigger from a parent (e.g. page-level drop). */
   externalOpen?: boolean;
   onExternalOpenChange?: (v: boolean) => void;
 }
 
 export function UploadDialog({
   jobs,
+  products = [],
   prefillFile = null,
   externalOpen,
   onExternalOpenChange,
@@ -99,6 +99,33 @@ export function UploadDialog({
             <Label htmlFor="title">Başlık *</Label>
             <Input id="title" name="title" required placeholder="ör. Flanş parça-A Rev.2" />
           </div>
+          {products.length > 0 && (
+            <div className="space-y-1.5 rounded-lg border bg-primary/5 p-3">
+              <Label
+                htmlFor="product_id"
+                className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-primary"
+              >
+                <Boxes className="size-3.5" /> Ürün (kütüphane)
+              </Label>
+              <Select name="product_id">
+                <SelectTrigger id="product_id" className="bg-background">
+                  <SelectValue placeholder="— Ürüne bağlama (opsiyonel) —" />
+                </SelectTrigger>
+                <SelectContent>
+                  {products.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="font-mono mr-1.5">{p.code}</span>· {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Ürüne bağlanan teknik resim, o ürünün her işinde otomatik
+                kullanılabilir.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="job_id">İş / Sipariş</Label>

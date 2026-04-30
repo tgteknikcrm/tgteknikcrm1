@@ -24,15 +24,17 @@ import {
 import { toast } from "sonner";
 import { Loader2, Upload } from "lucide-react";
 import { uploadCadProgram } from "./actions";
-import type { Job, Machine } from "@/lib/supabase/types";
+import type { Job, Machine, Product } from "@/lib/supabase/types";
 import { CAD_ACCEPT_EXTENSIONS } from "@/lib/supabase/types";
+import { Boxes } from "lucide-react";
 
 interface Props {
   machines: Pick<Machine, "id" | "name">[];
   jobs: Pick<Job, "id" | "job_no" | "customer" | "part_name">[];
+  products?: Product[];
 }
 
-export function CadUploadDialog({ machines, jobs }: Props) {
+export function CadUploadDialog({ machines, jobs, products = [] }: Props) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
@@ -42,6 +44,7 @@ export function CadUploadDialog({ machines, jobs }: Props) {
     // Convert "none" sentinel back to empty (the action expects empty string)
     if (formData.get("machine_id") === "none") formData.set("machine_id", "");
     if (formData.get("job_id") === "none") formData.set("job_id", "");
+    if (formData.get("product_id") === "none") formData.set("product_id", "");
     startTransition(async () => {
       const r = await uploadCadProgram(formData);
       if (r.error) toast.error(r.error);
@@ -86,6 +89,33 @@ export function CadUploadDialog({ machines, jobs }: Props) {
               placeholder="Mil-50 finiş program v2"
             />
           </div>
+          {products.length > 0 && (
+            <div className="space-y-1.5 rounded-lg border bg-primary/5 p-3">
+              <Label
+                htmlFor="cad-product"
+                className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-primary"
+              >
+                <Boxes className="size-3.5" /> Ürün (kütüphane)
+              </Label>
+              <Select name="product_id" defaultValue="none">
+                <SelectTrigger id="cad-product" className="bg-background">
+                  <SelectValue placeholder="— Ürüne bağlama (opsiyonel) —" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">— Ürün yok —</SelectItem>
+                  {products.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="font-mono mr-1.5">{p.code}</span>· {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Ürüne bağlanan program o ürünün her işinde otomatik kullanılabilir.
+              </p>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="cad-machine">Makine</Label>
