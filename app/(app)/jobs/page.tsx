@@ -11,7 +11,7 @@ import {
   computeJobsRange,
   type JobsPeriod,
   type JobsRange,
-} from "./date-range-filter";
+} from "./jobs-range";
 
 export const metadata = { title: "İşler / Siparişler" };
 

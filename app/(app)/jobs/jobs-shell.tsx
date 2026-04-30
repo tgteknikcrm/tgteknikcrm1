@@ -29,12 +29,12 @@ import {
 } from "@/lib/supabase/types";
 import { JobDialog } from "./job-dialog";
 import { MachineGroup } from "./machine-group";
+import { DateRangeFilter } from "./date-range-filter";
 import {
-  DateRangeFilter,
   computeJobsRange,
   type JobsPeriod,
   type JobsRange,
-} from "./date-range-filter";
+} from "./jobs-range";
 import { cn } from "@/lib/utils";
 
 interface Props {

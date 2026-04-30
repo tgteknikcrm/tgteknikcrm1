@@ -385,6 +385,7 @@ export function ProductForm({
         icon={Tag}
         title="Sınıflandırma & Durum"
         description="Kategori, durum, revizyon ve etiketler"
+        defaultOpen
       >
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="Kategori">
@@ -442,6 +443,7 @@ export function ProductForm({
         icon={Sparkles}
         title="Malzeme & Yüzey"
         description="Malzeme, yüzey işlemi, ısıl işlem, sertlik"
+        defaultOpen
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Malzeme">
@@ -483,6 +485,7 @@ export function ProductForm({
         icon={Box}
         title="Boyutlar & Toleranslar"
         description="Ölçüler (mm), ağırlık, tolerans sınıfı, yüzey kalitesi"
+        defaultOpen
       >
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
           <NumberField label="Uzunluk (mm)" value={lengthMm} onChange={setLengthMm} />
@@ -519,6 +522,7 @@ export function ProductForm({
         icon={Cog}
         title="İmalat"
         description="Proses, makine, ayar süresi, parça başı süre, bağlama adedi"
+        defaultOpen
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <Field label="Proses Tipi">
@@ -592,6 +596,7 @@ export function ProductForm({
         icon={CircleDollarSign}
         title="Ticari"
         description="Sipariş adedi, birim fiyat ve para birimi"
+        defaultOpen
       >
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <NumberField
@@ -635,6 +640,7 @@ export function ProductForm({
         icon={Wrench}
         title="Varsayılan Takım Listesi"
         description="İş bu üründen seçildiğinde job_tools'a otomatik kopyalanır"
+        defaultOpen
       >
         <div className="rounded-lg border bg-muted/20 p-3 space-y-2">
           <div className="flex items-center justify-between">
@@ -777,6 +783,7 @@ export function ProductForm({
         icon={Briefcase}
         title="Notlar"
         description="İşleme özel hatırlatmalar, prosedür notları"
+        defaultOpen
       >
         <Textarea
           value={notes}
