@@ -241,6 +241,16 @@ tgteknikcrm/
 | 0013 | activity_events.sql | activity_events + activity_reads + activity_event_type enum (~32 değer) + measurement.nok fail-safe trigger + Realtime publication |
 | 0014 | qc_bubble_appearance.sql | quality_specs.bubble_size (sm/md/lg/xl) + bubble_shape (circle/square/diamond/triangle/hexagon/star) — balon görünüm özelleştirme |
 | 0015 | messaging.sql | conversations + conversation_participants + messages + message_attachments + RLS (is_conversation_participant helper) + Realtime publication + private `message-attachments` storage bucket |
+| 0016 | messaging_rls_widen.sql | INSERT...RETURNING için SELECT politikalarını genişletti (`created_by = auth.uid()` da görsün) |
+| 0017 | task_kanban.sql | tasks + task_checklist_items + task_comments + position kolonu (kanban drag-drop) + RLS |
+| 0018 | activity_extended.sql | activity_event_type'a task.* + breakdown.* eklendi |
+| 0019 | calendar.sql | calendar_events + calendar_event_attendees + RLS |
+| 0020 | breakdowns.sql | breakdown reports + machine_status sync trigger |
+| 0021 | calendar_rls_split.sql | RLS recursion düzeltmesi: `is_calendar_event_visible` → `is_calendar_event_creator` + `is_calendar_event_attendee` (her policy tek tabloya bakıyor) |
+| 0022 | tasks_position_index.sql | task position index (kanban perf) |
+| 0023 | breakdowns_severity.sql | breakdown.severity enum + RLS |
+| 0024 | delete_constraints_relax.sql | `production_entries.machine_id` ve `quality_reviews.reviewer_id` FK'larını RESTRICT → SET NULL (makine/operatör silmek artık geçmişi yok etmiyor) |
+| 0025 | product_master.sql | products + product_tools junction + jobs/drawings/cad_programs.product_id + production_entries.notes (multi-entry için) |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -299,6 +309,35 @@ Admin API (service_role) ile kullanıcı oluşturma/silme: `lib/supabase/admin.t
 - Kısayollar: ⌘K / Ctrl+K / "/"
 - 8 kaynakta paralel ilike arama: machines, operators, tools, jobs, purchase_orders, suppliers, drawings, quality_specs
 - 200ms debounce · gruplandırılmış sonuçlar · tıklayınca ilgili sayfa
+
+### Ürün Master Modülü (yeni — migration 0025)
+- **Klasör:** `app/(app)/products/` — page (liste + bulk select), product-dialog (CRUD + bulk tool picker), products-table (client wrapper), actions.ts
+- **Tablolar:** `products` (code unique, name, customer, default_quantity) + `product_tools` (junction: product_id + tool_id + quantity_used)
+- **Job ile entegrasyon:** `JobDialog` üst kısımda ürün picker — seçince customer/part_name/quantity otomatik dolar, save sonrası `materializeProductIntoJob(jobId, productId)` çalışır → ürünün takım listesi `job_tools`'a kopyalanır
+- **Drawings/CAD bağlama:** upload dialog'larında ürün picker (opsiyonel, job_id'ye alternatif). Ürün filtresi ile dosyaları geri çekebilirsin
+- **Mantık:** "X malzemesi 2 haftada bir geliyor, her seferinde teknik resim/takım/CAD-CAM tekrar bağlama" derdine çözüm. Bir kere ürün tanımla, işler bu üründen instantiate olsun
+
+### Görev / Kanban Modülü (migration 0017)
+- **Klasör:** `app/(app)/tasks/` — kanban (HTML5 drag-drop), liste, checklist, comments
+- **Optimistik UI:** kart sürüklerken `statusOverrides` Map ile anında yeni kolona düşer, server cevabı beklenmez (geri gelirse rollback)
+- **Realtime:** `postgres_changes` ile diğer kullanıcılar canlı görür
+
+### Mesajlaşma (migrations 0015 + 0016)
+- **Klasör:** `app/(app)/messages/` — facebook messenger benzeri layout (sol konuşma listesi + sağ aktif konuşma)
+- **Optimistik gönderim:** UI kilidlenmez, fire-and-forget; server hatası toast'la geri gelir
+- **Görsel cache:** `/api/attach/[id]` route handler — token-less stable URL + 1 yıl `Cache-Control: immutable` → mesajlar arası geçişte resim ASLA tekrar yüklenmez
+- **Realtime:** broadcast ile typing indicator + `postgres_changes` ile yeni mesaj ekleme
+
+### Takvim Modülü (migrations 0019 + 0021)
+- **Klasör:** `app/(app)/calendar/` — Google Calendar benzeri ay grid + etkinlik dialog
+- **RLS recursion fix (0021):** `is_calendar_event_visible` ikiye bölündü (`creator` + `attendee` ayrı SECURITY DEFINER helper'lar) — her policy tek tabloya bakar, recursion biter
+- **Geniş ön-yükleme:** ay geçişi anında olsun diye 3 ay geri + 9 ay ileri tek seferde çekilir, navigation client-state ile
+
+### Bulk Select / Toplu Seçme
+- **6 liste sayfasında aktif:** operators, tools, suppliers, jobs, orders, products
+- **Pattern:** `lib/use-bulk-selection.ts` (hook) + `components/app/bulk-actions-bar.tsx` (sticky toolbar)
+- **Shift+click ile range select**, "Tümünü Seç", indeterminate state
+- **Server:** her modülde `bulkDeleteX(ids: string[])` action
 
 ### Kalite Kontrol Modülü
 - **Klasör:** `app/(app)/quality/` — actions, spec-dialog, measurement-dialog, bulk-measurement-dialog, result-badge
@@ -366,9 +405,16 @@ npm run lint        # ESLint
 
 ### Server Action + Client Component pattern
 
-Silme butonu gibi client component'lar için inline server action şablonu:
+⚠️ **Önemli (Next 16 davranışı):** **Client component** içinde inline `"use server"` arrow function tanımlanamaz — SWC `"use client" must be at top` hatası verir (yanıltıcı mesaj, gerçek sebep `"use server"` çakışması). Çözüm: server action zaten `"use server"` dosyasında export edilmişse doğrudan çağır:
 
 ```tsx
+// ✅ DOĞRU — client component içinde
+<DeleteButton
+  action={() => deleteX(id)}
+  confirmText={`'${item.name}' silinsin mi?`}
+/>
+
+// ❌ YANLIŞ — Next 16'da build hatası verir
 <DeleteButton
   action={async () => {
     "use server";
@@ -377,7 +423,24 @@ Silme butonu gibi client component'lar için inline server action şablonu:
 />
 ```
 
+Inline `"use server"` SADECE **server component**'lerde çalışır (bkz. `(app)/production/page.tsx`). Liste sayfaları artık `*-table.tsx` (client) wrapper'ına ayrıldı, hepsi doğrudan çağırma pattern'ini kullanır.
+
 `DeleteButton` `app/(app)/operators/delete-button.tsx` — generic, diğer modüller buradan import eder.
+
+### Bulk select pattern (toplu seçme/silme)
+
+Tüm liste sayfalarında ortak hook + sticky toolbar:
+
+- **Hook:** `lib/use-bulk-selection.ts` → `sel.has/toggle/toggleRange/selectAll/clear/ids/size/allSelected/someSelected`
+- **Toolbar:** `components/app/bulk-actions-bar.tsx` → sayı + Tümünü Seç + Sil + Kapat (Gmail/Outlook stili)
+- **Server action konvansiyonu:** her modülün `actions.ts`'inde `bulkDeleteX(ids: string[])` var (operators, tools, suppliers, jobs, orders, production_entries, products)
+- **Pages → table split:** liste sayfaları `app/(app)/X/page.tsx` (server, veri çeker) + `app/(app)/X/X-table.tsx` (client, checkbox + toolbar)
+- **Shift+click:** `<Checkbox onClick>` içinde `e.shiftKey` kontrolüyle range select
+- **Türkçe mesaj:** `BulkActionsBar` `itemLabel` prop'u alır (ör. `"takım"`, `"sipariş"`) — confirm + toast'larda kullanılır
+
+### URL-driven filtreler
+
+`components/app/product-filter.tsx` — `?product=<id>` URL paramı yazan dropdown. Drawings ve CAD/CAM sayfalarında kullanılıyor. Aynı pattern başka filtreler için de tekrarlanabilir (paramKey prop). Server page `searchParams`'tan okur, Supabase `.eq("product_id", id)` ile filtreler.
 
 ### Supabase client kullanımı
 
@@ -401,18 +464,46 @@ Silme butonu gibi client component'lar için inline server action şablonu:
 
 ---
 
-## Son commit
+## Son commit (f82e9b2 — 2026-04-30)
 
-**(yeni) — QC: kontrollü balon UX (Yeni Balon mode + Taşı/Renk/Boyut/Şekil mini paneli) + DecimalInput (whole + frac)**
+**Hydration + drag revert + dialog form wipe bug fix**
+
+3 kritik bug düzeltildi:
+
+1. **Calendar hydration error** — `<button>` içinde `<button>` (gün hücresi içinde EventChip) HTML nested button kuralını ihlal ediyordu. Dış element `<div role="button" tabIndex={0}>` + keyboard handler'a çevrildi. Console'da hydration mismatch çıkıyordu.
+
+2. **Tasks kanban drag-drop revert** — Kart sürükleyip bırakınca eski kolona snap back atıyordu. Sebep: optimistic `statusOverrides` 1500ms sonra temizleniyor ama `router.refresh()` açıkça çağrılmıyordu. `revalidatePath` server'da cache'i invalidate ediyor ama client'ı zorla refetch'e yönlendirmiyor; Realtime websocket flaky olabilir → override silindiğinde server tasks hâlâ eski. Çözüm: `setTaskStatus` success callback'inde `router.refresh()` eklendi.
+
+3. **Product dialog form input wipe** — Yeni ürün eklerken form alanlarına yazılan değerler kayboluyordu. Sebep: `useEffect([open, product, existingTools])` deps'te `existingTools` array ref'i parent her render'da değişiyordu (filter yeni array dönüyor) → router.refresh / Realtime parent rerender'ı effect'i tekrar tetikliyordu, init kodu state'i sıfırlıyordu. Çözüm: `wasOpenRef` ile init'i `open: false → true` transition'a sabitledik.
+
+---
+
+## Önceki commit (882781e — 2026-04-30)
+
+**Build düzeltme + bulk select tüm liste sayfalarına + ürün filtresi**
 
 Bu turda yapılanlar:
-- **QC balon UX disiplin:** resme tıklamak artık sadece **Yeni Balon** modu açıkken yeni spec açar (popup spam'i bitti). Drag-to-move tamamen kaldırıldı. Balona tıklayınca kompakt mini panel açılır: `Taşı · Renk · Boyut · Şekil · Sil · Kapat`. **Taşı**: bas → balon imleci canlı takip eder (ghost) → tıkla → konum kaydedilir + ✓ tik flash. Esc iptal.
-- **Renk popover** — 14 renk + auto + **özel hex** (input[type=color])
-- **Boyut popover** — sm/md/lg/xl (DB: `quality_specs.bubble_size`)
-- **Şekil popover** — daire/kare/baklava/üçgen/altıgen/yıldız (clipPath polygon'ları, DB: `quality_specs.bubble_shape`)
-- **Migration 0014** — `bubble_size` + `bubble_shape` kolonları
-- **DecimalInput component** ([components/ui/decimal-input.tsx](components/ui/decimal-input.tsx)): tüm sayısal QC giriş alanları artık **iki ayrı kutu** (tam kısım + ondalık kısım). `100 . 00` → 100.00. Tab/`.`/`,` ile fractional input'a atlar. Uncontrolled — parent `key={...}` ile reset eder.
-- **DecimalInput uygulanan yerler:** `spec-dialog.tsx` (nominal + tol+ + tol−), `measurement-dialog.tsx`, `bulk-measurement-dialog.tsx` (her spec için), `image-board.tsx` MeasurementBar (hızlı ölçüm).
+
+### 1. Build hatası kök neden (Next 16'da yeni davranış)
+Önceki commit (770f010) production'da Vercel build'i kırmıştı. SWC hatası `"use client" must be placed before other expressions` çıkıyordu — yanıltıcıydı. Gerçek sebep:
+
+> Next 16'da **client component** içinde inline `"use server"` arrow function tanımlanamaz. Eskiden çalışan `<DeleteButton action={async () => { "use server"; return deleteX(id); }} />` artık SWC'yi vuruyor.
+
+`deleteX` zaten ayrı `actions.ts` dosyasında `"use server"` ile export edildiği için doğrudan çağırmak yeterli: `action={() => deleteX(id)}`. Tüm liste sayfalarında uygulandı.
+
+### 2. Bulk select tüm liste sayfalarına yayıldı (6 sayfa)
+- **Yeni dosyalar:** `suppliers-table.tsx`, `jobs-table.tsx`, `orders-table.tsx`, `products-table.tsx` (operators ve tools zaten vardı)
+- Her sayfa: server `page.tsx` (veri çek) + client `*-table.tsx` (checkbox + sticky `BulkActionsBar`)
+- Shift+click range, "Tümünü seç", canlı sayaç + Türkçe `itemLabel`
+- Server actions: `bulkDeleteSuppliers`, `bulkDeleteJobs`, `bulkDeleteOrders`, `bulkDeleteProducts` (zaten yazılmıştı, sadece UI bağlandı)
+
+### 3. Ürün filtresi — Drawings + CAD/CAM
+- **Yeni component:** `components/app/product-filter.tsx` — URL-driven dropdown (`?product=<id>`), generic, başka modüllerde de kullanılabilir
+- `Drawing` ve `CadProgram` TypeScript tiplerine `product_id: string | null` eklendi (DB'de migration 0025'te zaten vardı, type'larda eksikti)
+- Page'ler `searchParams.product`'ı okuyor → Supabase `.eq("product_id", id)` ile filtreliyor
+
+### 4. Multi-entry'de ürün picker EKLENMEDİ
+Bilinçli karar: her job zaten `product_id`'ye bağlı. Multi-entry dialog'unda iş seçince ürün otomatik gelir, satır başına ürün picker over-engineering olur.
 
 Önceki commit'lerin özeti için `git log --oneline` ya da memory'deki `project_tgteknikcrm.md`.
 
