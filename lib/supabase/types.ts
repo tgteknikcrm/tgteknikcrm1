@@ -931,6 +931,103 @@ export const CALENDAR_ATTENDEE_LABEL: Record<CalendarAttendeeStatus, string> = {
 };
 
 // ── Products (master) ──────────────────────────────────────────────
+export type ProductStatus = "aktif" | "taslak" | "pasif";
+export type ProductProcess =
+  | "tornalama"
+  | "frezeleme"
+  | "tornalama_frezeleme"
+  | "taslama"
+  | "erozyon"
+  | "lazer"
+  | "diger";
+export type ProductCurrency = "TRY" | "USD" | "EUR";
+
+export const PRODUCT_STATUS_LABEL: Record<ProductStatus, string> = {
+  aktif: "Aktif",
+  taslak: "Taslak",
+  pasif: "Pasif",
+};
+
+export const PRODUCT_PROCESS_LABEL: Record<ProductProcess, string> = {
+  tornalama: "Tornalama",
+  frezeleme: "Frezeleme",
+  tornalama_frezeleme: "Tornalama + Frezeleme",
+  taslama: "Taşlama",
+  erozyon: "Erozyon",
+  lazer: "Lazer",
+  diger: "Diğer",
+};
+
+export const PRODUCT_STATUS_TONE: Record<ProductStatus, string> = {
+  aktif: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
+  taslak: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
+  pasif: "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300 border-zinc-500/30",
+};
+
+// Material / surface / heat treatment presets — free-form text in DB,
+// these just power the autocomplete dropdown in the form.
+export const MATERIAL_PRESETS = [
+  "Çelik (St37)",
+  "Çelik (1040)",
+  "Çelik (4140)",
+  "Paslanmaz (304)",
+  "Paslanmaz (316)",
+  "Alüminyum (6061)",
+  "Alüminyum (7075)",
+  "Pirinç",
+  "Bakır",
+  "Bronz",
+  "Plastik (POM)",
+  "Plastik (PA6)",
+];
+
+export const SURFACE_TREATMENT_PRESETS = [
+  "Hiçbiri",
+  "Eloksal (siyah)",
+  "Eloksal (renkli)",
+  "Krom kaplama",
+  "Çinko kaplama",
+  "Nikel kaplama",
+  "Pasivasyon",
+  "Boyalı",
+  "Kumlama",
+  "Polisaj",
+];
+
+export const HEAT_TREATMENT_PRESETS = [
+  "Hiçbiri",
+  "Sertleştirme",
+  "Tavlama",
+  "Normalleştirme",
+  "Su verme + Temperleme",
+  "Sementasyon",
+  "Nitrasyon",
+];
+
+export const TOLERANCE_CLASS_PRESETS = [
+  "ISO 2768-fH (Hassas)",
+  "ISO 2768-mK (Orta)",
+  "ISO 2768-cL (Kaba)",
+  "DIN 7168 ince",
+  "DIN 7168 orta",
+];
+
+export const PRODUCT_CATEGORY_PRESETS = [
+  "Mil",
+  "Flanş",
+  "Kovan",
+  "Kalıp Parçası",
+  "Bağlama Parçası",
+  "Yatak",
+  "Dişli",
+  "Profil",
+  "Pim",
+  "Cıvata/Somun",
+  "Aparat",
+  "Yedek Parça",
+  "Diğer",
+];
+
 export interface Product {
   id: string;
   code: string;
@@ -942,6 +1039,32 @@ export interface Product {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  // Extended (migration 0027)
+  category: string | null;
+  material: string | null;
+  surface_treatment: string | null;
+  heat_treatment: string | null;
+  weight_kg: number | null;
+  length_mm: number | null;
+  width_mm: number | null;
+  height_mm: number | null;
+  diameter_mm: number | null;
+  tolerance_class: string | null;
+  surface_finish_ra: number | null;
+  hardness: string | null;
+  process_type: ProductProcess | null;
+  cycle_time_minutes: number | null;
+  setup_time_minutes: number | null;
+  default_machine_id: string | null;
+  min_order_qty: number | null;
+  unit_price: number | null;
+  currency: ProductCurrency | null;
+  customer_part_no: string | null;
+  customer_drawing_ref: string | null;
+  status: ProductStatus;
+  revision: string | null;
+  revision_date: string | null;
+  tags: string[];
 }
 
 export interface ProductTool {
@@ -949,6 +1072,28 @@ export interface ProductTool {
   tool_id: string;
   quantity_used: number;
   notes: string | null;
+}
+
+export interface ProductImage {
+  id: string;
+  product_id: string;
+  image_path: string;
+  caption: string | null;
+  sort_order: number;
+  is_primary: boolean;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+// Public storage URL for a product image. Bucket 'product-images' is
+// public, mirror of toolImagePublicUrl() for consistency.
+export function productImagePublicUrl(
+  path: string | null | undefined,
+): string | null {
+  if (!path) return null;
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!base) return null;
+  return `${base}/storage/v1/object/public/product-images/${path}`;
 }
 
 // ── Tasks ───────────────────────────────────────────────────────────

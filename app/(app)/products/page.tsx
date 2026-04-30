@@ -1,40 +1,47 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/app/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import type { Product, ProductTool, Tool } from "@/lib/supabase/types";
+import type {
+  Product,
+  ProductImage,
+  ProductTool,
+} from "@/lib/supabase/types";
 import { EmptyState } from "@/components/app/empty-state";
 import { Boxes, Plus } from "lucide-react";
-import { ProductDialog } from "./product-dialog";
 import { ProductsTable } from "./products-table";
 
 export const metadata = { title: "Ürünler" };
 
 export default async function ProductsPage() {
   const supabase = await createClient();
-  const [pRes, tRes, ptRes] = await Promise.all([
+  const [pRes, ptRes, piRes] = await Promise.all([
     supabase.from("products").select("*").order("code", { ascending: true }),
-    supabase.from("tools").select("*").order("name"),
     supabase.from("product_tools").select("*"),
+    supabase
+      .from("product_images")
+      .select("product_id, image_path, is_primary, sort_order")
+      .eq("is_primary", true),
   ]);
   const products = (pRes.data ?? []) as Product[];
-  const tools = (tRes.data ?? []) as Tool[];
   const productTools = (ptRes.data ?? []) as ProductTool[];
+  const primaryImages = (piRes.data ?? []) as Pick<
+    ProductImage,
+    "product_id" | "image_path" | "is_primary" | "sort_order"
+  >[];
 
   return (
     <>
       <PageHeader
         title="Ürünler"
-        description="Tekrar eden parça/ürün kütüphanesi · İş açarken otomatik takım atama"
+        description="Tekrar eden parça/ürün kütüphanesi · Kapsamlı master kayıt"
         actions={
-          <ProductDialog
-            tools={tools}
-            trigger={
-              <Button>
-                <Plus className="size-4" /> Yeni Ürün
-              </Button>
-            }
-          />
+          <Button asChild>
+            <Link href="/products/new">
+              <Plus className="size-4" /> Yeni Ürün
+            </Link>
+          </Button>
         }
       />
 
@@ -46,21 +53,18 @@ export default async function ProductsPage() {
               title="Henüz ürün yok"
               description="Tekrar eden parçaları burada tanımla. İş açarken bu üründen seçince teknik resim, takım, CAD/CAM otomatik atanır."
               action={
-                <ProductDialog
-                  tools={tools}
-                  trigger={
-                    <Button>
-                      <Plus className="size-4" /> İlk Ürünü Ekle
-                    </Button>
-                  }
-                />
+                <Button asChild>
+                  <Link href="/products/new">
+                    <Plus className="size-4" /> İlk Ürünü Ekle
+                  </Link>
+                </Button>
               }
             />
           ) : (
             <ProductsTable
               products={products}
-              tools={tools}
               productTools={productTools}
+              primaryImages={primaryImages}
             />
           )}
         </CardContent>
