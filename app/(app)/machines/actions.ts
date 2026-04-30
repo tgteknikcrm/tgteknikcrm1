@@ -65,7 +65,10 @@ export async function deleteMachine(id: string) {
     .eq("id", id)
     .single();
   const { error } = await supabase.from("machines").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) {
+    // Map low-level Postgres errors to user-readable Turkish messages.
+    return { error: humanizeDeleteError(error.message, "makine") };
+  }
   await recordEvent({
     type: "machine.deleted",
     entity_type: "machine",
@@ -73,7 +76,28 @@ export async function deleteMachine(id: string) {
     entity_label: existing?.name ?? null,
   });
   revalidatePath("/machines");
+  revalidatePath("/dashboard");
   return { success: true };
+}
+
+/**
+ * Translate Postgres / RLS errors into messages an operator can act on.
+ * Generic "violates foreign key constraint" is now extremely unlikely
+ * after migration 0024 (everything is SET NULL or CASCADE), but if it
+ * ever happens we still want a friendly message instead of raw SQL.
+ */
+function humanizeDeleteError(raw: string, entity: string): string {
+  const m = raw.toLowerCase();
+  if (m.includes("foreign key") || m.includes("violates")) {
+    return `${entity} silinemedi: bağlı kayıtlar var. Yöneticiyle iletişime geç.`;
+  }
+  if (m.includes("permission") || m.includes("rls") || m.includes("policy")) {
+    return `${entity} silme yetkin yok.`;
+  }
+  if (m.includes("not found")) {
+    return `${entity} bulunamadı (zaten silinmiş olabilir).`;
+  }
+  return raw; // unknown — surface the raw message
 }
 
 export async function updateMachineStatus(id: string, status: MachineStatus) {
