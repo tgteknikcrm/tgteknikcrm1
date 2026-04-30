@@ -1,6 +1,9 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Clock } from "lucide-react";
 import { PageHeader } from "@/components/app/page-header";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -42,6 +45,27 @@ export default async function SettingsPage() {
         title="Ayarlar"
         description="Kullanıcı yönetimi ve sistem bilgileri (sadece yönetici)"
       />
+
+      {/* Sub-settings cards (admin tools) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+        <Link
+          href="/settings/work-hours"
+          className="rounded-xl border bg-card hover:bg-muted/40 transition p-4 flex items-center gap-3"
+        >
+          <div className="size-10 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
+            <Clock className="size-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold">Çalışma Saatleri</div>
+            <div className="text-xs text-muted-foreground">
+              Haftalık çizelge · iş ETA hesabını besler
+            </div>
+          </div>
+          <Button variant="outline" size="sm" className="shrink-0">
+            Aç
+          </Button>
+        </Link>
+      </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">

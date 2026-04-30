@@ -20,12 +20,14 @@ import {
 } from "lucide-react";
 import {
   calcJobTimeline,
+  DEFAULT_WORK_SCHEDULE,
   formatMinutes,
   type Job,
   type Machine,
   type Operator,
   type Product,
   type ProductionEntry,
+  type WorkSchedule,
 } from "@/lib/supabase/types";
 import { JobDialog } from "./job-dialog";
 import { MachineGroup } from "./machine-group";
@@ -44,9 +46,17 @@ interface Props {
   products: Product[];
   productionEntries: Pick<
     ProductionEntry,
-    "id" | "job_id" | "produced_qty" | "scrap_qty" | "entry_date" | "created_at"
+    | "id"
+    | "job_id"
+    | "produced_qty"
+    | "scrap_qty"
+    | "downtime_minutes"
+    | "setup_minutes"
+    | "entry_date"
+    | "created_at"
   >[];
   initialRange: JobsRange;
+  workSchedule?: WorkSchedule;
 }
 
 export function JobsShell({
@@ -56,6 +66,7 @@ export function JobsShell({
   products,
   productionEntries,
   initialRange,
+  workSchedule = DEFAULT_WORK_SCHEDULE,
 }: Props) {
   const router = useRouter();
   const pathname = usePathname();
@@ -101,6 +112,38 @@ export function JobsShell({
     return m;
   }, [productionEntries]);
 
+  // Today's running entry stats per job (TR local date).
+  const todayStr = useMemo(() => {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Istanbul",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  }, []);
+  const todayStatsByJob = useMemo(() => {
+    const m = new Map<
+      string,
+      { produced: number; scrap: number; downtime: number; setup: number }
+    >();
+    for (const e of productionEntries) {
+      if (!e.job_id) continue;
+      if (e.entry_date !== todayStr) continue;
+      const cur = m.get(e.job_id) ?? {
+        produced: 0,
+        scrap: 0,
+        downtime: 0,
+        setup: 0,
+      };
+      cur.produced += e.produced_qty ?? 0;
+      cur.scrap += e.scrap_qty ?? 0;
+      cur.downtime += e.downtime_minutes ?? 0;
+      cur.setup += e.setup_minutes ?? 0;
+      m.set(e.job_id, cur);
+    }
+    return m;
+  }, [productionEntries, todayStr]);
+
   // Filter by date range (server already filtered, but if user changes
   // range on the client we want instant feedback — re-apply locally too).
   const dateFilteredJobs = useMemo(() => {
@@ -142,6 +185,12 @@ export function JobsShell({
         const product = j.product_id ? productById.get(j.product_id) : null;
         const operator = j.operator_id ? operatorById.get(j.operator_id) : null;
         const produced = producedByJob.get(j.id) ?? 0;
+        const today = todayStatsByJob.get(j.id) ?? {
+          produced: 0,
+          scrap: 0,
+          downtime: 0,
+          setup: 0,
+        };
         return {
           job: j,
           product: product
@@ -150,6 +199,7 @@ export function JobsShell({
                 code: product.code,
                 name: product.name,
                 cycle_time_minutes: product.cycle_time_minutes,
+                cleanup_time_minutes: product.cleanup_time_minutes,
                 setup_time_minutes: product.setup_time_minutes,
                 parts_per_setup: product.parts_per_setup,
               }
@@ -158,9 +208,13 @@ export function JobsShell({
             ? { id: operator.id, full_name: operator.full_name }
             : null,
           produced,
+          todayProduced: today.produced,
+          todayScrap: today.scrap,
+          todayDowntime: today.downtime,
+          todaySetup: today.setup,
         };
       }),
-    [filtered, productById, operatorById, producedByJob],
+    [filtered, productById, operatorById, producedByJob, todayStatsByJob],
   );
 
   // Group by machine (null = "Atanmamış")
@@ -206,6 +260,7 @@ export function JobsShell({
         quantity: c.job.quantity,
         produced: c.produced,
         cycleMinutes: c.product?.cycle_time_minutes,
+        cleanupMinutes: c.product?.cleanup_time_minutes,
         setupMinutes: c.product?.setup_time_minutes,
         partsPerSetup: c.product?.parts_per_setup,
       });
@@ -360,6 +415,7 @@ export function JobsShell({
                 operators={operators}
                 products={products}
                 totalRemainingMinutes={machineRemaining}
+                workSchedule={workSchedule}
               />
             );
           })}

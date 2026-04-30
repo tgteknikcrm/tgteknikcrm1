@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getWorkSchedule } from "@/lib/app-settings";
 import type {
   Job,
   Machine,
@@ -51,8 +52,16 @@ export default async function JobsPage({
   let products: Product[] = [];
   let productionEntries: Pick<
     ProductionEntry,
-    "id" | "job_id" | "produced_qty" | "scrap_qty" | "entry_date" | "created_at"
+    | "id"
+    | "job_id"
+    | "produced_qty"
+    | "scrap_qty"
+    | "downtime_minutes"
+    | "setup_minutes"
+    | "entry_date"
+    | "created_at"
   >[] = [];
+  const workSchedule = await getWorkSchedule();
 
   try {
     const supabase = await createClient();
@@ -83,7 +92,7 @@ export default async function JobsPage({
       const peRes = await supabase
         .from("production_entries")
         .select(
-          "id, job_id, produced_qty, scrap_qty, entry_date, created_at",
+          "id, job_id, produced_qty, scrap_qty, downtime_minutes, setup_minutes, entry_date, created_at",
         )
         .in("job_id", jobIds);
       productionEntries = (peRes.data ?? []) as typeof productionEntries;
@@ -100,6 +109,7 @@ export default async function JobsPage({
       products={products}
       productionEntries={productionEntries}
       initialRange={range}
+      workSchedule={workSchedule}
     />
   );
 }

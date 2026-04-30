@@ -1,11 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertTriangle,
   CalendarDays,
@@ -14,15 +24,19 @@ import {
   ExternalLink,
   Hourglass,
   Loader2,
-  Pause,
+  PauseCircle,
   Play,
+  Plus,
   Settings2,
+  StopCircle,
   TrendingUp,
   User,
   Wrench,
+  Pause,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
+  calcEtaCalendarAware,
   calcJobTimeline,
   formatMinutes,
   JOB_STATUS_LABEL,
@@ -33,8 +47,13 @@ import {
   type JobStatus,
   type Operator,
   type Product,
+  type WorkSchedule,
 } from "@/lib/supabase/types";
 import { setJobStep } from "./actions";
+import {
+  appendProduction,
+  closeShiftForMachine,
+} from "../production/actions";
 import { JobDialog } from "./job-dialog";
 import { cn } from "@/lib/utils";
 
@@ -46,11 +65,16 @@ interface JobCardData {
     | "code"
     | "name"
     | "cycle_time_minutes"
+    | "cleanup_time_minutes"
     | "setup_time_minutes"
     | "parts_per_setup"
   > | null;
   operator: Pick<Operator, "id" | "full_name"> | null;
   produced: number;
+  todayProduced: number;
+  todayScrap: number;
+  todayDowntime: number;
+  todaySetup: number;
 }
 
 export function JobCard({
@@ -58,14 +82,17 @@ export function JobCard({
   machines,
   operators,
   products,
+  workSchedule,
 }: {
   data: JobCardData;
   machines: import("@/lib/supabase/types").Machine[];
   operators: Operator[];
   products: Product[];
+  workSchedule: WorkSchedule;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [productionOpen, setProductionOpen] = useState(false);
   const { job, product, operator, produced } = data;
 
   const isCancelled = job.status === "iptal";
@@ -76,14 +103,19 @@ export function JobCard({
     quantity: job.quantity,
     produced,
     cycleMinutes: product?.cycle_time_minutes,
+    cleanupMinutes: product?.cleanup_time_minutes,
     setupMinutes: product?.setup_time_minutes,
     partsPerSetup: product?.parts_per_setup,
   });
 
-  // Estimated finish wall-clock — only meaningful when work is in flight.
+  // Calendar-aware ETA: skips lunch + weekends + non-work days.
   const eta =
     job.status === "ayar" || job.status === "uretimde"
-      ? new Date(Date.now() + timeline.remainingTotalMinutes * 60_000)
+      ? calcEtaCalendarAware(
+          timeline.remainingTotalMinutes,
+          workSchedule,
+          new Date(),
+        )
       : null;
 
   const due = job.due_date ? new Date(job.due_date) : null;
@@ -365,9 +397,40 @@ export function JobCard({
         </div>
       )}
 
-      {/* Bottom row: due date + operator + primary action */}
-      <div className="flex items-center justify-between gap-2 pt-2 border-t">
-        <div className="flex items-center gap-2 text-[10px] text-muted-foreground min-w-0 flex-1">
+      {/* Today's running entry summary — visible while work is in flight */}
+      {!isCancelled &&
+        (job.status === "ayar" || job.status === "uretimde") && (
+          <div className="rounded-md bg-muted/40 border px-2 py-1.5 mb-2 flex items-center gap-2 text-[10px] flex-wrap">
+            <span className="font-bold uppercase tracking-wider text-muted-foreground">
+              Bugün:
+            </span>
+            <span className="tabular-nums">
+              <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
+                {data.todayProduced}
+              </span>{" "}
+              parça
+            </span>
+            {data.todayScrap > 0 && (
+              <span className="tabular-nums text-amber-700 dark:text-amber-300">
+                · {data.todayScrap} fire
+              </span>
+            )}
+            {data.todaySetup > 0 && (
+              <span className="tabular-nums">
+                · ⚙ {data.todaySetup}dk ayar
+              </span>
+            )}
+            {data.todayDowntime > 0 && (
+              <span className="tabular-nums text-rose-700 dark:text-rose-300">
+                · ⏸ {data.todayDowntime}dk duruş
+              </span>
+            )}
+          </div>
+        )}
+
+      {/* Bottom row: due date + operator + actions */}
+      <div className="flex items-center justify-between gap-2 pt-2 border-t flex-wrap">
+        <div className="flex items-center gap-2 text-[10px] text-muted-foreground min-w-0">
           {due && (
             <span
               className={cn(
@@ -404,35 +467,245 @@ export function JobCard({
             </span>
           )}
         </div>
-        {primaryAction && (
-          <Button
-            size="sm"
-            onClick={() => move(primaryAction.next)}
-            disabled={pending}
-            className="h-7 px-2.5 text-[11px] gap-1 shrink-0"
-          >
-            {pending ? (
-              <Loader2 className="size-3 animate-spin" />
-            ) : (
-              <primaryAction.icon className="size-3" />
+
+        <div className="flex items-center gap-1 ml-auto">
+          {!isCancelled &&
+            (job.status === "ayar" || job.status === "uretimde") && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setProductionOpen(true)}
+                  disabled={pending}
+                  className="h-7 px-2 text-[11px] gap-1"
+                  title="Bugünkü üretim formuna ekle"
+                >
+                  <Plus className="size-3" /> Üretim
+                </Button>
+                <Button
+                  asChild
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-[11px] gap-1 text-rose-700 dark:text-rose-300 border-rose-500/30"
+                  title="Arıza aç"
+                >
+                  <Link
+                    href={`/breakdowns?machine=${job.machine_id ?? ""}&job=${job.id}`}
+                  >
+                    <AlertTriangle className="size-3" /> Arıza
+                  </Link>
+                </Button>
+              </>
             )}
-            {primaryAction.label}
-          </Button>
-        )}
-        {job.status === "ayar" && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => move("beklemede")}
-            disabled={pending}
-            className="h-7 px-2 text-[11px] gap-1 shrink-0"
-            title="Bekleme listesine geri al"
-          >
-            <Pause className="size-3" />
-          </Button>
-        )}
+          {job.status === "uretimde" && job.machine_id && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                if (!confirm("Bu makinede bugünkü açık vardiyaları kapat?"))
+                  return;
+                startTransition(async () => {
+                  const r = await closeShiftForMachine(job.machine_id!);
+                  if (r.error) toast.error(r.error);
+                  else {
+                    toast.success("Vardiya kapatıldı");
+                    router.refresh();
+                  }
+                });
+              }}
+              disabled={pending}
+              className="h-7 px-2 text-[11px] gap-1"
+              title="Bugünkü açık vardiyaları kapat"
+            >
+              <StopCircle className="size-3" />
+            </Button>
+          )}
+          {primaryAction && (
+            <Button
+              size="sm"
+              onClick={() => move(primaryAction.next)}
+              disabled={pending}
+              className="h-7 px-2.5 text-[11px] gap-1"
+            >
+              {pending ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <primaryAction.icon className="size-3" />
+              )}
+              {primaryAction.label}
+            </Button>
+          )}
+          {job.status === "ayar" && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => move("beklemede")}
+              disabled={pending}
+              className="h-7 px-2 text-[11px] gap-1"
+              title="Bekleme listesine geri al"
+            >
+              <Pause className="size-3" />
+            </Button>
+          )}
+        </div>
       </div>
+
+      {/* + Üretim modal */}
+      <ProductionAppendDialog
+        open={productionOpen}
+        onOpenChange={setProductionOpen}
+        job={job}
+        onSubmitted={() => {
+          setProductionOpen(false);
+          router.refresh();
+        }}
+      />
     </div>
+  );
+}
+
+/** Quick "add to today's entry" form reachable from the JobCard. */
+function ProductionAppendDialog({
+  open,
+  onOpenChange,
+  job,
+  onSubmitted,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  job: Job;
+  onSubmitted: () => void;
+}) {
+  const [produced, setProduced] = useState("");
+  const [scrap, setScrap] = useState("");
+  const [downtime, setDowntime] = useState("");
+  const [setup, setSetup] = useState("");
+  const [pending, startTransition] = useTransition();
+
+  function reset() {
+    setProduced("");
+    setScrap("");
+    setDowntime("");
+    setSetup("");
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!job.machine_id) {
+      toast.error("Bu işin makinesi atanmamış");
+      return;
+    }
+    const p = Math.max(0, Number(produced) || 0);
+    const s = Math.max(0, Number(scrap) || 0);
+    const d = Math.max(0, Number(downtime) || 0);
+    const su = Math.max(0, Number(setup) || 0);
+    if (p + s + d + su === 0) {
+      toast.error("En az bir alan dolu olmalı");
+      return;
+    }
+    startTransition(async () => {
+      const r = await appendProduction({
+        machine_id: job.machine_id!,
+        job_id: job.id,
+        operator_id: job.operator_id ?? null,
+        produced: p,
+        scrap: s,
+        downtime_minutes: d,
+        setup_minutes: su,
+      });
+      if ("error" in r && r.error) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success("Bugünkü üretim formuna eklendi");
+      reset();
+      onSubmitted();
+    });
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        onOpenChange(v);
+        if (!v) reset();
+      }}
+    >
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Üretim Ekle</DialogTitle>
+          <DialogDescription>
+            Bugünkü açık vardiyaya ekleniyor — yoksa otomatik açılır.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={onSubmit} className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="ap-produced">Üretilen Adet</Label>
+              <Input
+                id="ap-produced"
+                type="number"
+                min={0}
+                value={produced}
+                onChange={(e) => setProduced(e.target.value)}
+                placeholder="0"
+                className="tabular-nums"
+                autoFocus
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ap-scrap">Hurda Adet</Label>
+              <Input
+                id="ap-scrap"
+                type="number"
+                min={0}
+                value={scrap}
+                onChange={(e) => setScrap(e.target.value)}
+                placeholder="0"
+                className="tabular-nums"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ap-setup">Ayar (dk)</Label>
+              <Input
+                id="ap-setup"
+                type="number"
+                min={0}
+                value={setup}
+                onChange={(e) => setSetup(e.target.value)}
+                placeholder="0"
+                className="tabular-nums"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ap-downtime">Duruş (dk)</Label>
+              <Input
+                id="ap-downtime"
+                type="number"
+                min={0}
+                value={downtime}
+                onChange={(e) => setDowntime(e.target.value)}
+                placeholder="0"
+                className="tabular-nums"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+            >
+              İptal
+            </Button>
+            <Button type="submit" disabled={pending}>
+              {pending && <Loader2 className="size-4 animate-spin" />}
+              Ekle
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

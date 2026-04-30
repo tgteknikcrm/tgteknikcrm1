@@ -15,6 +15,7 @@ import {
   type MachineStatus,
   type Operator,
   type Product,
+  type WorkSchedule,
 } from "@/lib/supabase/types";
 import { JobCard } from "./job-card";
 import { cn } from "@/lib/utils";
@@ -61,11 +62,16 @@ interface JobCardData {
     | "code"
     | "name"
     | "cycle_time_minutes"
+    | "cleanup_time_minutes"
     | "setup_time_minutes"
     | "parts_per_setup"
   > | null;
   operator: Pick<Operator, "id" | "full_name"> | null;
   produced: number;
+  todayProduced: number;
+  todayScrap: number;
+  todayDowntime: number;
+  todaySetup: number;
 }
 
 export function MachineGroup({
@@ -75,13 +81,15 @@ export function MachineGroup({
   operators,
   products,
   totalRemainingMinutes,
+  workSchedule,
 }: {
-  machine: Machine | null; // null = "Atanmamış" group
+  machine: Machine | null;
   jobs: JobCardData[];
   machines: Machine[];
   operators: Operator[];
   products: Product[];
   totalRemainingMinutes: number;
+  workSchedule: WorkSchedule;
 }) {
   const status = machine?.status ?? "durus";
   const Icon = machine ? STATUS_ICON[status] : PowerOff;
@@ -184,6 +192,7 @@ export function MachineGroup({
               machines={machines}
               operators={operators}
               products={products}
+              workSchedule={workSchedule}
             />
           ))
         )}

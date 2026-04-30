@@ -49,6 +49,7 @@ export interface SaveProductInput {
   // Manufacturing
   process_type?: ProductProcess | null;
   cycle_time_minutes?: number | null;
+  cleanup_time_minutes?: number | null;
   setup_time_minutes?: number | null;
   parts_per_setup?: number | null;
   default_machine_id?: string | null;
@@ -108,6 +109,7 @@ export async function saveProduct(input: SaveProductInput) {
     surface_finish_ra: nullableNumber(input.surface_finish_ra),
     process_type: input.process_type ?? null,
     cycle_time_minutes: nullableNumber(input.cycle_time_minutes),
+    cleanup_time_minutes: nullableNumber(input.cleanup_time_minutes),
     setup_time_minutes: nullableNumber(input.setup_time_minutes),
     parts_per_setup: nullableNumber(input.parts_per_setup),
     default_machine_id: input.default_machine_id || null,

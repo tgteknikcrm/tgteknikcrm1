@@ -207,30 +207,25 @@ export async function setJobStep(jobId: string, step: JobStatus) {
   const nowIso = new Date().toISOString();
   const updates: Record<string, unknown> = { status: step };
 
+  // Read job context up-front — needed for both timing stamps and
+  // auto-creating today's production entry.
+  const { data: job } = await supabase
+    .from("jobs")
+    .select("started_at, machine_id, operator_id")
+    .eq("id", jobId)
+    .single();
+
   if (step === "ayar") {
-    // Starting setup. Stamp started_at if not yet set; clear setup_completed_at.
-    const { data: cur } = await supabase
-      .from("jobs")
-      .select("started_at")
-      .eq("id", jobId)
-      .single();
-    if (!cur?.started_at) updates.started_at = nowIso;
+    if (!job?.started_at) updates.started_at = nowIso;
     updates.setup_completed_at = null;
     updates.completed_at = null;
   } else if (step === "uretimde") {
-    // Setup done, production starts.
-    const { data: cur } = await supabase
-      .from("jobs")
-      .select("started_at")
-      .eq("id", jobId)
-      .single();
-    if (!cur?.started_at) updates.started_at = nowIso;
+    if (!job?.started_at) updates.started_at = nowIso;
     updates.setup_completed_at = nowIso;
     updates.completed_at = null;
   } else if (step === "tamamlandi") {
     updates.completed_at = nowIso;
   } else if (step === "beklemede") {
-    // Reset to queue — clear timing so the indicator returns to step 0.
     updates.started_at = null;
     updates.setup_completed_at = null;
     updates.completed_at = null;
@@ -247,6 +242,26 @@ export async function setJobStep(jobId: string, step: JobStatus) {
   if (error) return { error: error.message };
   if (!data) return { error: "İş güncellenemedi (yetki yok ya da silinmiş)" };
 
+  // Auto-create today's production entry the moment work starts —
+  // either at "Ayara Başla" or "Üretime Başla". Uses UPSERT semantics
+  // via the partial unique index so re-clicking is idempotent.
+  if ((step === "ayar" || step === "uretimde") && job?.machine_id) {
+    try {
+      const { openTodayEntryForJob } = await import(
+        "../production/actions"
+      );
+      await openTodayEntryForJob({
+        machine_id: job.machine_id,
+        job_id: jobId,
+        operator_id: job.operator_id ?? null,
+      });
+    } catch (e) {
+      console.error("openTodayEntryForJob failed:", e);
+      // Don't fail the step transition if the entry create errored —
+      // the user can still record manually.
+    }
+  }
+
   await recordEvent({
     type: "job.status_changed",
     entity_type: "job",
@@ -258,6 +273,7 @@ export async function setJobStep(jobId: string, step: JobStatus) {
   revalidatePath("/jobs");
   revalidatePath("/dashboard");
   revalidatePath("/machines");
+  revalidatePath("/production");
   return { success: true };
 }
 

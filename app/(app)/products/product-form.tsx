@@ -162,6 +162,11 @@ export function ProductForm({
       ? String(product.setup_time_minutes)
       : "",
   );
+  const [cleanupTime, setCleanupTime] = useState(
+    product?.cleanup_time_minutes != null
+      ? String(product.cleanup_time_minutes)
+      : "",
+  );
   const [partsPerSetup, setPartsPerSetup] = useState(
     product?.parts_per_setup != null ? String(product.parts_per_setup) : "",
   );
@@ -291,6 +296,7 @@ export function ProductForm({
       surface_finish_ra: parseNumber(surfaceFinishRa),
       process_type: (processType || null) as ProductProcess | null,
       cycle_time_minutes: parseNumber(cycleTime),
+      cleanup_time_minutes: parseNumber(cleanupTime),
       setup_time_minutes: parseNumber(setupTime),
       parts_per_setup: parseNumber(partsPerSetup),
       default_machine_id: defaultMachineId === "none" ? null : defaultMachineId,
@@ -574,6 +580,13 @@ export function ProductForm({
             value={cycleTime}
             onChange={setCycleTime}
             step="0.1"
+            hint="makine"
+          />
+          <NumberField
+            label="Temizlik (dk)"
+            value={cleanupTime}
+            onChange={setCleanupTime}
+            step="0.1"
             hint="parça başı"
           />
           <NumberField
@@ -583,11 +596,19 @@ export function ProductForm({
             hint="aynı anda"
           />
         </div>
-        <div className="rounded-lg bg-muted/40 border border-dashed p-3 text-[11px] text-muted-foreground">
-          <span className="font-semibold text-foreground">Hesap:</span> 1000
-          adet için <strong>ayar</strong> = ⌈1000 / bağlama⌉ × ayar süresi ·{" "}
-          <strong>üretim</strong> = 1000 × cycle. İş kartında otomatik
-          gösterilir.
+        <div className="rounded-lg bg-muted/40 border border-dashed p-3 text-[11px] text-muted-foreground space-y-1">
+          <div>
+            <span className="font-semibold text-foreground">
+              Etkin cycle:
+            </span>{" "}
+            cycle + temizlik (parça başı net süre — kapı açma + parça koy/al
+            dahil)
+          </div>
+          <div>
+            <span className="font-semibold text-foreground">Toplam:</span>{" "}
+            ⌈adet / bağlama⌉ × ayar + adet × etkin_cycle. ETA hesabı{" "}
+            <strong>çalışma çizelgesini</strong> bilir (yemek, hafta sonu).
+          </div>
         </div>
       </Section>
 

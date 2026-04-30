@@ -189,11 +189,13 @@ export function calcJobTimeline(input: {
   quantity: number;
   produced: number;
   cycleMinutes: number | null | undefined;
+  cleanupMinutes?: number | null | undefined;
   setupMinutes: number | null | undefined;
   partsPerSetup: number | null | undefined;
 }): {
   remaining: number;
   setupsLeft: number;
+  effectiveCycle: number;
   remainingSetupMinutes: number;
   remainingProductionMinutes: number;
   remainingTotalMinutes: number;
@@ -205,19 +207,25 @@ export function calcJobTimeline(input: {
   const quantity = Math.max(0, input.quantity ?? 0);
   const produced = Math.max(0, Math.min(input.produced ?? 0, quantity));
   const cycle = Math.max(0, input.cycleMinutes ?? 0);
+  const cleanup = Math.max(0, input.cleanupMinutes ?? 0);
   const setup = Math.max(0, input.setupMinutes ?? 0);
-  const pps = input.partsPerSetup && input.partsPerSetup > 0 ? input.partsPerSetup : 1;
+  const pps =
+    input.partsPerSetup && input.partsPerSetup > 0 ? input.partsPerSetup : 1;
+
+  // Effective cycle includes operator cleanup/swap per piece.
+  const effectiveCycle = cycle + cleanup;
 
   const remaining = Math.max(0, quantity - produced);
   const setupsLeft = remaining > 0 ? Math.ceil(remaining / pps) : 0;
   const totalSetups = quantity > 0 ? Math.ceil(quantity / pps) : 0;
 
   const remainingSetupMinutes = setupsLeft * setup;
-  const remainingProductionMinutes = remaining * cycle;
-  const remainingTotalMinutes = remainingSetupMinutes + remainingProductionMinutes;
+  const remainingProductionMinutes = remaining * effectiveCycle;
+  const remainingTotalMinutes =
+    remainingSetupMinutes + remainingProductionMinutes;
 
   const totalSetupMinutes = totalSetups * setup;
-  const totalProductionMinutes = quantity * cycle;
+  const totalProductionMinutes = quantity * effectiveCycle;
   const totalMinutes = totalSetupMinutes + totalProductionMinutes;
 
   const progressPct = quantity > 0 ? (produced / quantity) * 100 : 0;
@@ -225,6 +233,7 @@ export function calcJobTimeline(input: {
   return {
     remaining,
     setupsLeft,
+    effectiveCycle,
     remainingSetupMinutes,
     remainingProductionMinutes,
     remainingTotalMinutes,
@@ -261,10 +270,172 @@ export interface ProductionEntry {
   produced_qty: number;
   scrap_qty: number;
   downtime_minutes: number;
+  setup_minutes: number;
   notes: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// ── Work schedule (app_settings 'work_schedule') ──────────────────
+//
+// 7 days (1=Mon .. 7=Sun, ISO style). Each day has its own toggle
+// and durations so Saturdays can be 8 saat ile mesai, Sundays kapalı,
+// etc. Used by the calendar-aware ETA helper.
+export interface WorkScheduleDay {
+  day: number; // 1=Pzt .. 7=Pzr
+  enabled: boolean;
+  shift_start: string; // "HH:MM"
+  work_minutes: number; // net (lunch hariç)
+  lunch_minutes: number;
+}
+
+export interface WorkSchedule {
+  days: WorkScheduleDay[];
+}
+
+export const DEFAULT_WORK_SCHEDULE: WorkSchedule = {
+  days: [
+    { day: 1, enabled: true,  shift_start: "08:00", work_minutes: 540, lunch_minutes: 60 },
+    { day: 2, enabled: true,  shift_start: "08:00", work_minutes: 540, lunch_minutes: 60 },
+    { day: 3, enabled: true,  shift_start: "08:00", work_minutes: 540, lunch_minutes: 60 },
+    { day: 4, enabled: true,  shift_start: "08:00", work_minutes: 540, lunch_minutes: 60 },
+    { day: 5, enabled: true,  shift_start: "08:00", work_minutes: 540, lunch_minutes: 60 },
+    { day: 6, enabled: false, shift_start: "08:00", work_minutes: 480, lunch_minutes: 60 },
+    { day: 7, enabled: false, shift_start: "08:00", work_minutes: 480, lunch_minutes: 60 },
+  ],
+};
+
+export const DAY_LABELS_TR: Record<number, string> = {
+  1: "Pazartesi",
+  2: "Salı",
+  3: "Çarşamba",
+  4: "Perşembe",
+  5: "Cuma",
+  6: "Cumartesi",
+  7: "Pazar",
+};
+
+export const DAY_LABELS_TR_SHORT: Record<number, string> = {
+  1: "Pzt",
+  2: "Sal",
+  3: "Çar",
+  4: "Per",
+  5: "Cum",
+  6: "Cmt",
+  7: "Pzr",
+};
+
+/**
+ * ISO weekday (1=Mon .. 7=Sun) of the given Date in the local TZ.
+ * JS Date.getDay() returns 0=Sun .. 6=Sat → remap.
+ */
+export function isoDayOfWeek(d: Date): number {
+  const js = d.getDay(); // 0..6
+  return js === 0 ? 7 : js;
+}
+
+function parseHHMM(s: string): { h: number; m: number } {
+  const [h, m] = s.split(":").map(Number);
+  return { h: h || 0, m: m || 0 };
+}
+
+/**
+ * Calendar-aware ETA: given remaining work minutes and a starting
+ * wall-clock, walk forward day by day, honouring the schedule's
+ * enabled flags and per-day work_minutes (already lunch-excluded),
+ * and return the moment those minutes are exhausted.
+ *
+ * Today's contribution: if `from` is mid-shift, we use the minutes
+ * remaining until shift_end (work_minutes after shift_start).
+ * Lunch break is treated as a single block at the middle of the
+ * day for "is now in lunch?" purposes — close enough for ETA UX.
+ */
+export function calcEtaCalendarAware(
+  remainingMinutes: number,
+  schedule: WorkSchedule,
+  from: Date = new Date(),
+): Date {
+  if (remainingMinutes <= 0) return new Date(from);
+
+  const dayByIso = new Map(schedule.days.map((d) => [d.day, d]));
+
+  let cursor = new Date(from);
+  let left = remainingMinutes;
+  // Hard ceiling: don't loop forever if every day is disabled.
+  for (let step = 0; step < 365; step++) {
+    const dayCfg = dayByIso.get(isoDayOfWeek(cursor));
+    if (!dayCfg || !dayCfg.enabled) {
+      // Skip to next day, 00:00.
+      cursor = new Date(
+        cursor.getFullYear(),
+        cursor.getMonth(),
+        cursor.getDate() + 1,
+      );
+      continue;
+    }
+
+    const { h, m } = parseHHMM(dayCfg.shift_start);
+    const shiftStart = new Date(
+      cursor.getFullYear(),
+      cursor.getMonth(),
+      cursor.getDate(),
+      h,
+      m,
+      0,
+      0,
+    );
+    // Shift end = start + work_minutes + lunch_minutes (wall clock).
+    const shiftEnd = new Date(
+      shiftStart.getTime() +
+        (dayCfg.work_minutes + dayCfg.lunch_minutes) * 60_000,
+    );
+
+    // If the cursor is after shift end, jump to next day.
+    if (cursor.getTime() >= shiftEnd.getTime()) {
+      cursor = new Date(
+        cursor.getFullYear(),
+        cursor.getMonth(),
+        cursor.getDate() + 1,
+      );
+      continue;
+    }
+
+    // If the cursor is before shift start, jump to shift start.
+    if (cursor.getTime() < shiftStart.getTime()) {
+      cursor = new Date(shiftStart);
+    }
+
+    // Available work minutes from cursor to shift end. Approximate by
+    // mapping wall-clock distance × work/(work+lunch) ratio so the
+    // lunch hour proportionally consumes wall-clock.
+    const wallMinutes = (shiftEnd.getTime() - cursor.getTime()) / 60_000;
+    const availableNet = Math.max(
+      0,
+      Math.floor(
+        (wallMinutes * dayCfg.work_minutes) /
+          (dayCfg.work_minutes + dayCfg.lunch_minutes),
+      ),
+    );
+
+    if (left <= availableNet) {
+      // Finishes today. Convert net-minutes back to wall-minutes.
+      const wallNeeded =
+        (left * (dayCfg.work_minutes + dayCfg.lunch_minutes)) /
+        dayCfg.work_minutes;
+      return new Date(cursor.getTime() + wallNeeded * 60_000);
+    }
+
+    // Use the rest of today, then continue tomorrow.
+    left -= availableNet;
+    cursor = new Date(
+      cursor.getFullYear(),
+      cursor.getMonth(),
+      cursor.getDate() + 1,
+    );
+  }
+  // Schedule is empty — fall back to "right now".
+  return new Date(from);
 }
 
 export interface Drawing {
@@ -1197,6 +1368,7 @@ export interface Product {
   hardness: string | null;
   process_type: ProductProcess | null;
   cycle_time_minutes: number | null;
+  cleanup_time_minutes: number | null;
   setup_time_minutes: number | null;
   parts_per_setup: number | null;
   default_machine_id: string | null;
