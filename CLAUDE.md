@@ -251,6 +251,7 @@ tgteknikcrm/
 | 0023 | breakdowns_severity.sql | breakdown.severity enum + RLS |
 | 0024 | delete_constraints_relax.sql | `production_entries.machine_id` ve `quality_reviews.reviewer_id` FK'larını RESTRICT → SET NULL (makine/operatör silmek artık geçmişi yok etmiyor) |
 | 0025 | product_master.sql | products + product_tools junction + jobs/drawings/cad_programs.product_id + production_entries.notes (multi-entry için) |
+| 0026 | tasks_rls_relax.sql | tasks/task_checklist/task_comments UPDATE+DELETE policy `using(true) with check(true)` — atölyede herkes herkesin kartını taşıyabilsin (kanban drag-drop revert bug fix) |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -464,7 +465,30 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (f82e9b2 — 2026-04-30)
+## Son commit (5ad5961 — 2026-04-30)
+
+**Tasks drag-drop kalıcı fix: RLS gevşetme + server-data sync override**
+
+Önceki "drag revert" fix (commit f82e9b2) yeterli değildi. **Asıl kök neden:** `tasks_update` RLS policy `(created_by = auth.uid()) OR (assigned_to = auth.uid())` ile sınırlıydı. **Supabase JS RLS-bloklu update'lerde hata fırlatmıyor** — 0 row etkiler ama `error: null, success: true` döner. Yani:
+
+1. User başkasının task'ını sürükler → optimistic UI kartı taşır
+2. `setTaskStatus` çağrılır → DB write 0 row affects (RLS reddeder)
+3. Action `{ success: true }` döner (sessiz başarısızlık!)
+4. `router.refresh` server'dan ESKI status'u çeker
+5. Sync effect: server eski + override yeni → eşit değil → override KALIR
+6. Kart yeni kolonda görünür ama DB'de değişmedi → bir sonraki refresh'te geri zıplar
+
+**Düzeltmeler:**
+
+1. **Migration 0026** — tasks/task_checklist/task_comments UPDATE+DELETE policy'leri `using(true) with check(true)`. CLAUDE.md zaten "small team, generous policy" diyor; suppliers/products gibi diğer modüllerle hizalandı.
+2. **`setTaskStatus` defansif** — `.select("id").maybeSingle()` ile affected row kontrol. 0 row ise açık hata: `"Görev güncellenemedi (yetki yok ya da silindi)"`. Sessiz başarısızlık imkânsız.
+3. **Override sync stratejisi (race-free)** — Önceki kod `setTimeout(1500ms)` ile override siliyor, network yavaşsa override zamansız temizleniyordu → kart geri zıplıyordu. Yeni yaklaşım: `useEffect([tasks])` server prop'u izler, server status override status'una EŞİTSE override'ı sil. Timing değil, mutation propagation'a bağlı. Hiçbir koşulda race olmaz.
+4. **Pending visual feedback** — Kayıt halindeki kartta `ring-2 ring-primary/40` pulse. Kullanıcı drag bittiği gibi feedback alır.
+5. **Realtime debouncer 250→80ms** — Cascading update'leri hâlâ batch'liyor ama UI çok daha responsive.
+
+---
+
+## Önceki commit (f82e9b2 — 2026-04-30)
 
 **Hydration + drag revert + dialog form wipe bug fix**
 
