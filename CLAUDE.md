@@ -465,7 +465,25 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (3719b56 — 2026-04-30)
+## Son commit (ff6dfa9 — 2026-04-30)
+
+**Mesajlar: scroll davranışı + silme UX + defansif delete action**
+
+3 messaging UX bug'ı düzeltildi:
+
+1. **Scroll konuşma geçişinde pozisyonda kalıyordu.** Eski kod `useEffect([messages.length])` ile tetikleniyordu — yeni konuşma aynı sayıdaysa scroll tetiklenmiyordu. Yeni mantık:
+   - Konuşma id değişince **INSTANT** jump-to-bottom (rAF içinde, animasyon yok)
+   - Yeni mesaj gelirse, kullanıcı zaten dipte ise smooth scroll; yukarı kaydırmışsa pozisyonu bırak (120px tolerance, `atBottomRef` ile takip ediliyor)
+   - Optimistic mesaj eklenince (kendi gönderdim) **her zaman** dibe kaydır
+   - `onScroll` handler `atBottomRef`'i günceller
+
+2. **Mesaj silme görünmüyor sanılıyordu.** Trigger `bg-background/70 + opacity-70` ile çok soluktu. Şimdi tam opak `bg-background` + border + shadow + hover'da primary ring. Title'a da "yanıtla, düzenle, sil" eklendi. Mesaj silme aslında zaten vardı (kendi mesajının yanındaki üç-nokta menüsünde) sadece keşfedilebilir değildi.
+
+3. **`deleteMessage` defansif** — `.select("id").maybeSingle()` ile affected row kontrol. RLS reddederse veya yanlış id ise sessiz success yerine açık hata ("Bu mesaj silinemedi"). Tasks fix'iyle aynı pattern (Supabase silent RLS trap).
+
+---
+
+## Önceki commit (3719b56 — 2026-04-30)
 
 **Hydration kalıcı fix: MessageNotifier localStorage useState init**
 
