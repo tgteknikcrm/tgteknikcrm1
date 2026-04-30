@@ -1084,6 +1084,9 @@ export interface MessageAttachment {
   file_name: string;
   mime_type: string;
   size_bytes: number;
+  /** Where the binary lives — `supabase` (storage bucket via /api/attach)
+   *  or `r2` (Cloudflare R2 via the worker/CDN public URL). */
+  provider: "supabase" | "r2";
   created_at: string;
 }
 

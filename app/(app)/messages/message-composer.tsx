@@ -16,6 +16,12 @@ import {
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { editMessage, sendMessage } from "./actions";
+import { uploadAttachmentToR2 } from "./r2-upload-action";
+
+// Set on the client at build time. When NEXT_PUBLIC_R2_ENABLED is
+// "1", uploads bypass Supabase storage and go to R2 via a server
+// action. Reads then come from the R2 public URL / worker.
+const R2_ENABLED = process.env.NEXT_PUBLIC_R2_ENABLED === "1";
 import type { MessageWithRelations, Profile } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +47,7 @@ interface PendingAttachment {
   uploading: boolean;
   error?: string;
   preview?: string;
+  provider: "supabase" | "r2";
 }
 
 /* ──────────────────────────────────────────────────────────────────
@@ -235,6 +242,7 @@ export function MessageComposer({
 
   async function uploadFiles(files: FileList | File[]) {
     const arr = Array.from(files);
+    const provider: "supabase" | "r2" = R2_ENABLED ? "r2" : "supabase";
     const valid: PendingAttachment[] = [];
     for (const f of arr) {
       if (f.size > MAX_FILE_SIZE) {
@@ -242,17 +250,45 @@ export function MessageComposer({
         continue;
       }
       const safe = f.name.replace(/[^\w.\-]/g, "_");
-      const storagePath = `${currentUserId}/${conversationId}/${Date.now()}_${safe}`;
+      // Supabase path is computed up front so the upload loop knows
+      // where it's heading. R2's path is decided server-side and
+      // returned from the action, so we use a placeholder here.
+      const storagePath = R2_ENABLED
+        ? `__pending__/${Date.now()}_${safe}`
+        : `${currentUserId}/${conversationId}/${Date.now()}_${safe}`;
       const preview = f.type.startsWith("image/")
         ? URL.createObjectURL(f)
         : undefined;
-      valid.push({ file: f, storagePath, uploading: true, preview });
+      valid.push({ file: f, storagePath, uploading: true, preview, provider });
     }
     if (valid.length === 0) return;
     setAttachments((prev) => [...prev, ...valid]);
 
     await Promise.all(
       valid.map(async (a) => {
+        if (provider === "r2") {
+          // Server action: sharp encodes thumbnails + PUTs to R2.
+          // The action returns the canonical storage_path.
+          const fd = new FormData();
+          fd.append("file", a.file);
+          const r = await uploadAttachmentToR2(conversationId, fd);
+          setAttachments((prev) =>
+            prev.map((x) =>
+              x.storagePath === a.storagePath
+                ? r.error
+                  ? { ...x, uploading: false, error: r.error }
+                  : {
+                      ...x,
+                      uploading: false,
+                      storagePath: r.data!.storage_path,
+                    }
+                : x,
+            ),
+          );
+          if (r.error) toast.error(`${a.file.name}: ${r.error}`);
+          return;
+        }
+        // Legacy path: Supabase storage via the client SDK.
         const { error } = await supabase.storage
           .from("message-attachments")
           .upload(a.storagePath, a.file, {
@@ -276,7 +312,11 @@ export function MessageComposer({
     setAttachments((prev) => {
       const a = prev[idx];
       if (a?.preview) URL.revokeObjectURL(a.preview);
-      if (a && !a.error) {
+      // R2 cleanup needs a server action; we leave orphan R2 objects
+      // alone for now (R2 has lifecycle rules; an orphan reaper job
+      // can sweep `__pending__` keys older than X minutes).
+      // Supabase: client SDK can delete directly.
+      if (a && !a.error && a.provider === "supabase") {
         void supabase.storage
           .from("message-attachments")
           .remove([a.storagePath]);
@@ -394,6 +434,7 @@ export function MessageComposer({
                   mime_type:
                     piece.att.file.type || "application/octet-stream",
                   size_bytes: piece.att.file.size,
+                  provider: piece.att.provider,
                 },
               ],
             };

@@ -56,5 +56,37 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // ── Cookie bridge for Cloudflare R2 worker ──────────────────────
+  // The R2 attachment worker (cdn.<your-domain>) verifies a Supabase
+  // JWT to enforce RLS, but <img> tags can't add Authorization
+  // headers. Mirror the access_token into a cross-subdomain cookie
+  // (`tg_jwt`) so the worker can read it on every fetch.
+  // Requires the app + worker to share a parent domain — when running
+  // on `vercel.app` this cookie won't reach the worker, so set
+  // `R2_COOKIE_DOMAIN` (e.g. `.tgteknik.com.tr`) once a custom domain
+  // is in place.
+  if (user) {
+    const cookieDomain = process.env.R2_COOKIE_DOMAIN; // e.g. ".tgteknik.com.tr"
+    if (cookieDomain) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      const expiresAt = session?.expires_at
+        ? new Date(session.expires_at * 1000)
+        : undefined;
+      if (accessToken) {
+        response.cookies.set("tg_jwt", accessToken, {
+          domain: cookieDomain,
+          path: "/",
+          httpOnly: false, // worker reads via Cookie header; this is fine
+          secure: true,
+          sameSite: "lax",
+          ...(expiresAt && { expires: expiresAt }),
+        });
+      }
+    }
+  }
+
   return response;
 }

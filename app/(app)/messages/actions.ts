@@ -173,12 +173,16 @@ export async function sendMessage(input: {
   conversationId: string;
   body?: string | null;
   replyTo?: string | null;
-  // Storage paths already uploaded by the client via the Supabase client SDK.
+  // Each attachment was already uploaded — either via the client SDK
+  // to Supabase storage (provider='supabase') or via the R2 server
+  // action to Cloudflare R2 (provider='r2'). storage_path is a key in
+  // the corresponding bucket.
   attachments?: Array<{
     storage_path: string;
     file_name: string;
     mime_type: string;
     size_bytes: number;
+    provider?: "supabase" | "r2";
   }>;
 }) {
   const { supabase, user, error } = await requireUser();
@@ -210,6 +214,7 @@ export async function sendMessage(input: {
       file_name: a.file_name,
       mime_type: a.mime_type,
       size_bytes: a.size_bytes,
+      provider: a.provider ?? "supabase",
     }));
     const { error: aErr } = await supabase
       .from("message_attachments")

@@ -134,7 +134,7 @@ export function MessagesClient({
         supabase
           .from("messages")
           .select(
-            "*, message_attachments(id, message_id, storage_path, file_name, mime_type, size_bytes, created_at)",
+            "*, message_attachments(id, message_id, storage_path, file_name, mime_type, size_bytes, provider, created_at)",
           )
           .eq("conversation_id", convId)
           .order("created_at", { ascending: true })

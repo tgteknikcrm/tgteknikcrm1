@@ -1,0 +1,20 @@
+name = "tgteknikcrm-attach"
+main = "src/index.ts"
+compatibility_date = "2025-04-30"
+
+# Bind the R2 bucket. Same `R2_BUCKET_NAME` you set in Vercel.
+# Replace `tgteknikcrm-attach` if you used a different bucket name.
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "tgteknikcrm-attach"
+
+# Plain (non-secret) env vars — overwritten per-environment if needed.
+# Set these via `wrangler.toml` or `wrangler deploy --var KEY=VALUE`.
+[vars]
+SUPABASE_URL = ""             # https://xxx.supabase.co
+SUPABASE_ANON_KEY = ""        # anon public key
+ALLOWED_ORIGINS = "https://tgteknikcrm1.vercel.app,http://localhost:3000"
+
+# Secrets — set with:
+#   wrangler secret put SUPABASE_JWT_SECRET
+# (paste the value from Supabase Dashboard → Project Settings → API → JWT secret)

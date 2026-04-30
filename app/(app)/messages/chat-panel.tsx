@@ -982,12 +982,31 @@ function BubbleActionMenu({
 
 /* ──────────────────────────────────────────────────────────────────
    Attachment preview — deterministic, token-less URL.
-   `/api/attach/<uuid>` proxies the file through our authenticated
-   route handler (RLS-checked, admin storage fetch). Because the URL
-   string never changes for a given attachment id, the browser's
-   HTTP cache (1-year `Cache-Control: immutable`) hits on every
-   subsequent render — even after a hard refresh.
+   Two providers:
+     - `supabase`: served via /api/attach/[id] (Vercel route)
+     - `r2`:        served via the Cloudflare Worker at NEXT_PUBLIC_R2_PUBLIC_URL
+   Both yield stable URLs so the browser HTTP cache (1-year immutable)
+   hits on every subsequent render.
    ────────────────────────────────────────────────────────────────── */
+
+const R2_PUBLIC_URL = process.env.NEXT_PUBLIC_R2_PUBLIC_URL || "";
+
+function attachmentUrls(a: MessageAttachment): { full: string; thumb: string } {
+  if (a.provider === "r2" && R2_PUBLIC_URL) {
+    const base = R2_PUBLIC_URL.replace(/\/$/, "");
+    return {
+      full: `${base}/${a.storage_path}`,
+      thumb: a.mime_type.startsWith("image/")
+        ? `${base}/${a.storage_path}__600.webp`
+        : `${base}/${a.storage_path}`,
+    };
+  }
+  // Supabase fallback — token-less proxy with server-side image transform
+  return {
+    full: `/api/attach/${a.id}`,
+    thumb: `/api/attach/${a.id}?w=600&q=80`,
+  };
+}
 
 const RawAttachmentPreview = function AttachmentPreview({
   attachment: a,
@@ -998,10 +1017,7 @@ const RawAttachmentPreview = function AttachmentPreview({
 }) {
   const isImage = a.mime_type.startsWith("image/");
   const sizeKb = (a.size_bytes / 1024).toFixed(0);
-
-  // Stable URL — same for every render and every page load.
-  const fullUrl = `/api/attach/${a.id}`;
-  const thumbUrl = `${fullUrl}?w=600&q=80`;
+  const { full: fullUrl, thumb: thumbUrl } = attachmentUrls(a);
 
   if (isImage) {
     return (
