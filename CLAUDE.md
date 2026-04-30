@@ -253,6 +253,7 @@ tgteknikcrm/
 | 0025 | product_master.sql | products + product_tools junction + jobs/drawings/cad_programs.product_id + production_entries.notes (multi-entry için) |
 | 0026 | tasks_rls_relax.sql | tasks/task_checklist/task_comments UPDATE+DELETE policy `using(true) with check(true)` — atölyede herkes herkesin kartını taşıyabilsin (kanban drag-drop revert bug fix) |
 | 0027 | product_master_extended.sql | products tablosuna 24 yeni kolon (kategori, malzeme, yüzey/ısıl işlem, boyutlar, tolerans, proses, ticari) + product_images tablosu + 'product-images' public storage bucket + 3 enum (product_status / product_process / product_currency) |
+| 0028 | jobs_setup_steps.sql | job_status'a 'ayar' eklendi (beklemede ↔ uretimde arası) + jobs.started_at/setup_completed_at + products.parts_per_setup (aynı anda bağlanan adet, setup-count math'i için) |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -466,7 +467,61 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (7c65bd0 — 2026-04-30)
+## Son commit (7c67fdb — 2026-04-30)
+
+**İşler: makine bazlı kart grid + 4-step + tahmini bitiş + tarih filtresi**
+
+User isteği: işlerde makine ayrımı, modern kartlar, 4 adımlı durum takibi, % bar, tahmini bitiş süresi, ürün master'da "kaç adet bağlanıyor", gün/hafta/ay/yıl/tüm + özel tarih aralığı.
+
+### Migration 0028
+- `job_status` enum'una **`ayar`** eklendi (beklemede ↔ uretimde arası)
+- `jobs.started_at`, `jobs.setup_completed_at` — step indicator anchor'ları
+- `products.parts_per_setup` — aynı bağlamada işlenen adet
+
+### Hesap mantığı (calcJobTimeline helper, types.ts)
+
+```
+remaining = quantity - produced
+setupsLeft = ceil(remaining / parts_per_setup)
+remainingMinutes = setupsLeft × setup_time + remaining × cycle_time
+ETA = now + remainingMinutes
+```
+
+Plus `formatMinutes()` ("2 sa 30 dk" / "1 g 4 sa") ve `JOB_STEPS` array, `jobStepIndex()` helper, `JOB_STATUS_TONE` 5-step renk paleti.
+
+### 4 yeni component (jobs/)
+
+1. **`date-range-filter.tsx`** — 5 preset (Bugün/Hafta/Ay/Yıl/Tümü) + Özel range (input[type=date] from→to). `computeJobsRange()` server+client share.
+2. **`job-card.tsx`** — modern kart:
+   - Top row: job_no + ürün kodu link + status badge + öncelik + Geç riski
+   - **4-step progress**: yatay 4 bar (aktif animate-pulse, tamamlanmış emerald, bekleyen muted)
+   - **4 KPI mini-stat**: Adet / Üretilen (%) / Kalan / Tahmini Bitiş + ETA tarihi
+   - Progress bar 0-100% (gradient emerald)
+   - **Timeline math line**: "Cycle: 5 dk · Ayar: 20 dk × 3 · Bağlama: 4 adet · Toplam: 8 sa 35 dk"
+   - Bottom: due date + operatör avatar + primary action button (**Ayara Başla → Üretime Başla → Tamamla**)
+3. **`machine-group.tsx`** — makine kart wrapper:
+   - Header: status-renk ring border, ikon kutusu (Cog/Pause/Wrench/AlertOctagon)
+   - Sayım: üretimde/ayar/beklemede + makine için toplam kalan süre
+   - Body: işler status priority + created_at sırasıyla sorted
+4. **`jobs-shell.tsx`** — orchestrator:
+   - 5 KPI strip (Üretimde/Beklemede/Tamamlanan/Geç Riski/Toplam Kalan)
+   - DateRangeFilter + Search input
+   - Machine grouping (sidebar order) + "Atanmamış" group
+   - URL sync (period/from/to query params)
+
+### Server action
+
+`setJobStep(jobId, step)` — status değişince `started_at` / `setup_completed_at` / `completed_at` otomatik stamp; `.select().maybeSingle()` defansif. JobCard'da "Ayara Başla → Üretime Başla → Tamamla" buton akışı.
+
+### ProductForm güncellemesi
+"Bağlanan Adet" alanı eklendi. "Setup Süresi → Ayar Süresi" rename + hint. Açıklayıcı dashed kutu: hesabın nasıl yapıldığını gösteriyor.
+
+### Geriye uyum
+Tüm `STATUS_VARIANT` / `STATUS_CLS` map'lere `ayar` fallback (jobs-table, machines/[id], products linked-jobs, product-quality-tab, quality/page). TypeScript exhaustiveness sağlandı.
+
+---
+
+## Önceki commit (7c65bd0 — 2026-04-30)
 
 **Ürün detayı modernize: 7 tab full CRUD + modern hero + sticky tabs**
 
