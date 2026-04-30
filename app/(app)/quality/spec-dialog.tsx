@@ -223,9 +223,12 @@ export function SpecDialog({
             />
           </div>
 
-          <div className="grid grid-cols-12 gap-3">
-            <div className="col-span-5 space-y-1.5">
-              <Label htmlFor="s-nominal">Nominal *</Label>
+          {/* Nominal + Birim — daha geniş, sıkışmadan */}
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_7rem] gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="s-nominal" className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Nominal *
+              </Label>
               <DecimalInput
                 id="s-nominal"
                 defaultValue={nominal}
@@ -236,58 +239,69 @@ export function SpecDialog({
                 ariaLabel="Nominal değer"
               />
             </div>
-            <div className="col-span-3 space-y-1.5">
-              <Label>Tol +</Label>
-              <DecimalInput
-                key={`tol-plus-${tolPresetNonce}`}
-                defaultValue={tolPlus}
-                onChange={setTolPlus}
-                decimals={3}
-                min={0}
-                size="sm"
-                ariaLabel="Üst tolerans"
-              />
-            </div>
-            <div className="col-span-3 space-y-1.5">
-              <Label>Tol −</Label>
-              <DecimalInput
-                key={`tol-minus-${tolPresetNonce}`}
-                defaultValue={tolMinus}
-                onChange={setTolMinus}
-                decimals={3}
-                min={0}
-                size="sm"
-                ariaLabel="Alt tolerans"
-              />
-            </div>
-            <div className="col-span-1 space-y-1.5">
-              <Label htmlFor="s-unit">Birim</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="s-unit" className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                Birim
+              </Label>
               <Input
                 id="s-unit"
                 value={unit}
                 onChange={(e) => setUnit(e.target.value)}
                 placeholder="mm"
+                className="font-mono"
               />
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-              Hızlı Tolerans
-            </Label>
-            <div className="flex flex-wrap gap-1.5">
-              {QC_TOLERANCE_PRESETS.map((p) => (
-                <Button
-                  key={p.value}
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-xs tabular-nums"
-                  onClick={() => applyTolerancePreset(p.value)}
-                >
-                  {p.label}
-                </Button>
-              ))}
+          {/* Tolerans satırı — Tol+ / Tol- yan yana, eşit genişlikte */}
+          <div className="rounded-lg border bg-muted/20 p-3 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                  <span className="text-base leading-none">+</span> Üst Tolerans
+                </Label>
+                <DecimalInput
+                  key={`tol-plus-${tolPresetNonce}`}
+                  defaultValue={tolPlus}
+                  onChange={setTolPlus}
+                  decimals={3}
+                  min={0}
+                  ariaLabel="Üst tolerans"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1">
+                  <span className="text-base leading-none">−</span> Alt Tolerans
+                </Label>
+                <DecimalInput
+                  key={`tol-minus-${tolPresetNonce}`}
+                  defaultValue={tolMinus}
+                  onChange={setTolMinus}
+                  decimals={3}
+                  min={0}
+                  ariaLabel="Alt tolerans"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1.5 pt-1 border-t border-border/40">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                Hızlı Tolerans
+              </Label>
+              <div className="flex flex-wrap gap-1.5">
+                {QC_TOLERANCE_PRESETS.map((p) => (
+                  <Button
+                    key={p.value}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs tabular-nums hover:scale-[1.04] transition"
+                    onClick={() => applyTolerancePreset(p.value)}
+                  >
+                    {p.label}
+                  </Button>
+                ))}
+              </div>
             </div>
           </div>
 
