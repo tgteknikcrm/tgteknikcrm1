@@ -251,11 +251,17 @@ export async function editMessage(messageId: string, body: string) {
 export async function deleteMessage(messageId: string) {
   const { supabase, error } = await requireUser();
   if (error) return { error };
-  const { error: e } = await supabase
+  // .select() forces affected-row return so a 0-row update (RLS denied
+  // — trying to delete someone else's message — or wrong id) surfaces
+  // as an explicit error instead of silent success.
+  const { data, error: e } = await supabase
     .from("messages")
     .update({ deleted_at: new Date().toISOString(), body: null })
-    .eq("id", messageId);
+    .eq("id", messageId)
+    .select("id")
+    .maybeSingle();
   if (e) return { error: e.message };
+  if (!data) return { error: "Bu mesaj silinemedi (yetki yok ya da bulunamadı)" };
   return { success: true };
 }
 

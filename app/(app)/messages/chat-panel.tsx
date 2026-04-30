@@ -320,13 +320,66 @@ export function ChatPanel({
         !!p,
     );
 
-  // ── Auto-scroll to bottom on new messages.
+  // ── Scroll management ──
+  // Three rules:
+  //   1. Conversation switch → INSTANT jump to bottom (no animation
+  //      bleed across threads, no leftover scroll position from the
+  //      previous conversation).
+  //   2. New message in current thread → SMOOTH scroll to bottom IF
+  //      the user is already at (or near) bottom. If they scrolled
+  //      up to read older messages we leave their position alone.
+  //   3. New optimistic message I just sent → ALWAYS scroll, even if
+  //      the user happened to be scrolled up — they intentionally
+  //      acted, the latest message must be visible.
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const lastConvIdRef = useRef<string | null>(null);
+  const atBottomRef = useRef(true);
+  const lastOptimisticLenRef = useRef(0);
+
+  // Rule 1: instant jump when conversation id changes.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages.length]);
+    if (lastConvIdRef.current !== conversation.id) {
+      lastConvIdRef.current = conversation.id;
+      // Use rAF so the DOM has committed the new message list before we measure scrollHeight.
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+        atBottomRef.current = true;
+      });
+    }
+  }, [conversation.id, messages.length]);
+
+  // Rule 2 + 3: react to message count changes within the current thread.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const optimisticGrew = optimistic.length > lastOptimisticLenRef.current;
+    lastOptimisticLenRef.current = optimistic.length;
+    // I just sent something → force scroll regardless of position.
+    if (optimisticGrew) {
+      requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        atBottomRef.current = true;
+      });
+      return;
+    }
+    // Server message landed → only scroll if I'm already at bottom.
+    if (atBottomRef.current) {
+      requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      });
+    }
+  }, [messages.length, optimistic.length]);
+
+  // Track whether the user is at-bottom (within 120px tolerance —
+  // covers a half-typed line of preview content and small toolbars).
+  function onScrollFeed() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    atBottomRef.current = distance < 120;
+  }
 
   // Group messages by day for nicer separators. We merge server messages
   // with the optimistic queue, sorted by created_at. Optimistic rows have
@@ -517,6 +570,7 @@ export function ChatPanel({
       {/* Messages feed — user-chosen wallpaper applied as background */}
       <div
         ref={scrollRef}
+        onScroll={onScrollFeed}
         className={cn(
           "flex-1 overflow-y-auto p-3 sm:p-4 space-y-1",
           // Fallback when no wallpaper is set
@@ -927,6 +981,10 @@ function BubbleActionMenu({
   // <body>, so the parent's `overflow-y-auto` (the chat feed) can't
   // clip it and z-index conflicts disappear. It also handles
   // click-outside, Esc, focus trap, and keyboard nav for free.
+  //
+  // Trigger is fully opaque (was 70%) — users were missing it. The
+  // hover ring + open ring still differentiate idle / active states
+  // so the affordance is clear without being subtle.
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -934,12 +992,12 @@ function BubbleActionMenu({
           variant="ghost"
           size="icon"
           className={cn(
-            "size-8 rounded-full bg-background/70 backdrop-blur-sm border shadow-sm",
-            "opacity-70 hover:opacity-100 hover:bg-background transition",
-            "data-[state=open]:opacity-100 data-[state=open]:bg-background data-[state=open]:ring-2 data-[state=open]:ring-primary/40",
+            "size-8 rounded-full bg-background border shadow-sm shrink-0",
+            "hover:bg-accent hover:ring-2 hover:ring-primary/30 transition",
+            "data-[state=open]:bg-background data-[state=open]:ring-2 data-[state=open]:ring-primary/40",
           )}
           aria-label="Mesaj eylemleri"
-          title="Mesaj eylemleri"
+          title="Mesaj eylemleri (yanıtla, düzenle, sil)"
         >
           <MoreVertical className="size-4" />
         </Button>
