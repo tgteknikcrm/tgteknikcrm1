@@ -86,22 +86,52 @@ export function TasksShell({
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
-  // Optimistic status overrides (taskId → status) so the card jumps to
-  // the new column instantly on drop. Cleared automatically when the
-  // realtime push or the next server render brings the new state.
+  // Card ids whose status mutation is in flight — drives a subtle
+  // pulsing border on the card so the user knows their change is
+  // saving. Doesn't block further drags.
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  // Optimistic status overrides (taskId → desired status). The override
+  // wins over the server prop so the card jumps to the new column on
+  // drop. We DON'T clear it on a timer (race-prone — a slow refresh
+  // would clear the override before the server catches up, and the
+  // card snaps back). Instead the sync effect below clears each entry
+  // the moment the server prop reports the same status.
   const [statusOverrides, setStatusOverrides] = useState<
     Map<string, TaskStatus>
   >(new Map());
 
-  // Realtime: refresh on any task change. Debounced so a burst of
-  // updates (drop + status touch + checklist tick) only triggers one
-  // server roundtrip instead of three.
+  // Drop-once-server-catches-up. When `tasks` prop updates and the
+  // server now agrees with our optimistic value for some id, we drop
+  // that override. This is the canonical merge point — no timing,
+  // no race; the override stays exactly as long as it has to.
+  useEffect(() => {
+    setStatusOverrides((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Map(prev);
+      for (const [id, optStatus] of prev) {
+        const serverTask = tasks.find((t) => t.id === id);
+        // Server caught up → drop override.
+        // Server doesn't have this id any more (deleted) → drop too.
+        if (!serverTask || serverTask.status === optStatus) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [tasks]);
+
+  // Realtime: refresh on any task change. Debounced just enough to
+  // batch a burst (drop + status touch + checklist tick) into one
+  // round-trip without making the UI feel laggy. 80ms is human-
+  // imperceptible but still coalesces multi-table cascades.
   useEffect(() => {
     const supabase = createClient();
     let timer: ReturnType<typeof setTimeout> | null = null;
     const schedule = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => router.refresh(), 250);
+      timer = setTimeout(() => router.refresh(), 80);
     };
     const ch = supabase
       .channel("tasks-feed")
@@ -212,39 +242,59 @@ export function TasksShell({
     const id = e.dataTransfer.getData("text/plain") || draggingId;
     setDraggingId(null);
     if (!id) return;
-    const task = tasks.find((t) => t.id === id);
-    if (!task || task.status === status) return;
+    // Resolve current status against our optimistic view (not raw
+    // server prop) — otherwise dropping into the same effective column
+    // would still fire an update because the server prop lags.
+    const effective = tasksWithOverride.find((t) => t.id === id);
+    if (!effective || effective.status === status) return;
+
     // 1. Optimistic — card jumps to the new column on the next paint.
     setStatusOverrides((prev) => {
       const next = new Map(prev);
       next.set(id, status);
       return next;
     });
-    // 2. Fire-and-forget — push the canonical state via router.refresh(),
-    //    then clean up the override after the new server data lands.
-    //    Realtime might not always be connected (websocket flaky over LAN),
-    //    so we don't rely on it here.
+    // Mark the card as "saving" — drives a subtle pulsing border.
+    setPendingIds((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+
+    // 2. Persist. On success we trigger a server refresh; the sync
+    //    effect above will drop the override the moment the new
+    //    `tasks` prop arrives with the matching status. No setTimeout,
+    //    no race condition — the override lasts exactly as long as
+    //    the server takes to catch up.
+    //
+    //    Realtime is best-effort (websocket can be flaky over LAN /
+    //    cellular / proxies), so we don't rely on it; we always call
+    //    router.refresh() ourselves. The server action also calls
+    //    `.select().maybeSingle()` so RLS-blocked / not-found writes
+    //    surface as an explicit error instead of silent success.
+    const clearPending = () => {
+      setPendingIds((prev) => {
+        if (!prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    };
     void setTaskStatus(id, status).then((r) => {
       if (r.error) {
         toast.error(r.error);
+        // Persist failed → drop the optimistic override so the card
+        // returns to its real column.
         setStatusOverrides((prev) => {
           const next = new Map(prev);
           next.delete(id);
           return next;
         });
+        clearPending();
         return;
       }
-      // Pull fresh server data, then drop the override. Without an
-      // explicit refresh the override clears before tasks prop updates
-      // and the card snaps back to its old column.
       router.refresh();
-      setTimeout(() => {
-        setStatusOverrides((prev) => {
-          const next = new Map(prev);
-          next.delete(id);
-          return next;
-        });
-      }, 1500);
+      clearPending();
     });
   }
 
@@ -357,6 +407,7 @@ export function TasksShell({
                         commentsCount={commentsByTask.get(t.id)?.length ?? 0}
                         onClick={() => setEditTask(t)}
                         onDragStart={(e) => onDragStart(t.id, e)}
+                        isPending={pendingIds.has(t.id)}
                       />
                     ))
                   )}
@@ -511,6 +562,7 @@ function TaskCard({
   commentsCount,
   onClick,
   onDragStart,
+  isPending = false,
 }: {
   task: Task;
   people: Map<string, Pick<Profile, "id" | "full_name" | "phone">>;
@@ -518,6 +570,7 @@ function TaskCard({
   commentsCount: number;
   onClick: () => void;
   onDragStart: (e: React.DragEvent) => void;
+  isPending?: boolean;
 }) {
   const today = todayISO();
   const overdue =
@@ -540,6 +593,7 @@ function TaskCard({
         "hover:shadow-md hover:scale-[1.01] transition cursor-grab active:cursor-grabbing",
         "animate-tg-fade-in",
         overdue && "border-red-500/40",
+        isPending && "ring-2 ring-primary/40 ring-offset-1 ring-offset-background",
       )}
     >
       <div className="flex items-start gap-2 mb-1.5">

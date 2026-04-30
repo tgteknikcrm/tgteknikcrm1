@@ -71,11 +71,18 @@ export async function saveTask(input: SaveTaskInput) {
 export async function setTaskStatus(id: string, status: TaskStatus) {
   const { supabase, error } = await requireUser();
   if (error) return { error };
-  const { error: e } = await supabase
+  // .select() forces PostgREST to return the affected row. Supabase JS
+  // doesn't raise on 0-row updates (e.g. RLS-blocked or wrong id), so
+  // without this we'd return success while DB is unchanged — and the
+  // kanban card would snap back on the next refresh.
+  const { data, error: e } = await supabase
     .from("tasks")
     .update({ status })
-    .eq("id", id);
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
   if (e) return { error: e.message };
+  if (!data) return { error: "Görev güncellenemedi (yetki yok ya da silindi)" };
   revalidatePath("/tasks");
   return { success: true };
 }
