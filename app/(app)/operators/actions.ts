@@ -63,13 +63,28 @@ export async function deleteOperator(id: string) {
     .eq("id", id)
     .single();
   const { error } = await supabase.from("operators").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "operatör") };
+  }
   await recordEvent({
     type: "operator.deleted",
     entity_type: "operator",
     entity_id: id,
     entity_label: existing?.full_name ?? null,
   });
+  revalidatePath("/operators");
+  return { success: true };
+}
+
+export async function bulkDeleteOperators(ids: string[]) {
+  if (!ids || ids.length === 0) return { error: "Seçili operatör yok" };
+  const supabase = await createClient();
+  const { error } = await supabase.from("operators").delete().in("id", ids);
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "operatörler") };
+  }
   revalidatePath("/operators");
   return { success: true };
 }

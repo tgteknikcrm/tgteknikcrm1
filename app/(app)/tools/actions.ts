@@ -78,13 +78,38 @@ export async function deleteTool(id: string) {
   }
 
   const { error } = await supabase.from("tools").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "takım") };
+  }
   await recordEvent({
     type: "tool.deleted",
     entity_type: "tool",
     entity_id: id,
     entity_label: tool?.name ?? null,
   });
+  revalidatePath("/tools");
+  return { success: true };
+}
+
+export async function bulkDeleteTools(ids: string[]) {
+  if (!ids || ids.length === 0) return { error: "Seçili takım yok" };
+  const supabase = await createClient();
+  const { data: rows } = await supabase
+    .from("tools")
+    .select("id, image_path")
+    .in("id", ids);
+  const { error } = await supabase.from("tools").delete().in("id", ids);
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "takımlar") };
+  }
+  const paths = (rows ?? [])
+    .map((r) => r.image_path)
+    .filter((p): p is string => !!p);
+  if (paths.length > 0) {
+    void supabase.storage.from("tool-images").remove(paths);
+  }
   revalidatePath("/tools");
   return { success: true };
 }

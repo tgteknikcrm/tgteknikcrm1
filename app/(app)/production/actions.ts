@@ -53,7 +53,26 @@ export async function saveProductionEntry(input: {
 export async function deleteProductionEntry(id: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("production_entries").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "üretim kaydı") };
+  }
   revalidatePath("/production");
+  return { success: true };
+}
+
+export async function bulkDeleteProductionEntries(ids: string[]) {
+  if (!ids || ids.length === 0) return { error: "Seçili kayıt yok" };
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("production_entries")
+    .delete()
+    .in("id", ids);
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "üretim kayıtları") };
+  }
+  revalidatePath("/production");
+  revalidatePath("/dashboard");
   return { success: true };
 }

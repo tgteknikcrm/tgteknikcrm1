@@ -167,3 +167,16 @@ export async function setJobTools(jobId: string, items: JobToolInput[]) {
   revalidatePath("/machines");
   return { success: true };
 }
+
+export async function bulkDeleteJobs(ids: string[]) {
+  if (!ids || ids.length === 0) return { error: "Seçili iş yok" };
+  const supabase = await createClient();
+  const { error } = await supabase.from("jobs").delete().in("id", ids);
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "işler") };
+  }
+  revalidatePath("/jobs");
+  revalidatePath("/dashboard");
+  return { success: true };
+}

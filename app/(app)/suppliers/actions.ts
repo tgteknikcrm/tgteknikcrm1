@@ -51,7 +51,22 @@ export async function saveSupplier(input: {
 export async function deleteSupplier(id: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("suppliers").delete().eq("id", id);
-  if (error) return { error: error.message };
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "tedarikçi") };
+  }
+  revalidatePath("/suppliers");
+  return { success: true };
+}
+
+export async function bulkDeleteSuppliers(ids: string[]) {
+  if (!ids || ids.length === 0) return { error: "Seçili tedarikçi yok" };
+  const supabase = await createClient();
+  const { error } = await supabase.from("suppliers").delete().in("id", ids);
+  if (error) {
+    const { humanizeDeleteError } = await import("@/lib/delete-helpers");
+    return { error: humanizeDeleteError(error.message, "tedarikçiler") };
+  }
   revalidatePath("/suppliers");
   return { success: true };
 }
