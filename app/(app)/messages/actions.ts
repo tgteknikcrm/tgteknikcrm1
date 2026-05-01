@@ -2,6 +2,10 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import type {
+  Conversation,
+  ConversationParticipant,
+} from "@/lib/supabase/types";
 
 const MAX_BODY_LEN = 4000;
 
@@ -10,6 +14,34 @@ async function requireUser() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { supabase, user: null as never, error: "Giriş gerekli" };
   return { supabase, user };
+}
+
+// Fetch the canonical conversation row + all participant rows so we
+// can hand them to the client in one shot — no client-side re-fetch
+// race ("yeni sohbet F5'siz açılmıyor" pattern). Returns nulls if
+// reads hit RLS issues; the client will fall back to router.refresh.
+async function loadConversationBundle(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  conversationId: string,
+): Promise<{
+  conversation: Conversation | null;
+  participants: ConversationParticipant[];
+}> {
+  const [cRes, pRes] = await Promise.all([
+    supabase
+      .from("conversations")
+      .select("*")
+      .eq("id", conversationId)
+      .maybeSingle(),
+    supabase
+      .from("conversation_participants")
+      .select("*")
+      .eq("conversation_id", conversationId),
+  ]);
+  return {
+    conversation: (cRes.data ?? null) as Conversation | null,
+    participants: (pRes.data ?? []) as ConversationParticipant[],
+  };
 }
 
 // ── Conversations ─────────────────────────────────────────────────
@@ -52,7 +84,12 @@ export async function getOrCreateDirectConversation(otherUserId: string) {
     const existing = (shared ?? [])[0]?.conversation_id;
     if (existing) {
       revalidatePath("/messages");
-      return { id: existing as string };
+      const bundle = await loadConversationBundle(supabase, existing);
+      return {
+        id: existing as string,
+        conversation: bundle.conversation,
+        participants: bundle.participants,
+      };
     }
   }
 
@@ -98,7 +135,12 @@ export async function getOrCreateDirectConversation(otherUserId: string) {
   }
 
   revalidatePath("/messages");
-  return { id: conv.id as string };
+  const bundle = await loadConversationBundle(supabase, conv.id);
+  return {
+    id: conv.id as string,
+    conversation: bundle.conversation,
+    participants: bundle.participants,
+  };
 }
 
 export async function createGroupConversation(input: {
@@ -137,7 +179,12 @@ export async function createGroupConversation(input: {
   if (pErr) return { error: pErr.message };
 
   revalidatePath("/messages");
-  return { id: conv.id as string };
+  const bundle = await loadConversationBundle(supabase, conv.id);
+  return {
+    id: conv.id as string,
+    conversation: bundle.conversation,
+    participants: bundle.participants,
+  };
 }
 
 export async function renameConversation(conversationId: string, title: string) {
@@ -286,33 +333,39 @@ export async function editMessage(messageId: string, body: string) {
 }
 
 export async function deleteMessage(messageId: string) {
-  const { supabase, error } = await requireUser();
+  const { supabase, user, error } = await requireUser();
   if (error) return { error };
-  // RPC route — SECURITY DEFINER on the server side, so the silent
-  // RLS-read-after-update trap that was producing "yetki yok"
-  // toasts on legitimate deletes is bypassed entirely. The function
-  // raises specific errcodes that we map to friendly Turkish here.
-  const { data, error: e } = await supabase.rpc("soft_delete_message", {
-    p_message_id: messageId,
-  });
-  if (e) {
-    const msg = e.message || "";
-    if (msg.includes("not_your_message")) {
-      return { error: "Sadece kendi mesajını silebilirsin" };
-    }
-    if (msg.includes("message_not_found")) {
-      return { error: "Mesaj bulunamadı (zaten silinmiş olabilir)" };
-    }
-    if (msg.includes("auth_required")) {
-      return { error: "Giriş gerekli" };
-    }
-    return { error: msg };
+
+  // Why plain UPDATE instead of soft_delete_message RPC: the RPC is
+  // SECURITY DEFINER and depends on its owner having BYPASSRLS. In
+  // some Supabase setups the owner doesn't, so the inner UPDATE gets
+  // silently RLS-blocked → the RPC raises `rls_blocked_update` and
+  // the user sees a raw error toast on every delete.
+  //
+  // The standard `update own messages` policy
+  // (`using (author_id = auth.uid())`) is sufficient for the author
+  // to soft-delete their own row. We pre-validate via SELECT so we
+  // can surface friendly Turkish errors instead of a silent no-op.
+  const { data: msg, error: selErr } = await supabase
+    .from("messages")
+    .select("id, author_id, deleted_at")
+    .eq("id", messageId)
+    .maybeSingle();
+  if (selErr) return { error: `Mesaj okunamadı: ${selErr.message}` };
+  if (!msg) return { error: "Mesaj bulunamadı (zaten silinmiş olabilir)" };
+  if (msg.author_id !== user.id) {
+    return { error: "Sadece kendi mesajını silebilirsin" };
   }
-  // Defensive: RPC returned but somehow with no rows (shouldn't happen
-  // — RPC raises on every failure path).
-  if (!data || (Array.isArray(data) && data.length === 0)) {
-    return { error: "Beklenmeyen hata: mesaj silinemedi" };
-  }
+  if (msg.deleted_at) return { success: true }; // idempotent
+
+  // No .select() chain — silent RLS-read-after-update trap doesn't
+  // apply when we don't try to read the row back. Just check `error`.
+  const { error: updErr } = await supabase
+    .from("messages")
+    .update({ deleted_at: new Date().toISOString(), body: null })
+    .eq("id", messageId)
+    .eq("author_id", user.id);
+  if (updErr) return { error: `Mesaj silinemedi: ${updErr.message}` };
   return { success: true };
 }
 

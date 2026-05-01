@@ -246,62 +246,78 @@ export function MessagesClient({
   );
 
   // Called by NewConversationDialog after it successfully creates a
-  // direct or group conversation. We can't rely on `router.refresh()`
-  // alone because MessagesClient's state was seeded from props in
-  // useState() initializers — those don't re-run on prop change. So
-  // we eagerly fetch the new conversation row + participants here and
-  // merge them into local state before selecting it. End result: the
-  // chat panel opens immediately, no manual refresh required.
+  // direct or group conversation. The dialog (via the server action)
+  // hands us the canonical conversation row + participants in one
+  // bundle — we seed local state synchronously so the chat panel
+  // opens on the same render. If the bundle is missing for any reason,
+  // we fall back to a client-side fetch + router.refresh.
   const handleNewConversation = useCallback(
-    async (newConvId: string) => {
-      try {
-        const [cRes, pRes] = await Promise.all([
-          supabase
-            .from("conversations")
-            .select("*")
-            .eq("id", newConvId)
-            .maybeSingle(),
-          supabase
-            .from("conversation_participants")
-            .select("*")
-            .eq("conversation_id", newConvId),
-        ]);
-        const conv = cRes.data as Conversation | null;
-        const parts = (pRes.data ?? []) as ConversationParticipant[];
-        if (conv) {
-          setConversations((prev) =>
-            prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev],
-          );
-        }
-        if (parts.length > 0) {
-          setAllParticipants((prev) => {
-            const remaining = prev.filter(
-              (p) => p.conversation_id !== newConvId,
-            );
-            return [...remaining, ...parts];
-          });
-          const myPart = parts.find((p) => p.user_id === currentUserId);
-          if (myPart) {
-            setMyParticipants((prev) => {
-              const idx = prev.findIndex(
-                (p) =>
-                  p.conversation_id === newConvId &&
-                  p.user_id === currentUserId,
-              );
-              if (idx === -1) return [...prev, myPart];
-              const next = [...prev];
-              next[idx] = myPart;
-              return next;
-            });
+    async (
+      newConvId: string,
+      bundle?: {
+        conversation: Conversation | null;
+        participants: ConversationParticipant[];
+      },
+    ) => {
+      let conv: Conversation | null = bundle?.conversation ?? null;
+      let parts: ConversationParticipant[] = bundle?.participants ?? [];
+
+      // Fallback fetch when the action couldn't read the bundle (rare —
+      // e.g., RLS hiccup). Keeps the "panel opens without F5" promise.
+      if (!conv || parts.length === 0) {
+        try {
+          const [cRes, pRes] = await Promise.all([
+            supabase
+              .from("conversations")
+              .select("*")
+              .eq("id", newConvId)
+              .maybeSingle(),
+            supabase
+              .from("conversation_participants")
+              .select("*")
+              .eq("conversation_id", newConvId),
+          ]);
+          conv = (cRes.data as Conversation | null) ?? conv;
+          if ((pRes.data ?? []).length > 0) {
+            parts = (pRes.data ?? []) as ConversationParticipant[];
           }
-          setParticipantsCache((prev) =>
-            setBounded(prev, newConvId, parts, activeIdRef.current),
-          );
+        } catch {
+          // Ignore — selectConversation will trigger fetchConversationDetail.
         }
-      } catch {
-        // Ignore — fall through to selectConversation, which will
-        // trigger a fresh fetch via fetchConversationDetail anyway.
       }
+
+      if (conv) {
+        const newConv = conv;
+        setConversations((prev) =>
+          prev.some((c) => c.id === newConv.id) ? prev : [newConv, ...prev],
+        );
+      }
+      if (parts.length > 0) {
+        setAllParticipants((prev) => {
+          const remaining = prev.filter(
+            (p) => p.conversation_id !== newConvId,
+          );
+          return [...remaining, ...parts];
+        });
+        const myPart = parts.find((p) => p.user_id === currentUserId);
+        if (myPart) {
+          setMyParticipants((prev) => {
+            const idx = prev.findIndex(
+              (p) =>
+                p.conversation_id === newConvId &&
+                p.user_id === currentUserId,
+            );
+            if (idx === -1) return [...prev, myPart];
+            const next = [...prev];
+            next[idx] = myPart;
+            return next;
+          });
+        }
+        setParticipantsCache((prev) =>
+          setBounded(prev, newConvId, parts, activeIdRef.current),
+        );
+      }
+
       selectConversation(newConvId);
       // Best-effort backstop: keep server-rendered metadata fresh.
       router.refresh();
@@ -309,37 +325,59 @@ export function MessagesClient({
     [supabase, currentUserId, selectConversation, router],
   );
 
-  // Defensive prop-sync: if `router.refresh()` happens elsewhere in
-  // the app and brings new conversations from the server, additively
-  // merge them into local state. We never DROP local conversations
-  // here — local state is the source of truth for client-only
-  // mutations. We only ADD what the server has but the client missed.
+  // Defensive prop-sync. The server's view (initial* props) is
+  // authoritative for membership: if the server says I'm no longer in
+  // a conversation (because I left it via leaveConversation, or an
+  // admin removed me), drop those rows from local state — otherwise
+  // the sidebar keeps showing the conversation until F5.
+  //
+  // For ADDITIONS we keep additive merge so client-only mutations
+  // (e.g. an optimistic conversation that hasn't propagated back)
+  // aren't clobbered.
   useEffect(() => {
+    const serverConvIds = new Set(initialConversations.map((c) => c.id));
+    const serverMyKeys = new Set(
+      initialMyParticipants.map(
+        (p) => `${p.conversation_id}:${p.user_id}`,
+      ),
+    );
+
     setConversations((prev) => {
-      const known = new Set(prev.map((c) => c.id));
+      const kept = prev.filter((c) => serverConvIds.has(c.id));
+      const known = new Set(kept.map((c) => c.id));
       const additions = initialConversations.filter((c) => !known.has(c.id));
-      if (additions.length === 0) return prev;
-      return [...additions, ...prev];
+      if (additions.length === 0 && kept.length === prev.length) return prev;
+      return [...additions, ...kept];
     });
+
     setAllParticipants((prev) => {
+      // Drop participant rows for conversations the server no longer
+      // reports — the conv was deleted or I left it.
+      const kept = prev.filter((p) => serverConvIds.has(p.conversation_id));
       const knownKeys = new Set(
-        prev.map((p) => `${p.conversation_id}:${p.user_id}`),
+        kept.map((p) => `${p.conversation_id}:${p.user_id}`),
       );
       const additions = initialAllParticipants.filter(
         (p) => !knownKeys.has(`${p.conversation_id}:${p.user_id}`),
       );
-      if (additions.length === 0) return prev;
-      return [...prev, ...additions];
+      if (additions.length === 0 && kept.length === prev.length) return prev;
+      return [...kept, ...additions];
     });
+
     setMyParticipants((prev) => {
+      // Server is authoritative for MY participant rows — if a row
+      // I had locally is no longer there, I left/was-removed; drop it.
+      const kept = prev.filter((p) =>
+        serverMyKeys.has(`${p.conversation_id}:${p.user_id}`),
+      );
       const knownKeys = new Set(
-        prev.map((p) => `${p.conversation_id}:${p.user_id}`),
+        kept.map((p) => `${p.conversation_id}:${p.user_id}`),
       );
       const additions = initialMyParticipants.filter(
         (p) => !knownKeys.has(`${p.conversation_id}:${p.user_id}`),
       );
-      if (additions.length === 0) return prev;
-      return [...prev, ...additions];
+      if (additions.length === 0 && kept.length === prev.length) return prev;
+      return [...kept, ...additions];
     });
   }, [initialConversations, initialAllParticipants, initialMyParticipants]);
 
@@ -610,30 +648,36 @@ export function MessagesClient({
   );
 
   const items: ConvoListItem[] = useMemo(() => {
-    return conversations.map((conv) => {
-      const parts = allParticipants.filter(
-        (p) => p.conversation_id === conv.id,
-      );
-      const mine = myPartByConv.get(conv.id);
-      return {
-        conversation: conv,
-        participants: parts
-          .map((p) => profileById.get(p.user_id))
-          .filter(
-            (
-              x,
-            ): x is Pick<
-              Profile,
-              "id" | "full_name" | "phone" | "last_seen_at"
-            > => !!x,
-          ),
-        unreadCount: unreadByConv.get(conv.id) ?? 0,
-        myLastReadAt: mine?.last_read_at ?? null,
-        archivedAt: mine?.archived_at ?? null,
-        pinnedAt: mine?.pinned_at ?? null,
-        tags: mine?.tags ?? [],
-      };
-    });
+    return conversations
+      // Skip conversations I'm no longer a participant in. Belt-and-
+      // suspenders alongside the prop-sync effect: if Realtime DELETE
+      // for my participant row drops on a flaky websocket, this still
+      // hides the row immediately so the sidebar stays clean.
+      .filter((conv) => myPartByConv.has(conv.id))
+      .map((conv) => {
+        const parts = allParticipants.filter(
+          (p) => p.conversation_id === conv.id,
+        );
+        const mine = myPartByConv.get(conv.id);
+        return {
+          conversation: conv,
+          participants: parts
+            .map((p) => profileById.get(p.user_id))
+            .filter(
+              (
+                x,
+              ): x is Pick<
+                Profile,
+                "id" | "full_name" | "phone" | "last_seen_at"
+              > => !!x,
+            ),
+          unreadCount: unreadByConv.get(conv.id) ?? 0,
+          myLastReadAt: mine?.last_read_at ?? null,
+          archivedAt: mine?.archived_at ?? null,
+          pinnedAt: mine?.pinned_at ?? null,
+          tags: mine?.tags ?? [],
+        };
+      });
   }, [conversations, allParticipants, myPartByConv, profileById, unreadByConv]);
 
   const activeConversation = useMemo(

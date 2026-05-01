@@ -28,6 +28,7 @@ import {
   readableTextOn,
   tagMeta,
   type Conversation,
+  type ConversationParticipant,
   type Profile,
 } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
@@ -58,8 +59,15 @@ interface Props {
   onSelect: (id: string) => void;
   // Called by NewConversationDialog after a successful create. The
   // shell merges the new conv into client state and selects it — no
-  // manual refresh required.
-  onNewConversation?: (convId: string) => void | Promise<void>;
+  // manual refresh required. The bundle (conversation + participants)
+  // is the canonical row read server-side right after the insert.
+  onNewConversation?: (
+    convId: string,
+    bundle?: {
+      conversation: Conversation | null;
+      participants: ConversationParticipant[];
+    },
+  ) => void | Promise<void>;
 }
 
 type TabKey = "inbox" | "archive" | string; // arbitrary tag key

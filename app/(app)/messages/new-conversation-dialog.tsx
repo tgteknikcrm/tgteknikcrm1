@@ -21,6 +21,8 @@ import { toast } from "sonner";
 import { Loader2, Search, Check, MessageSquarePlus, Users, X } from "lucide-react";
 import {
   CONVERSATION_COLOR_PRESETS,
+  type Conversation,
+  type ConversationParticipant,
   type Profile,
 } from "@/lib/supabase/types";
 import {
@@ -39,7 +41,18 @@ interface Props {
   // flow (merging into client state + selecting it). The dialog
   // skips its own router.push/refresh in that case so we don't
   // race against the parent's state mutation.
-  onCreated?: (convId: string) => void | Promise<void>;
+  //
+  // The bundle (canonical conversation row + participants) is read
+  // by the server action right after the insert and forwarded here.
+  // The parent uses it to seed local state synchronously — no extra
+  // client-side fetch, no F5 needed for the chat panel to appear.
+  onCreated?: (
+    convId: string,
+    bundle?: {
+      conversation: Conversation | null;
+      participants: ConversationParticipant[];
+    },
+  ) => void | Promise<void>;
 }
 
 function initials(s: string | null | undefined): string {
@@ -147,15 +160,18 @@ export function NewConversationDialog({
         toast.error(msg);
         return;
       }
-      // Success — close dialog, hand the new id to the parent so it
-      // can merge the conversation into client state and open it
-      // immediately. Without the parent callback, useState() seeds in
-      // MessagesClient never re-run on prop change, so the chat panel
-      // wouldn't open until a manual refresh.
+      // Success — close dialog, hand the new id + canonical bundle to
+      // the parent. With the bundle, the parent updates local state
+      // synchronously and opens the chat panel without waiting for a
+      // refresh round-trip.
       setOpen(false);
       reset();
       if (onCreated) {
-        await onCreated(id);
+        const conv =
+          "conversation" in r ? r.conversation ?? null : null;
+        const parts =
+          "participants" in r ? r.participants ?? [] : [];
+        await onCreated(id, { conversation: conv, participants: parts });
       } else {
         router.push(`/messages?c=${id}`);
         router.refresh();
@@ -200,7 +216,11 @@ export function NewConversationDialog({
       reset();
       toast.success("Grup oluşturuldu");
       if (onCreated) {
-        await onCreated(id);
+        const conv =
+          "conversation" in r ? r.conversation ?? null : null;
+        const parts =
+          "participants" in r ? r.participants ?? [] : [];
+        await onCreated(id, { conversation: conv, participants: parts });
       } else {
         router.push(`/messages?c=${id}`);
         router.refresh();
