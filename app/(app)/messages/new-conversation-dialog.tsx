@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Dialog,
@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { toast } from "sonner";
-import { Loader2, Search, Check } from "lucide-react";
+import { Loader2, Search, Check, MessageSquarePlus, Users, X } from "lucide-react";
 import {
   CONVERSATION_COLOR_PRESETS,
   type Profile,
@@ -47,6 +47,16 @@ function initials(s: string | null | undefined): string {
     .toUpperCase();
 }
 
+/**
+ * Modern messenger-style new-conversation flow:
+ *   1. User clicks a person → SELECT (visual only, no server call yet)
+ *   2. User clicks "Sohbeti Başlat" → loading overlay → server creates
+ *      conversation atomically → navigate
+ *   3. If anything fails, inline error stays in the dialog (user doesn't
+ *      lose their selection or tab state)
+ *
+ * Group tab uses the same select-then-confirm pattern with multi-select.
+ */
 export function NewConversationDialog({
   trigger,
   currentUserId,
@@ -57,6 +67,10 @@ export function NewConversationDialog({
   const [tab, setTab] = useState<"direct" | "group">("direct");
   const [pending, startTransition] = useTransition();
   const [search, setSearch] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Direct: single selection (radio behavior)
+  const [selectedDirectId, setSelectedDirectId] = useState<string | null>(null);
 
   // Group form state
   const [title, setTitle] = useState("");
@@ -78,13 +92,27 @@ export function NewConversationDialog({
     );
   }, [candidates, search]);
 
+  const selectedDirectPerson = useMemo(
+    () => candidates.find((p) => p.id === selectedDirectId) ?? null,
+    [candidates, selectedDirectId],
+  );
+
   function reset() {
     setTab("direct");
     setSearch("");
+    setError(null);
+    setSelectedDirectId(null);
     setTitle("");
     setColor(CONVERSATION_COLOR_PRESETS[0].hex);
     setMemberIds(new Set());
   }
+
+  // Clear inline errors as soon as the user changes anything that might
+  // resolve them — prevents stale error banners.
+  useEffect(() => {
+    if (error) setError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, selectedDirectId, memberIds, title]);
 
   function toggleMember(id: string) {
     setMemberIds((prev) => {
@@ -95,30 +123,47 @@ export function NewConversationDialog({
     });
   }
 
-  function startDirect(otherId: string) {
+  function startDirect() {
+    if (!selectedDirectId) return;
+    setError(null);
     startTransition(async () => {
-      const r = await getOrCreateDirectConversation(otherId);
+      const r = await getOrCreateDirectConversation(selectedDirectId);
       if ("error" in r && r.error) {
+        setError(r.error);
         toast.error(r.error);
         return;
       }
       const id = "id" in r ? r.id : null;
-      if (id) {
-        setOpen(false);
-        reset();
-        router.push(`/messages?c=${id}`);
+      if (!id) {
+        const msg = "Konuşma oluşturulamadı (id dönmedi)";
+        setError(msg);
+        toast.error(msg);
+        return;
       }
+      // Success — close dialog, navigate. We push BEFORE reset so the
+      // dialog doesn't briefly flash an empty state.
+      setOpen(false);
+      reset();
+      router.push(`/messages?c=${id}`);
+      // router.refresh ensures the conversation list re-renders with the
+      // new entry visible (in case Realtime push was missed).
+      router.refresh();
     });
   }
 
   function startGroup(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     if (!title.trim()) {
-      toast.error("Grup adı gerekli");
+      const msg = "Grup adı gerekli";
+      setError(msg);
+      toast.error(msg);
       return;
     }
     if (memberIds.size === 0) {
-      toast.error("En az bir üye seç");
+      const msg = "En az bir üye seç";
+      setError(msg);
+      toast.error(msg);
       return;
     }
     startTransition(async () => {
@@ -128,16 +173,22 @@ export function NewConversationDialog({
         memberIds: Array.from(memberIds),
       });
       if ("error" in r && r.error) {
+        setError(r.error);
         toast.error(r.error);
         return;
       }
       const id = "id" in r ? r.id : null;
-      if (id) {
-        setOpen(false);
-        reset();
-        toast.success("Grup oluşturuldu");
-        router.push(`/messages?c=${id}`);
+      if (!id) {
+        const msg = "Grup oluşturulamadı (id dönmedi)";
+        setError(msg);
+        toast.error(msg);
+        return;
       }
+      setOpen(false);
+      reset();
+      toast.success("Grup oluşturuldu");
+      router.push(`/messages?c=${id}`);
+      router.refresh();
     });
   }
 
@@ -145,186 +196,180 @@ export function NewConversationDialog({
     <Dialog
       open={open}
       onOpenChange={(v) => {
+        if (pending) return; // prevent close mid-flight
         setOpen(v);
         if (!v) reset();
       }}
     >
       <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Yeni Mesajlaşma</DialogTitle>
+      <DialogContent className="max-w-lg overflow-hidden p-0">
+        {/* Header */}
+        <DialogHeader className="px-5 pt-5 pb-3 border-b">
+          <DialogTitle className="flex items-center gap-2">
+            <MessageSquarePlus className="size-5 text-primary" />
+            Yeni Mesajlaşma
+          </DialogTitle>
           <DialogDescription>
             Birebir konuşma başlat ya da grup oluştur.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as "direct" | "group")}>
-          <TabsList className="grid grid-cols-2 w-full">
-            <TabsTrigger value="direct">Birebir</TabsTrigger>
-            <TabsTrigger value="group">Grup</TabsTrigger>
-          </TabsList>
-
-          {/* Direct */}
-          <TabsContent value="direct" className="space-y-3 mt-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="İsim veya telefon ara…"
-                className="pl-9 h-9"
-                autoFocus
-              />
-            </div>
-            <div className="rounded-md border max-h-72 overflow-y-auto divide-y">
-              {filteredCandidates.length === 0 ? (
-                <div className="p-6 text-center text-sm text-muted-foreground">
-                  Eşleşen kişi yok.
+        <div className="relative">
+          {/* Loading overlay — covers the whole dialog body so the user
+              can't click anything else while the server is working. */}
+          {pending && (
+            <div
+              className="absolute inset-0 z-30 bg-background/85 backdrop-blur-sm flex items-center justify-center animate-tg-fade-in"
+              aria-live="polite"
+            >
+              <div className="flex flex-col items-center gap-3 text-center">
+                <Loader2 className="size-8 animate-spin text-primary" />
+                <div className="text-sm font-semibold">
+                  {tab === "direct"
+                    ? "Sohbet hazırlanıyor…"
+                    : "Grup oluşturuluyor…"}
                 </div>
-              ) : (
-                filteredCandidates.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => startDirect(p.id)}
-                    disabled={pending}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted/60 transition text-left disabled:opacity-50"
-                  >
-                    <Avatar className="size-9">
-                      <AvatarFallback className="text-xs font-semibold bg-primary/15 text-primary">
-                        {initials(p.full_name || p.phone)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold truncate">
-                        {p.full_name || formatPhoneForDisplay(p.phone) || "—"}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground font-mono truncate">
-                        {formatPhoneForDisplay(p.phone)}
-                      </div>
-                    </div>
-                    {pending && (
-                      <Loader2 className="size-4 animate-spin text-muted-foreground" />
-                    )}
-                  </button>
-                ))
-              )}
+                <div className="text-[11px] text-muted-foreground max-w-[260px]">
+                  Bir saniye, katılımcılar ekleniyor ve konuşma açılıyor.
+                </div>
+              </div>
             </div>
-          </TabsContent>
+          )}
 
-          {/* Group */}
-          <TabsContent value="group" className="mt-3">
-            <form onSubmit={startGroup} className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="g-title">Grup Adı</Label>
+          <Tabs
+            value={tab}
+            onValueChange={(v) => setTab(v as "direct" | "group")}
+            className="flex flex-col"
+          >
+            <div className="px-5 pt-3">
+              <TabsList className="grid grid-cols-2 w-full">
+                <TabsTrigger value="direct" className="gap-1.5">
+                  <MessageSquarePlus className="size-3.5" /> Birebir
+                </TabsTrigger>
+                <TabsTrigger value="group" className="gap-1.5">
+                  <Users className="size-3.5" /> Grup
+                </TabsTrigger>
+              </TabsList>
+            </div>
+
+            {/* Direct tab — select then start */}
+            <TabsContent
+              value="direct"
+              className="space-y-3 m-0 p-5 pt-3 data-[state=inactive]:hidden"
+            >
+              {/* Selected preview chip */}
+              {selectedDirectPerson && (
+                <div className="flex items-center gap-2 rounded-full border-2 border-primary/30 bg-primary/5 pl-1 pr-1 py-1 animate-tg-fade-in">
+                  <Avatar className="size-7">
+                    <AvatarFallback className="text-[10px] font-bold bg-primary/15 text-primary">
+                      {initials(
+                        selectedDirectPerson.full_name ||
+                          selectedDirectPerson.phone,
+                      )}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1 text-xs">
+                    <span className="font-semibold">
+                      {selectedDirectPerson.full_name ||
+                        formatPhoneForDisplay(selectedDirectPerson.phone) ||
+                        "—"}
+                    </span>
+                    <span className="text-muted-foreground ml-1.5 font-mono">
+                      {selectedDirectPerson.full_name &&
+                        formatPhoneForDisplay(selectedDirectPerson.phone)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDirectId(null)}
+                    className="size-6 rounded-full hover:bg-muted flex items-center justify-center transition"
+                    aria-label="Seçimi kaldır"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                </div>
+              )}
+
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
                 <Input
-                  id="g-title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Vardiya operatörleri, Tornaadama, …"
-                  maxLength={80}
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="İsim veya telefon ara…"
+                  className="pl-9 h-9"
+                  autoFocus
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <Label className="text-xs">Renk</Label>
-                <div className="flex flex-wrap gap-2">
-                  {CONVERSATION_COLOR_PRESETS.map((p) => {
-                    const active = color === p.hex;
+              <div className="rounded-md border max-h-72 overflow-y-auto divide-y bg-background">
+                {filteredCandidates.length === 0 ? (
+                  <div className="p-6 text-center text-sm text-muted-foreground">
+                    Eşleşen kişi yok.
+                  </div>
+                ) : (
+                  filteredCandidates.map((p) => {
+                    const isSelected = selectedDirectId === p.id;
                     return (
                       <button
-                        key={p.hex}
+                        key={p.id}
                         type="button"
-                        onClick={() => setColor(p.hex)}
+                        onClick={() =>
+                          setSelectedDirectId(isSelected ? null : p.id)
+                        }
                         className={cn(
-                          "size-7 rounded-full border-2 flex items-center justify-center transition",
-                          active
-                            ? "ring-2 ring-primary scale-110 border-white"
-                            : "border-transparent hover:scale-110",
+                          "w-full flex items-center gap-3 px-3 py-2.5 text-left transition",
+                          "hover:bg-muted/60",
+                          isSelected &&
+                            "bg-primary/5 ring-2 ring-primary/40 ring-inset",
                         )}
-                        style={{ backgroundColor: p.hex }}
-                        title={p.name}
                       >
-                        {active && (
-                          <Check className="size-3 text-white drop-shadow" />
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs">
-                    Üyeler ({memberIds.size} seçili)
-                  </Label>
-                  {memberIds.size > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setMemberIds(new Set())}
-                      className="text-[11px] text-muted-foreground hover:underline"
-                    >
-                      Temizle
-                    </button>
-                  )}
-                </div>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                  <Input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Kişi ara…"
-                    className="pl-9 h-9"
-                  />
-                </div>
-                <div className="rounded-md border max-h-56 overflow-y-auto divide-y">
-                  {filteredCandidates.length === 0 ? (
-                    <div className="p-6 text-center text-sm text-muted-foreground">
-                      Eşleşen kişi yok.
-                    </div>
-                  ) : (
-                    filteredCandidates.map((p) => {
-                      const checked = memberIds.has(p.id);
-                      return (
-                        <label
-                          key={p.id}
+                        <Avatar className="size-9">
+                          <AvatarFallback
+                            className={cn(
+                              "text-xs font-semibold",
+                              isSelected
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-primary/15 text-primary",
+                            )}
+                          >
+                            {initials(p.full_name || p.phone)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-sm font-semibold truncate">
+                            {p.full_name ||
+                              formatPhoneForDisplay(p.phone) ||
+                              "—"}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground font-mono truncate">
+                            {formatPhoneForDisplay(p.phone)}
+                          </div>
+                        </div>
+                        <div
                           className={cn(
-                            "flex items-center gap-3 px-3 py-2 cursor-pointer transition",
-                            "hover:bg-muted/60",
-                            checked && "bg-primary/5",
+                            "size-5 rounded-full border-2 flex items-center justify-center transition shrink-0",
+                            isSelected
+                              ? "border-primary bg-primary"
+                              : "border-muted-foreground/30",
                           )}
                         >
-                          <Checkbox
-                            checked={checked}
-                            onCheckedChange={() => toggleMember(p.id)}
-                          />
-                          <Avatar className="size-7">
-                            <AvatarFallback className="text-[10px] font-semibold bg-primary/15 text-primary">
-                              {initials(p.full_name || p.phone)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-sm font-medium truncate">
-                              {p.full_name ||
-                                formatPhoneForDisplay(p.phone) ||
-                                "—"}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground font-mono truncate">
-                              {formatPhoneForDisplay(p.phone)}
-                            </div>
-                          </div>
-                          {checked && (
-                            <Check className="size-4 text-primary shrink-0" />
+                          {isSelected && (
+                            <Check className="size-3 text-primary-foreground" />
                           )}
-                        </label>
-                      );
-                    })
-                  )}
-                </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
               </div>
 
-              <DialogFooter>
+              {error && tab === "direct" && (
+                <div className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300 animate-tg-fade-in">
+                  {error}
+                </div>
+              )}
+
+              <DialogFooter className="gap-2 sm:gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -332,14 +377,162 @@ export function NewConversationDialog({
                 >
                   İptal
                 </Button>
-                <Button type="submit" disabled={pending}>
-                  {pending && <Loader2 className="size-4 animate-spin" />}
-                  Grubu Oluştur
+                <Button
+                  type="button"
+                  onClick={startDirect}
+                  disabled={!selectedDirectId || pending}
+                  className="gap-1.5"
+                >
+                  <MessageSquarePlus className="size-4" />
+                  Sohbeti Başlat
                 </Button>
               </DialogFooter>
-            </form>
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+
+            {/* Group tab */}
+            <TabsContent
+              value="group"
+              className="m-0 p-5 pt-3 data-[state=inactive]:hidden"
+            >
+              <form onSubmit={startGroup} className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="g-title">Grup Adı</Label>
+                  <Input
+                    id="g-title"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="Vardiya operatörleri, Tornaadama, …"
+                    maxLength={80}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Renk</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {CONVERSATION_COLOR_PRESETS.map((p) => {
+                      const active = color === p.hex;
+                      return (
+                        <button
+                          key={p.hex}
+                          type="button"
+                          onClick={() => setColor(p.hex)}
+                          className={cn(
+                            "size-7 rounded-full border-2 flex items-center justify-center transition",
+                            active
+                              ? "ring-2 ring-primary scale-110 border-white"
+                              : "border-transparent hover:scale-110",
+                          )}
+                          style={{ backgroundColor: p.hex }}
+                          title={p.name}
+                        >
+                          {active && (
+                            <Check className="size-3 text-white drop-shadow" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs">
+                      Üyeler ({memberIds.size} seçili)
+                    </Label>
+                    {memberIds.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setMemberIds(new Set())}
+                        className="text-[11px] text-muted-foreground hover:underline"
+                      >
+                        Temizle
+                      </button>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Kişi ara…"
+                      className="pl-9 h-9"
+                    />
+                  </div>
+                  <div className="rounded-md border max-h-56 overflow-y-auto divide-y bg-background">
+                    {filteredCandidates.length === 0 ? (
+                      <div className="p-6 text-center text-sm text-muted-foreground">
+                        Eşleşen kişi yok.
+                      </div>
+                    ) : (
+                      filteredCandidates.map((p) => {
+                        const checked = memberIds.has(p.id);
+                        return (
+                          <label
+                            key={p.id}
+                            className={cn(
+                              "flex items-center gap-3 px-3 py-2 cursor-pointer transition",
+                              "hover:bg-muted/60",
+                              checked && "bg-primary/5",
+                            )}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={() => toggleMember(p.id)}
+                            />
+                            <Avatar className="size-7">
+                              <AvatarFallback className="text-[10px] font-semibold bg-primary/15 text-primary">
+                                {initials(p.full_name || p.phone)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium truncate">
+                                {p.full_name ||
+                                  formatPhoneForDisplay(p.phone) ||
+                                  "—"}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground font-mono truncate">
+                                {formatPhoneForDisplay(p.phone)}
+                              </div>
+                            </div>
+                            {checked && (
+                              <Check className="size-4 text-primary shrink-0" />
+                            )}
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {error && tab === "group" && (
+                  <div className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300 animate-tg-fade-in">
+                    {error}
+                  </div>
+                )}
+
+                <DialogFooter className="gap-2 sm:gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setOpen(false)}
+                  >
+                    İptal
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      !title.trim() || memberIds.size === 0 || pending
+                    }
+                    className="gap-1.5"
+                  >
+                    <Users className="size-4" />
+                    Grubu Oluştur
+                  </Button>
+                </DialogFooter>
+              </form>
+            </TabsContent>
+          </Tabs>
+        </div>
       </DialogContent>
     </Dialog>
   );

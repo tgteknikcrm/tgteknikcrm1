@@ -15,29 +15,40 @@ async function requireUser() {
 // ── Conversations ─────────────────────────────────────────────────
 
 // Find or create a 1:1 conversation between the current user and `otherUserId`.
+//
+// Hardened against the modes the workshop has hit on prod:
+//  - Returns specific Turkish errors at every step (no raw Postgres bubbling)
+//  - Verifies that the participant rows actually landed before claiming
+//    success (so the UI doesn't navigate into a half-built conversation)
+//  - revalidatePath('/messages') so the conversation list re-fetches and
+//    the new entry shows up without an extra refresh
 export async function getOrCreateDirectConversation(otherUserId: string) {
   const { supabase, user, error } = await requireUser();
   if (error) return { error };
   if (!otherUserId || otherUserId === user.id) {
-    return { error: "Geçersiz kullanıcı" };
+    return { error: "Geçersiz kullanıcı seçimi" };
   }
 
   // 1) Look for an existing direct conversation with both participants.
-  const { data: mine } = await supabase
+  const { data: mine, error: mineErr } = await supabase
     .from("conversation_participants")
     .select("conversation_id, conversations!inner(id, kind)")
     .eq("user_id", user.id);
+  if (mineErr) return { error: `Konuşma listesi okunamadı: ${mineErr.message}` };
   type Row = { conversation_id: string; conversations: { id: string; kind: string } | null };
   const myDirectConvIds = ((mine ?? []) as unknown as Row[])
     .filter((r) => r.conversations?.kind === "direct")
     .map((r) => r.conversation_id);
 
   if (myDirectConvIds.length > 0) {
-    const { data: shared } = await supabase
+    const { data: shared, error: sharedErr } = await supabase
       .from("conversation_participants")
       .select("conversation_id")
       .eq("user_id", otherUserId)
       .in("conversation_id", myDirectConvIds);
+    if (sharedErr) {
+      return { error: `Mevcut konuşma kontrolü başarısız: ${sharedErr.message}` };
+    }
     const existing = (shared ?? [])[0]?.conversation_id;
     if (existing) {
       revalidatePath("/messages");
@@ -51,14 +62,40 @@ export async function getOrCreateDirectConversation(otherUserId: string) {
     .insert({ kind: "direct", created_by: user.id })
     .select("id")
     .single();
-  if (convErr || !conv) return { error: convErr?.message ?? "Konuşma oluşturulamadı" };
+  if (convErr || !conv) {
+    return {
+      error: `Konuşma oluşturulamadı: ${convErr?.message ?? "bilinmeyen hata"}`,
+    };
+  }
 
-  // 3) Add both participants.
-  const { error: pErr } = await supabase.from("conversation_participants").insert([
-    { conversation_id: conv.id, user_id: user.id, role: "admin" },
-    { conversation_id: conv.id, user_id: otherUserId, role: "member" },
-  ]);
-  if (pErr) return { error: pErr.message };
+  // 3) Add both participants in one statement (atomic).
+  const { error: pErr } = await supabase
+    .from("conversation_participants")
+    .insert([
+      { conversation_id: conv.id, user_id: user.id, role: "admin" },
+      { conversation_id: conv.id, user_id: otherUserId, role: "member" },
+    ]);
+  if (pErr) {
+    // Roll back the orphan conversation so the user can retry cleanly.
+    await supabase.from("conversations").delete().eq("id", conv.id);
+    return {
+      error: `Katılımcılar eklenemedi: ${pErr.message}`,
+    };
+  }
+
+  // 4) Verify the participant rows actually landed (RLS could silently
+  //    block the insert and we'd otherwise navigate into a broken conv).
+  const { data: verifyParts } = await supabase
+    .from("conversation_participants")
+    .select("user_id")
+    .eq("conversation_id", conv.id);
+  if (!verifyParts || verifyParts.length < 2) {
+    await supabase.from("conversations").delete().eq("id", conv.id);
+    return {
+      error:
+        "Katılımcı kayıtları doğrulanamadı (yetki problemi olabilir). Tekrar dene.",
+    };
+  }
 
   revalidatePath("/messages");
   return { id: conv.id as string };
