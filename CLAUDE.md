@@ -7,6 +7,77 @@
 
 ---
 
+## 🔁 İki Bilgisayar Arasında Çalışma Rehberi (UNUTMA!)
+
+> **Durum:** Bu proje hem ev hem iş PC'sinde geliştiriliyor. Kod GitHub'da, env Vercel'de, DB Supabase bulutta. Üçü de senkron — sadece **doğru komutları doğru sırada** çalıştırman lazım.
+
+### 🌅 Sabah / Çalışmaya başlarken (her PC'de):
+
+```bash
+cd C:\Users\gebze\Desktop\tgteknikcrm1
+git pull                    # diğer PC'deki değişiklikleri al
+npm install                 # yeni paket eklendiyse kur (yoksa hızlı geçer)
+npm run dev                 # http://localhost:3000
+```
+
+### 🌙 Akşam / Çalışmayı bitirirken (her PC'de):
+
+```bash
+git add -A
+git commit -m "wip: bugünkü iş - kısa açıklama"
+git push                    # GitHub'a yolla — diğer PC pull ile alacak
+```
+
+### 🆕 Yeni bir PC'de SIFIRDAN kurulum (bir kerelik):
+
+```bash
+# 1. Repo'yu klonla
+cd C:\Users\gebze\Desktop
+git clone https://github.com/tgteknikcrm/tgteknikcrm1.git
+cd tgteknikcrm1
+
+# 2. Vercel CLI kur ve doğru hesapla giriş
+npm install -g vercel
+vercel login                # Email ile giriş: tgteknikcrm@outlook.com
+vercel whoami               # → "tgteknikcrm" yazmalı
+vercel teams ls             # → "tgteknikcrms-projects" görünmeli
+
+# 3. Projeyi link et ve env'leri çek
+vercel link                 # scope: tgteknikcrm's projects, project: tgteknikcrm1
+vercel env pull .env.local  # .env.local dosyası otomatik oluşur
+
+# 4. Bağımlılıkları kur ve çalıştır
+npm install
+npm run dev
+```
+
+### 🔑 Hesap Bilgileri (referans)
+
+| Servis | Hesap | Notlar |
+|---|---|---|
+| GitHub | `tgteknikcrm` | Repo: github.com/tgteknikcrm/tgteknikcrm1 (public) |
+| Vercel | `tgteknikcrm` (email: tgteknikcrm@outlook.com) | Team: `tgteknikcrms-projects` |
+| Supabase | tgteknikcrm@outlook.com | Project: `qikxnbgfaangeyrxzxxl` (Frankfurt) |
+| Outlook | tgteknikcrm@outlook.com | Doğrulama mailleri buraya |
+
+### ⚠️ KRİTİK Kurallar
+
+1. **Her zaman `git pull` ile başla** — yoksa eski koddan devam edersin, akşam çakışma çıkar
+2. **Her zaman `git push` ile bitir** — yoksa diğer PC'de bugünkü işi göremezsin
+3. **`.env.local` git'e gitmez** (`.gitignore`'da) — her PC'de `vercel env pull` ile alınır
+4. **Supabase bulutta** — DB her iki PC'de aynı, ekstra kurulum yok
+5. **Yarım kalan iş varsa** → `git commit -m "wip: ..."` ile commit et ve push et, çekinme
+
+### 🔧 Yardımcı Komutlar
+
+```bash
+git status                  # nelerin değiştiğini gör
+git log --oneline -10       # son 10 commit
+vercel env pull .env.local --environment=production  # production env'i çek
+```
+
+---
+
 ## Ne Yapar Bu Uygulama?
 
 TG Teknik atölyesi için **web tabanlı PWA** — masaüstünden ve mobilden açılabilen üretim + satın alma + teknik resim takip sistemi.
