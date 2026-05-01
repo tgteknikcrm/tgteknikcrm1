@@ -255,6 +255,9 @@ tgteknikcrm/
 | 0027 | product_master_extended.sql | products tablosuna 24 yeni kolon (kategori, malzeme, yüzey/ısıl işlem, boyutlar, tolerans, proses, ticari) + product_images tablosu + 'product-images' public storage bucket + 3 enum (product_status / product_process / product_currency) |
 | 0028 | jobs_setup_steps.sql | job_status'a 'ayar' eklendi (beklemede ↔ uretimde arası) + jobs.started_at/setup_completed_at + products.parts_per_setup (aynı anda bağlanan adet, setup-count math'i için) |
 | 0029 | production_workflow_and_schedule.sql | products.cleanup_time_minutes (parça başı kapı açma+swap+temizlik) + production_entries.setup_minutes (ayar dakikası ayrı kolonda) + app_settings (key text PK, value jsonb) — work_schedule default seed (Pzt-Cum 540 dk + 60 dk yemek) + machine_timeline_entries.production_entry_id + production_entries UNIQUE INDEX (machine,date,shift,job_id) |
+| 0030 | machine_downtime_sync.sql | machine_downtime_sessions tablosu + `_close_open_downtime_session` + `_active_job_entry_for_machine` helpers + AFTER UPDATE OF status ON machines trigger — makine `aktif → durus/bakim/ariza` olunca session açar, `aktif`'e dönünce kapatır + elapsed dk'ı active job'ın production_entry.downtime_minutes'ına credit eder. v_machine_active_downtime view (security_invoker). |
+| 0031 | complete_job_rpc.sql | İki SECURITY DEFINER RPC: `soft_delete_message(uuid)` — RLS read-after-update sessiz 0-row trap'i bypass + spesifik errcodes (auth_required / not_your_message / message_not_found). `complete_job_rpc(uuid, int)` — atomik jobs.UPDATE + production_entries INSERT/UPDATE + setup backfill (started_at→setup_completed_at delta) + scrap validation. Her ikisi de authenticated grant. |
+| 0032 | messaging_rls_recursion_fix.sql | `is_conversation_participant` + yeni `is_conversation_admin` SECURITY DEFINER fonksiyonlarına `set row_security = off` eklendi → "infinite recursion detected in policy for relation conversation_participants" hatası bitti. Calendar 0021'de yapılan recursion fix'in messaging eşdeğeri. Eski "delete participants" + "insert participants" policy'leri inline subquery yerine helper kullanır. |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -468,7 +471,51 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 ---
 
-## Son commit (a3befa6 — 2026-04-30)
+## Son commitler (2026-05-01 — 4 turluk büyük revizyon)
+
+**Hepsi tek session'da yapıldı:** mesaj silme + iş tamamlama + canlı sayım + makine arıza anlık durdurma + RLS recursion fix.
+
+### Commit `19c3984` — Round 1: temel bug fix turu
+- **Mesajlar router.refresh-during-render** (`Cannot update a component while rendering a different component` console hatası): `setConversations` updater içinden `router.refresh()` çağrılıyordu, `queueMicrotask` ile dışına taşındı.
+- **Mesaj silme cache patch**: `MessagesClient`'a `applyMessageMutation(convId, msgId, patch)` callback eklendi, ChatPanel `onApplyMessageMutation` prop'uyla alıyor → silinince Realtime'a bel bağlamadan cache anında patch'leniyor.
+- **Scroll jitter** (geçişte yukarı-aşağı): `lastMsgCountRef` ile cache geç dolma case'i tespit edildi → 0→N geçişinde **smooth değil INSTANT** scroll.
+- **JobCard sil butonu** kart sağ üstüne eklendi (kırmızı çöp kutusu).
+- **"+ Üretim" + "Vardiya Kapat" kaldırıldı** — auto akışla yer değiştirdi.
+- **CompletionDialog** (yeni): Tamamla → modal SADECE hurda sorar → otomatik özet (planlanan/üretilen/ayar/duruş) gösterir → `produced = remaining - scrap`.
+- **setJobStep auto setup_minutes**: ayar→üretimde geçişinde elapsed dakikayı otomatik bugünkü entry'ye ekliyor.
+- **Migration 0030** (`machine_downtime_sync.sql`): machine_downtime_sessions tablosu + sync trigger.
+
+### Commit `862923f` — Round 2: canlı sayım + delete RLS-trap
+- **`calcLiveProduced` v1** types.ts'e: `setup_completed_at` + cycle + cleanup'tan client-side hesap.
+- **`useTick(10s)` hook**: üretimdeki kart 10 sn'de bir kendi kendine refresh.
+- **"Üretilen" stat'ı** üretimde'yken **"Canlı"** rozetiyle değişiyor; "Bugün" satırına CANLI rozeti + parça başına cycle ilerleme barı.
+- **deleteMessage** `.select().maybeSingle()` çıkarıldı (silent RLS read-after-update 0-row → haksız "yetki yok" toast'u veriyordu).
+
+### Commit `ec1f9a4` — Round 3: bulletproof RPC + makine-bilinçli ticker
+- **Migration 0031**: iki SECURITY DEFINER RPC.
+  - `soft_delete_message(uuid)` — RPC üzerinden silme, spesifik errcodes (auth_required / not_your_message / message_not_found). Client RPC çağırıp Türkçe çeviriyor.
+  - `complete_job_rpc(uuid, int)` — atomik jobs.UPDATE + production_entries INSERT/UPDATE + setup backfill + scrap validation.
+- **`calcLiveProduced` v2** machine-aware:
+  - `machineStatus`, `creditedDowntimeMinutes`, `openDowntimeStartedAt` parametreleri.
+  - Makine `aktif` değilse ticker `openDowntimeStartedAt`'te DONUYOR (sayfa refresh beklemeden).
+  - Cycle hesabı `entry.downtime_minutes`'ı çıkarıyor → kapanmış duruşları doğru hesaplar.
+  - "DURDU · Arızalı/Bakımda/Duruşta" rozeti CANLI yerine geçiyor.
+- **JobsShell Realtime**: `machines` + `machine_downtime_sessions` + `production_entries` herhangi birinde değişiklik → `router.refresh()`. Anlık güncellenir.
+- **Tamamlandı kart özeti**: yeni mavi şerit "Tamamlandı: X parça · Y fire · ⚙ Z dk ayar · ⏸ W dk duruş · tarih" — cross-shift toplam (user'ın "iş bittiğinde duruş süresi orada yazmalı" isteği).
+- **machines/actions.ts** `updateMachineStatus` `revalidatePath('/jobs')` ekledi (Realtime'ın backup'ı).
+- **JobsShell `activeDowntime` prop**: `v_machine_active_downtime` view'ından açık session'lar.
+
+### Commit (Round 4 — bu turda) — RLS recursion fix
+- **Migration 0032** (`messaging_rls_recursion_fix.sql`):
+  - User mesaj silmeye çalışırken "infinite recursion detected in policy for relation conversation_participants" alıyordu.
+  - Sebep: `is_conversation_participant` SECURITY DEFINER ama Supabase function owner BYPASSRLS değil → inner SELECT policy'i yine tetikliyor → recursion.
+  - Çözüm: function'a `set row_security = off` eklendi (calendar 0021 ile aynı pattern).
+  - Yeni `is_conversation_admin(conv_id, uid)` helper (admin kontrolü).
+  - `delete participants` + `insert participants` policy'leri inline subquery yerine helper kullanıyor.
+
+---
+
+## Önceki commit (a3befa6 — 2026-04-30)
 
 **İş akışı: auto-create üretim formu + cleanup time + takvim-bilinçli ETA + çalışma saatleri ayarı**
 
