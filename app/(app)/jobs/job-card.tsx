@@ -17,6 +17,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Activity,
   AlertTriangle,
   CalendarDays,
   CheckCircle2,
@@ -36,6 +37,7 @@ import { toast } from "sonner";
 import {
   calcEtaCalendarAware,
   calcJobTimeline,
+  calcLiveProduced,
   formatMinutes,
   JOB_STATUS_LABEL,
   JOB_STATUS_TONE,
@@ -90,6 +92,12 @@ export function JobCard({
   const [completionOpen, setCompletionOpen] = useState(false);
   const { job, product, operator, produced } = data;
 
+  // Re-render every 10 seconds so the live ticker on cards in the
+  // "uretimde" step stays current. setState bumps the React lane the
+  // same way a Realtime push would; we don't actually do anything in
+  // the body of the hook other than scheduling the wake-up.
+  useTick(job.status === "uretimde" ? 10_000 : 60_000);
+
   const isCancelled = job.status === "iptal";
   const stepIdx = jobStepIndex(job.status);
   const tone = JOB_STATUS_TONE[job.status];
@@ -101,6 +109,19 @@ export function JobCard({
     cleanupMinutes: product?.cleanup_time_minutes,
     setupMinutes: product?.setup_time_minutes,
     partsPerSetup: product?.parts_per_setup,
+  });
+
+  // Client-side live ticker: how many parts SHOULD have come off the
+  // machine since "Üretime Başla" was clicked, given the cycle time.
+  // Pure derived display; never written to the DB. Other clients see
+  // the same number because the inputs (timestamp + cycle) are shared.
+  const live = calcLiveProduced({
+    setupCompletedAt: job.setup_completed_at ?? null,
+    jobStatus: job.status,
+    cycleMinutes: product?.cycle_time_minutes,
+    cleanupMinutes: product?.cleanup_time_minutes,
+    alreadyProduced: produced,
+    quantity: job.quantity,
   });
 
   // Calendar-aware ETA: skips lunch + weekends + non-work days.
@@ -335,16 +356,38 @@ export function JobCard({
           value={job.quantity.toLocaleString("tr-TR")}
         />
         <Stat
-          icon={TrendingUp}
-          label="Üretilen"
-          value={`${produced.toLocaleString("tr-TR")}`}
-          tone={produced > 0 ? "emerald" : undefined}
-          subtitle={`%${timeline.progressPct.toFixed(0)}`}
+          icon={live.liveActive ? Activity : TrendingUp}
+          label={live.liveActive ? "Canlı" : "Üretilen"}
+          value={
+            live.liveActive
+              ? live.liveProduced.toLocaleString("tr-TR")
+              : produced.toLocaleString("tr-TR")
+          }
+          tone={
+            live.liveActive
+              ? "emerald"
+              : produced > 0
+                ? "emerald"
+                : undefined
+          }
+          subtitle={
+            live.liveActive
+              ? `Sıradaki %${live.pieceProgressPct.toFixed(0)}`
+              : `%${timeline.progressPct.toFixed(0)}`
+          }
+          pulse={live.liveActive}
         />
         <Stat
           icon={Hourglass}
           label="Kalan"
-          value={timeline.remaining.toLocaleString("tr-TR")}
+          value={
+            live.liveActive
+              ? Math.max(
+                  0,
+                  job.quantity - live.liveProduced,
+                ).toLocaleString("tr-TR")
+              : timeline.remaining.toLocaleString("tr-TR")
+          }
         />
         <Stat
           icon={CalendarDays}
@@ -427,33 +470,73 @@ export function JobCard({
         </div>
       )}
 
-      {/* Today's running entry summary — visible while work is in flight */}
+      {/* Today's running entry summary — visible while work is in flight.
+          During üretimde the produced count ticks live (every 10s) so
+          the operator/supervisor sees a number that matches what's
+          actually coming off the machine, not a stale "0". */}
       {!isCancelled &&
         (job.status === "ayar" || job.status === "uretimde") && (
-          <div className="rounded-md bg-muted/40 border px-2 py-1.5 mb-2 flex items-center gap-2 text-[10px] flex-wrap">
-            <span className="font-bold uppercase tracking-wider text-muted-foreground">
-              Bugün:
-            </span>
-            <span className="tabular-nums">
-              <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
-                {data.todayProduced}
-              </span>{" "}
-              parça
-            </span>
-            {data.todayScrap > 0 && (
-              <span className="tabular-nums text-amber-700 dark:text-amber-300">
-                · {data.todayScrap} fire
-              </span>
+          <div
+            className={cn(
+              "rounded-md border px-2 py-1.5 mb-2 space-y-1",
+              live.liveActive
+                ? "bg-emerald-500/5 border-emerald-500/30"
+                : "bg-muted/40",
             )}
-            {data.todaySetup > 0 && (
+          >
+            <div className="flex items-center gap-2 text-[10px] flex-wrap">
+              <span className="font-bold uppercase tracking-wider text-muted-foreground">
+                Bugün:
+              </span>
               <span className="tabular-nums">
-                · ⚙ {data.todaySetup}dk ayar
+                <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
+                  {live.liveActive
+                    ? data.todayProduced +
+                      (live.liveProduced - produced)
+                    : data.todayProduced}
+                </span>{" "}
+                parça
+                {live.liveActive && (
+                  <span className="ml-1 inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    CANLI
+                  </span>
+                )}
               </span>
-            )}
-            {data.todayDowntime > 0 && (
-              <span className="tabular-nums text-rose-700 dark:text-rose-300">
-                · ⏸ {data.todayDowntime}dk duruş
-              </span>
+              {data.todayScrap > 0 && (
+                <span className="tabular-nums text-amber-700 dark:text-amber-300">
+                  · {data.todayScrap} fire
+                </span>
+              )}
+              {data.todaySetup > 0 && (
+                <span className="tabular-nums">
+                  · ⚙ {data.todaySetup}dk ayar
+                </span>
+              )}
+              {data.todayDowntime > 0 && (
+                <span className="tabular-nums text-rose-700 dark:text-rose-300">
+                  · ⏸ {data.todayDowntime}dk duruş
+                </span>
+              )}
+            </div>
+            {live.liveActive && live.effectiveCycleMin > 0 && (
+              <div className="space-y-0.5">
+                <div className="h-1 rounded-full bg-emerald-500/15 overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 transition-[width] duration-700"
+                    style={{
+                      width: `${Math.min(100, live.pieceProgressPct)}%`,
+                    }}
+                  />
+                </div>
+                <div className="text-[9px] text-muted-foreground tabular-nums flex items-center justify-between">
+                  <span>
+                    Sıradaki parça · cycle{" "}
+                    {live.effectiveCycleMin.toFixed(1)} dk
+                  </span>
+                  <span>%{live.pieceProgressPct.toFixed(0)}</span>
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -718,18 +801,38 @@ function SumRow({
   );
 }
 
+/**
+ * Force the host component to re-render every `intervalMs`. Used to
+ * keep the live "Şu an" ticker on JobCard fresh without manual
+ * polling or a Realtime channel.
+ *
+ * Cleans up its interval on unmount and when the period changes (e.g.
+ * jobs that aren't actively producing tick less aggressively).
+ */
+function useTick(intervalMs: number) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => {
+      setTick((x) => (x + 1) & 0x7fffffff);
+    }, intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs]);
+}
+
 function Stat({
   icon: Icon,
   label,
   value,
   subtitle,
   tone,
+  pulse = false,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string;
   subtitle?: string;
   tone?: "emerald" | "rose" | "amber";
+  pulse?: boolean;
 }) {
   const toneClass =
     tone === "emerald"
@@ -740,9 +843,19 @@ function Stat({
           ? "text-amber-700 dark:text-amber-300"
           : "";
   return (
-    <div className="rounded-md bg-muted/40 px-2 py-1.5 min-w-0">
+    <div
+      className={cn(
+        "rounded-md bg-muted/40 px-2 py-1.5 min-w-0 relative",
+        pulse && "ring-1 ring-emerald-500/40 bg-emerald-500/5",
+      )}
+    >
       <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-muted-foreground font-bold">
-        <Icon className="size-2.5" />
+        <Icon
+          className={cn(
+            "size-2.5",
+            pulse && "text-emerald-600 dark:text-emerald-400 animate-pulse",
+          )}
+        />
         {label}
       </div>
       <div className={cn("text-sm font-semibold tabular-nums truncate", toneClass)}>

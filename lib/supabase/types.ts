@@ -244,6 +244,85 @@ export function calcJobTimeline(input: {
   };
 }
 
+/**
+ * Live "kaç parça üretildi şimdiye kadar" estimate.
+ *
+ * Source of truth for already-produced is production_entries — but
+ * those entries only get bumped at the end of the run (Tamamla) or
+ * via manual + Üretim. Between those two events the operator wants
+ * to see a number that ticks up in real time so the card doesn't
+ * feel frozen.
+ *
+ * We compute it client-side from `setup_completed_at` (the moment
+ * "Üretime Başla" was clicked) plus the product's cycle and cleanup
+ * minutes. This is a derived number — it never gets written to the
+ * DB. Other clients seeing the same job will compute the same value
+ * because they all read the same anchor + cycle time.
+ *
+ * Capped at quantity so the estimate doesn't run past 100%.
+ */
+export function calcLiveProduced(input: {
+  setupCompletedAt: string | null | undefined;
+  jobStatus: JobStatus;
+  cycleMinutes: number | null | undefined;
+  cleanupMinutes: number | null | undefined;
+  alreadyProduced: number;
+  quantity: number;
+  now?: Date;
+}): {
+  liveProduced: number;
+  pieceProgressPct: number; // 0..100 toward the next piece
+  effectiveCycleMin: number;
+  liveActive: boolean;
+} {
+  const cycle = Math.max(0, input.cycleMinutes ?? 0);
+  const cleanup = Math.max(0, input.cleanupMinutes ?? 0);
+  const effectiveCycleMin = cycle + cleanup;
+  const remaining = Math.max(
+    0,
+    input.quantity - Math.max(0, input.alreadyProduced),
+  );
+
+  // Only tick while we're actually in the production step.
+  const liveActive =
+    input.jobStatus === "uretimde" &&
+    !!input.setupCompletedAt &&
+    effectiveCycleMin > 0 &&
+    remaining > 0;
+
+  if (!liveActive) {
+    return {
+      liveProduced: input.alreadyProduced,
+      pieceProgressPct: 0,
+      effectiveCycleMin,
+      liveActive: false,
+    };
+  }
+
+  const now = input.now ?? new Date();
+  const elapsedMin = Math.max(
+    0,
+    (now.getTime() - new Date(input.setupCompletedAt!).getTime()) / 60_000,
+  );
+  const wholePieces = Math.floor(elapsedMin / effectiveCycleMin);
+  const remainderMin = elapsedMin - wholePieces * effectiveCycleMin;
+  const pieceProgressPct = Math.min(
+    100,
+    (remainderMin / effectiveCycleMin) * 100,
+  );
+  const liveProduced = Math.min(
+    input.alreadyProduced + wholePieces,
+    input.alreadyProduced + remaining,
+  );
+
+  return {
+    liveProduced,
+    pieceProgressPct,
+    effectiveCycleMin,
+    liveActive: true,
+  };
+}
+
 /** Friendly "2 sa 30 dk" / "45 dk" / "1 g 4 sa" formatter. */
 export function formatMinutes(mins: number): string {
   if (!mins || mins <= 0) return "0 dk";

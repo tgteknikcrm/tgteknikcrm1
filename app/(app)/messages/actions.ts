@@ -249,19 +249,23 @@ export async function editMessage(messageId: string, body: string) {
 }
 
 export async function deleteMessage(messageId: string) {
-  const { supabase, error } = await requireUser();
+  const { supabase, user, error } = await requireUser();
   if (error) return { error };
-  // .select() forces affected-row return so a 0-row update (RLS denied
-  // — trying to delete someone else's message — or wrong id) surfaces
-  // as an explicit error instead of silent success.
-  const { data, error: e } = await supabase
+  // We deliberately DON'T do .select().maybeSingle() here:
+  // the RLS-read-after-update behaviour can return 0 rows even when
+  // the UPDATE itself succeeded, producing a misleading "yetki yok"
+  // toast (the silent-RLS-trap inverse). For messages the UI only
+  // exposes Sil on the user's own bubble, so the "delete someone
+  // else's message" attack surface doesn't exist.
+  //
+  // Defensive: scope the update with author_id = user.id so even if
+  // someone bypasses the UI they cannot soft-delete others' messages.
+  const { error: e } = await supabase
     .from("messages")
     .update({ deleted_at: new Date().toISOString(), body: null })
     .eq("id", messageId)
-    .select("id")
-    .maybeSingle();
+    .eq("author_id", user.id);
   if (e) return { error: e.message };
-  if (!data) return { error: "Bu mesaj silinemedi (yetki yok ya da bulunamadı)" };
   return { success: true };
 }
 
