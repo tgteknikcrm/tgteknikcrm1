@@ -249,31 +249,49 @@ export function calcJobTimeline(input: {
  *
  * Source of truth for already-produced is production_entries — but
  * those entries only get bumped at the end of the run (Tamamla) or
- * via manual + Üretim. Between those two events the operator wants
- * to see a number that ticks up in real time so the card doesn't
- * feel frozen.
+ * via the auto-downtime trigger. Between those events the operator
+ * wants a number that ticks up in real time.
  *
- * We compute it client-side from `setup_completed_at` (the moment
- * "Üretime Başla" was clicked) plus the product's cycle and cleanup
- * minutes. This is a derived number — it never gets written to the
- * DB. Other clients seeing the same job will compute the same value
- * because they all read the same anchor + cycle time.
+ * Math:
+ *   elapsedMin = (clock - setup_completed_at) / 60
+ *   - subtract creditedDowntimeMin (already on the entry)
+ *   - if a downtime session is OPEN now, freeze elapsed at the
+ *     moment the session started so we don't keep "producing" while
+ *     the machine is in arıza/bakım/durus.
+ *   pieces = floor(effective / (cycle + cleanup))
  *
- * Capped at quantity so the estimate doesn't run past 100%.
+ * Capped at quantity. Returns liveActive=false when the machine is
+ * stopped so the UI can render a "DURDU" pill instead of the green
+ * pulse.
  */
 export function calcLiveProduced(input: {
   setupCompletedAt: string | null | undefined;
   jobStatus: JobStatus;
+  machineStatus?: MachineStatus | null;
   cycleMinutes: number | null | undefined;
   cleanupMinutes: number | null | undefined;
   alreadyProduced: number;
   quantity: number;
+  /**
+   * Downtime minutes already credited to today's production_entry
+   * (closed sessions). The trigger writes this on session close;
+   * we subtract it from elapsed.
+   */
+  creditedDowntimeMinutes?: number;
+  /**
+   * If a downtime session is currently OPEN for this machine, the
+   * timestamp it started at. We freeze elapsed at this instant so
+   * the live ticker stops while the machine is down — even before
+   * the trigger has had a chance to credit the closed session.
+   */
+  openDowntimeStartedAt?: string | null | undefined;
   now?: Date;
 }): {
   liveProduced: number;
   pieceProgressPct: number; // 0..100 toward the next piece
   effectiveCycleMin: number;
   liveActive: boolean;
+  stoppedReason: MachineStatus | null;
 } {
   const cycle = Math.max(0, input.cycleMinutes ?? 0);
   const cleanup = Math.max(0, input.cleanupMinutes ?? 0);
@@ -282,44 +300,61 @@ export function calcLiveProduced(input: {
     0,
     input.quantity - Math.max(0, input.alreadyProduced),
   );
+  const isMachineDown =
+    input.machineStatus != null && input.machineStatus !== "aktif";
+  const stoppedReason = isMachineDown
+    ? (input.machineStatus as MachineStatus)
+    : null;
 
-  // Only tick while we're actually in the production step.
-  const liveActive =
+  const baseEligible =
     input.jobStatus === "uretimde" &&
     !!input.setupCompletedAt &&
-    effectiveCycleMin > 0 &&
-    remaining > 0;
+    effectiveCycleMin > 0;
 
-  if (!liveActive) {
+  if (!baseEligible) {
     return {
       liveProduced: input.alreadyProduced,
       pieceProgressPct: 0,
       effectiveCycleMin,
       liveActive: false,
+      stoppedReason,
     };
   }
 
   const now = input.now ?? new Date();
-  const elapsedMin = Math.max(
+  // Anchor the "current" timestamp at the moment downtime started, so
+  // the live ticker freezes the second the operator flips the machine
+  // away from aktif (no need to wait for the page to refresh).
+  const ceilingMs =
+    isMachineDown && input.openDowntimeStartedAt
+      ? Math.min(
+          now.getTime(),
+          new Date(input.openDowntimeStartedAt).getTime(),
+        )
+      : now.getTime();
+
+  const grossElapsedMin = Math.max(
     0,
-    (now.getTime() - new Date(input.setupCompletedAt!).getTime()) / 60_000,
+    (ceilingMs - new Date(input.setupCompletedAt!).getTime()) / 60_000,
   );
-  const wholePieces = Math.floor(elapsedMin / effectiveCycleMin);
-  const remainderMin = elapsedMin - wholePieces * effectiveCycleMin;
+  const credited = Math.max(0, input.creditedDowntimeMinutes ?? 0);
+  const effectiveMin = Math.max(0, grossElapsedMin - credited);
+
+  const wholePieces = Math.floor(effectiveMin / effectiveCycleMin);
+  const remainderMin = effectiveMin - wholePieces * effectiveCycleMin;
   const pieceProgressPct = Math.min(
     100,
     (remainderMin / effectiveCycleMin) * 100,
   );
-  const liveProduced = Math.min(
-    input.alreadyProduced + wholePieces,
-    input.alreadyProduced + remaining,
-  );
+  const cappedPieces = Math.min(wholePieces, remaining);
+  const liveProduced = input.alreadyProduced + cappedPieces;
 
   return {
     liveProduced,
-    pieceProgressPct,
+    pieceProgressPct: isMachineDown ? 0 : pieceProgressPct,
     effectiveCycleMin,
-    liveActive: true,
+    liveActive: !isMachineDown && remaining > 0,
+    stoppedReason,
   };
 }
 

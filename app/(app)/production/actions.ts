@@ -158,116 +158,49 @@ export async function addSetupMinutesToToday(args: {
  */
 export async function completeJob(args: { job_id: string; scrap: number }) {
   const supabase = await createClient();
-  const scrap = Math.max(0, args.scrap | 0);
+  const scrap = Math.max(0, Math.floor(args.scrap || 0));
 
-  const { data: job, error: jErr } = await supabase
-    .from("jobs")
-    .select(
-      "id, machine_id, operator_id, quantity, status, started_at, setup_completed_at",
-    )
-    .eq("id", args.job_id)
-    .single();
-  if (jErr || !job) return { error: jErr?.message ?? "İş bulunamadı" };
-  if (!job.machine_id) {
-    return { error: "İşin makinesi atanmamış" };
-  }
-  if (job.status === "tamamlandi") {
-    return { error: "Bu iş zaten tamamlandı" };
-  }
-
-  // How many parts have already been logged across all entries?
-  const { data: allEntries } = await supabase
-    .from("production_entries")
-    .select("produced_qty")
-    .eq("job_id", args.job_id);
-  const alreadyProduced = (allEntries ?? []).reduce(
-    (s, e) => s + (e.produced_qty ?? 0),
-    0,
-  );
-  const remaining = Math.max(0, job.quantity - alreadyProduced);
-  if (scrap > remaining) {
-    return {
-      error: `Hurda kalan adetten (${remaining}) fazla olamaz`,
-    };
-  }
-  const finalProduced = Math.max(0, remaining - scrap);
-
-  // Open / find today's entry
-  const ensured = await ensureTodayOpenEntry({
-    machine_id: job.machine_id,
-    job_id: args.job_id,
-    operator_id: job.operator_id ?? null,
+  // Atomic RPC — handles jobs UPDATE + production_entries INSERT/UPDATE
+  // in one transaction with SECURITY DEFINER, so RLS edge-cases on
+  // either table can never leave us with a half-completed state.
+  const { data, error } = await supabase.rpc("complete_job_rpc", {
+    p_job_id: args.job_id,
+    p_scrap: scrap,
   });
-  if ("error" in ensured) return ensured;
-
-  // Read current cumulative values so we can append (idempotent re-clicks).
-  const { data: cur } = await supabase
-    .from("production_entries")
-    .select("produced_qty, scrap_qty, setup_minutes")
-    .eq("id", ensured.id)
-    .single();
-
-  // If setup hasn't been recorded yet (e.g. user skipped "Üretime
-  // Başla" and went straight to "Tamamla"), opportunistically backfill
-  // from started_at → setup_completed_at delta if both are present.
-  let extraSetup = 0;
-  if (
-    job.started_at &&
-    job.setup_completed_at &&
-    (cur?.setup_minutes ?? 0) === 0
-  ) {
-    extraSetup = Math.max(
-      0,
-      Math.floor(
-        (new Date(job.setup_completed_at).getTime() -
-          new Date(job.started_at).getTime()) /
-          60000,
-      ),
-    );
+  if (error) {
+    const msg = error.message || "";
+    if (msg.includes("auth_required")) return { error: "Giriş gerekli" };
+    if (msg.includes("job_not_found")) return { error: "İş bulunamadı" };
+    if (msg.includes("job_no_machine")) {
+      return { error: "İşin makinesi atanmamış — önce makine ata" };
+    }
+    if (msg.includes("job_already_done")) {
+      return { error: "Bu iş zaten tamamlandı" };
+    }
+    if (msg.includes("scrap_exceeds_remaining")) {
+      return { error: "Hurda kalan adetten fazla olamaz" };
+    }
+    return { error: msg };
   }
-
-  const nowHHMM = new Intl.DateTimeFormat("tr-TR", {
-    timeZone: "Europe/Istanbul",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date());
-
-  const updates = {
-    produced_qty: (cur?.produced_qty ?? 0) + finalProduced,
-    scrap_qty: (cur?.scrap_qty ?? 0) + scrap,
-    setup_minutes: (cur?.setup_minutes ?? 0) + extraSetup,
-    end_time: nowHHMM,
-  };
-  const { error: uErr } = await supabase
-    .from("production_entries")
-    .update(updates)
-    .eq("id", ensured.id);
-  if (uErr) return { error: uErr.message };
-
-  // Mark the job complete + stamp wall-clock
-  const nowIso = new Date().toISOString();
-  const { error: jUpd } = await supabase
-    .from("jobs")
-    .update({ status: "tamamlandi", completed_at: nowIso })
-    .eq("id", args.job_id);
-  if (jUpd) return { error: jUpd.message };
-
-  // Close any open downtime session — work has stopped here.
-  // Trigger sync_machine_downtime closes on aktif transition; we don't
-  // touch the machine status, so any open session keeps running until
-  // the operator flips status. That's intentional: completing this job
-  // doesn't mean the machine is now aktif.
 
   revalidatePath("/jobs");
   revalidatePath("/production");
   revalidatePath("/dashboard");
   revalidatePath("/machines");
+
+  type RpcResult = {
+    success: boolean;
+    entry_id: string;
+    produced: number;
+    scrap: number;
+    setup_minutes_added: number;
+  };
+  const r = (data ?? {}) as Partial<RpcResult>;
   return {
     success: true,
-    produced: finalProduced,
-    scrap,
-    setup_minutes_added: extraSetup,
+    produced: r.produced ?? 0,
+    scrap: r.scrap ?? scrap,
+    setup_minutes_added: r.setup_minutes_added ?? 0,
   };
 }
 

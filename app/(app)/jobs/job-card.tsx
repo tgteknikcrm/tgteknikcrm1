@@ -43,8 +43,10 @@ import {
   JOB_STATUS_TONE,
   JOB_STEPS,
   jobStepIndex,
+  MACHINE_STATUS_LABEL,
   type Job,
   type JobStatus,
+  type MachineStatus,
   type Operator,
   type Product,
   type WorkSchedule,
@@ -54,7 +56,7 @@ import { completeJob } from "../production/actions";
 import { JobDialog } from "./job-dialog";
 import { cn } from "@/lib/utils";
 
-interface JobCardData {
+export interface JobCardData {
   job: Job;
   product: Pick<
     Product,
@@ -68,10 +70,20 @@ interface JobCardData {
   > | null;
   operator: Pick<Operator, "id" | "full_name"> | null;
   produced: number;
+  /** Today's open production_entry stats (current shift). */
   todayProduced: number;
   todayScrap: number;
   todayDowntime: number;
   todaySetup: number;
+  /** Cross-shift cumulative — used in the completion summary. */
+  totalScrap: number;
+  totalSetup: number;
+  totalDowntime: number;
+  /** Machine status drives the live-ticker freeze. */
+  machineStatus: MachineStatus | null;
+  /** If a downtime session is open right now, the moment it started. */
+  openDowntimeStartedAt: string | null;
+  openDowntimeStatus: MachineStatus | null;
 }
 
 export function JobCard({
@@ -114,14 +126,22 @@ export function JobCard({
   // Client-side live ticker: how many parts SHOULD have come off the
   // machine since "Üretime Başla" was clicked, given the cycle time.
   // Pure derived display; never written to the DB. Other clients see
-  // the same number because the inputs (timestamp + cycle) are shared.
+  // the same number because the inputs (timestamp + cycle + downtime)
+  // are shared.
+  //
+  // Now machine-aware: if the machine is in arıza/bakım/durus the
+  // ticker freezes at the moment the downtime session opened, so the
+  // operator's UI matches reality without waiting for a refresh.
   const live = calcLiveProduced({
     setupCompletedAt: job.setup_completed_at ?? null,
     jobStatus: job.status,
+    machineStatus: data.machineStatus,
     cycleMinutes: product?.cycle_time_minutes,
     cleanupMinutes: product?.cleanup_time_minutes,
     alreadyProduced: produced,
     quantity: job.quantity,
+    creditedDowntimeMinutes: data.totalDowntime,
+    openDowntimeStartedAt: data.openDowntimeStartedAt,
   });
 
   // Calendar-aware ETA: skips lunch + weekends + non-work days.
@@ -473,7 +493,9 @@ export function JobCard({
       {/* Today's running entry summary — visible while work is in flight.
           During üretimde the produced count ticks live (every 10s) so
           the operator/supervisor sees a number that matches what's
-          actually coming off the machine, not a stale "0". */}
+          actually coming off the machine. The moment the machine flips
+          to arıza/bakım/durus, the ticker freezes and a stop banner
+          replaces the green pulse. */}
       {!isCancelled &&
         (job.status === "ayar" || job.status === "uretimde") && (
           <div
@@ -481,7 +503,9 @@ export function JobCard({
               "rounded-md border px-2 py-1.5 mb-2 space-y-1",
               live.liveActive
                 ? "bg-emerald-500/5 border-emerald-500/30"
-                : "bg-muted/40",
+                : live.stoppedReason
+                  ? "bg-rose-500/5 border-rose-500/30"
+                  : "bg-muted/40",
             )}
           >
             <div className="flex items-center gap-2 text-[10px] flex-wrap">
@@ -489,17 +513,27 @@ export function JobCard({
                 Bugün:
               </span>
               <span className="tabular-nums">
-                <span className="text-emerald-700 dark:text-emerald-300 font-semibold">
-                  {live.liveActive
-                    ? data.todayProduced +
-                      (live.liveProduced - produced)
-                    : data.todayProduced}
+                <span
+                  className={cn(
+                    "font-semibold",
+                    live.stoppedReason
+                      ? "text-rose-700 dark:text-rose-300"
+                      : "text-emerald-700 dark:text-emerald-300",
+                  )}
+                >
+                  {data.todayProduced + (live.liveProduced - produced)}
                 </span>{" "}
                 parça
                 {live.liveActive && (
                   <span className="ml-1 inline-flex items-center gap-1 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
                     <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     CANLI
+                  </span>
+                )}
+                {live.stoppedReason && (
+                  <span className="ml-1 inline-flex items-center gap-1 text-[9px] font-bold text-rose-700 dark:text-rose-300">
+                    <span className="size-1.5 rounded-full bg-rose-500 animate-pulse" />
+                    DURDU · {MACHINE_STATUS_LABEL[live.stoppedReason]}
                   </span>
                 )}
               </span>
@@ -513,9 +547,23 @@ export function JobCard({
                   · ⚙ {data.todaySetup}dk ayar
                 </span>
               )}
-              {data.todayDowntime > 0 && (
+              {(data.todayDowntime > 0 || data.openDowntimeStartedAt) && (
                 <span className="tabular-nums text-rose-700 dark:text-rose-300">
-                  · ⏸ {data.todayDowntime}dk duruş
+                  · ⏸{" "}
+                  {data.todayDowntime +
+                    (data.openDowntimeStartedAt
+                      ? Math.max(
+                          0,
+                          Math.floor(
+                            (Date.now() -
+                              new Date(
+                                data.openDowntimeStartedAt,
+                              ).getTime()) /
+                              60000,
+                          ),
+                        )
+                      : 0)}
+                  dk duruş
                 </span>
               )}
             </div>
@@ -540,6 +588,45 @@ export function JobCard({
             )}
           </div>
         )}
+
+      {/* Completed-job summary — shows accumulated stats from ALL
+          shifts (not just today). The user explicitly asked: "iş
+          bittiğinde bu arıza duruş süresi orada yazmalıdır". */}
+      {!isCancelled && job.status === "tamamlandi" && (
+        <div className="rounded-md border bg-blue-500/5 border-blue-500/30 px-2 py-1.5 mb-2 flex items-center gap-2 text-[10px] flex-wrap">
+          <span className="font-bold uppercase tracking-wider text-blue-700 dark:text-blue-300">
+            Tamamlandı:
+          </span>
+          <span className="tabular-nums text-emerald-700 dark:text-emerald-300 font-semibold">
+            {produced} parça
+          </span>
+          {data.totalScrap > 0 && (
+            <span className="tabular-nums text-amber-700 dark:text-amber-300">
+              · {data.totalScrap} fire
+            </span>
+          )}
+          {data.totalSetup > 0 && (
+            <span className="tabular-nums">
+              · ⚙ {data.totalSetup}dk ayar
+            </span>
+          )}
+          {data.totalDowntime > 0 && (
+            <span className="tabular-nums text-rose-700 dark:text-rose-300">
+              · ⏸ {data.totalDowntime}dk duruş
+            </span>
+          )}
+          {job.completed_at && (
+            <span className="ml-auto text-muted-foreground">
+              {new Date(job.completed_at).toLocaleString("tr-TR", {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Bottom row: due date + operator + actions */}
       <div className="flex items-center justify-between gap-2 pt-2 border-t flex-wrap">

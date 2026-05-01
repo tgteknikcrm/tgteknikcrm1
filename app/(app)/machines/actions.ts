@@ -129,5 +129,8 @@ export async function updateMachineStatus(id: string, status: MachineStatus) {
   revalidatePath("/machines");
   revalidatePath(`/machines/${id}`);
   revalidatePath("/dashboard");
+  // Job cards on /jobs need to know the machine status changed so the
+  // live-ticker freeze on running jobs activates immediately.
+  revalidatePath("/jobs");
   return { success: true };
 }

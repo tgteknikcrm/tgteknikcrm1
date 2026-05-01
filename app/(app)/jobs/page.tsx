@@ -7,7 +7,7 @@ import type {
   Product,
   ProductionEntry,
 } from "@/lib/supabase/types";
-import { JobsShell } from "./jobs-shell";
+import { JobsShell, type ActiveDowntimeRow } from "./jobs-shell";
 import {
   computeJobsRange,
   type JobsPeriod,
@@ -61,6 +61,7 @@ export default async function JobsPage({
     | "entry_date"
     | "created_at"
   >[] = [];
+  let activeDowntime: ActiveDowntimeRow[] = [];
   const workSchedule = await getWorkSchedule();
 
   try {
@@ -73,17 +74,25 @@ export default async function JobsPage({
     if (fromIso) jq = jq.gte("created_at", fromIso);
     if (toIso) jq = jq.lte("created_at", toIso);
 
-    const [jRes, mRes, oRes, pRes] = await Promise.all([
+    const [jRes, mRes, oRes, pRes, adRes] = await Promise.all([
       jq,
       supabase.from("machines").select("*").order("name"),
       supabase.from("operators").select("*").order("full_name"),
       supabase.from("products").select("*").order("code"),
+      // Open downtime sessions per machine — drives the live ticker
+      // freeze so cards show "DURDU" the moment a machine flips to
+      // arıza/bakım/durus, before the trigger has even credited the
+      // entry.
+      supabase
+        .from("v_machine_active_downtime")
+        .select("machine_id, status, started_at, job_id, production_entry_id"),
     ]);
 
     jobs = (jRes.data ?? []) as Job[];
     machines = (mRes.data ?? []) as Machine[];
     operators = (oRes.data ?? []) as Operator[];
     products = (pRes.data ?? []) as Product[];
+    activeDowntime = (adRes.data ?? []) as ActiveDowntimeRow[];
 
     // Pull production entries only for the visible jobs to keep the
     // payload tight. Done counts come from sum(produced_qty).
@@ -108,6 +117,7 @@ export default async function JobsPage({
       operators={operators}
       products={products}
       productionEntries={productionEntries}
+      activeDowntime={activeDowntime}
       initialRange={range}
       workSchedule={workSchedule}
     />

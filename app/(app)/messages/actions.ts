@@ -249,23 +249,33 @@ export async function editMessage(messageId: string, body: string) {
 }
 
 export async function deleteMessage(messageId: string) {
-  const { supabase, user, error } = await requireUser();
+  const { supabase, error } = await requireUser();
   if (error) return { error };
-  // We deliberately DON'T do .select().maybeSingle() here:
-  // the RLS-read-after-update behaviour can return 0 rows even when
-  // the UPDATE itself succeeded, producing a misleading "yetki yok"
-  // toast (the silent-RLS-trap inverse). For messages the UI only
-  // exposes Sil on the user's own bubble, so the "delete someone
-  // else's message" attack surface doesn't exist.
-  //
-  // Defensive: scope the update with author_id = user.id so even if
-  // someone bypasses the UI they cannot soft-delete others' messages.
-  const { error: e } = await supabase
-    .from("messages")
-    .update({ deleted_at: new Date().toISOString(), body: null })
-    .eq("id", messageId)
-    .eq("author_id", user.id);
-  if (e) return { error: e.message };
+  // RPC route — SECURITY DEFINER on the server side, so the silent
+  // RLS-read-after-update trap that was producing "yetki yok"
+  // toasts on legitimate deletes is bypassed entirely. The function
+  // raises specific errcodes that we map to friendly Turkish here.
+  const { data, error: e } = await supabase.rpc("soft_delete_message", {
+    p_message_id: messageId,
+  });
+  if (e) {
+    const msg = e.message || "";
+    if (msg.includes("not_your_message")) {
+      return { error: "Sadece kendi mesajını silebilirsin" };
+    }
+    if (msg.includes("message_not_found")) {
+      return { error: "Mesaj bulunamadı (zaten silinmiş olabilir)" };
+    }
+    if (msg.includes("auth_required")) {
+      return { error: "Giriş gerekli" };
+    }
+    return { error: msg };
+  }
+  // Defensive: RPC returned but somehow with no rows (shouldn't happen
+  // — RPC raises on every failure path).
+  if (!data || (Array.isArray(data) && data.length === 0)) {
+    return { error: "Beklenmeyen hata: mesaj silinemedi" };
+  }
   return { success: true };
 }
 

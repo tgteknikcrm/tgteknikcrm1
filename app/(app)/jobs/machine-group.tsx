@@ -17,7 +17,7 @@ import {
   type Product,
   type WorkSchedule,
 } from "@/lib/supabase/types";
-import { JobCard } from "./job-card";
+import { JobCard, type JobCardData } from "./job-card";
 import { cn } from "@/lib/utils";
 
 const STATUS_ICON: Record<MachineStatus, React.ComponentType<{ className?: string }>> = {
@@ -53,26 +53,6 @@ const STATUS_TONE: Record<MachineStatus, { ring: string; bg: string; text: strin
     dot: "bg-rose-500",
   },
 };
-
-interface JobCardData {
-  job: import("@/lib/supabase/types").Job;
-  product: Pick<
-    Product,
-    | "id"
-    | "code"
-    | "name"
-    | "cycle_time_minutes"
-    | "cleanup_time_minutes"
-    | "setup_time_minutes"
-    | "parts_per_setup"
-  > | null;
-  operator: Pick<Operator, "id" | "full_name"> | null;
-  produced: number;
-  todayProduced: number;
-  todayScrap: number;
-  todayDowntime: number;
-  todaySetup: number;
-}
 
 export function MachineGroup({
   machine,

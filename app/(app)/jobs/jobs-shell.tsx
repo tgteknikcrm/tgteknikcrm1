@@ -24,11 +24,13 @@ import {
   formatMinutes,
   type Job,
   type Machine,
+  type MachineStatus,
   type Operator,
   type Product,
   type ProductionEntry,
   type WorkSchedule,
 } from "@/lib/supabase/types";
+import { createClient } from "@/lib/supabase/client";
 import { JobDialog } from "./job-dialog";
 import { MachineGroup } from "./machine-group";
 import { DateRangeFilter } from "./date-range-filter";
@@ -38,6 +40,15 @@ import {
   type JobsRange,
 } from "./jobs-range";
 import { cn } from "@/lib/utils";
+
+/** Row from v_machine_active_downtime view — one per OPEN session. */
+export interface ActiveDowntimeRow {
+  machine_id: string;
+  status: MachineStatus;
+  started_at: string;
+  job_id: string | null;
+  production_entry_id: string | null;
+}
 
 interface Props {
   jobs: Job[];
@@ -55,6 +66,7 @@ interface Props {
     | "entry_date"
     | "created_at"
   >[];
+  activeDowntime?: ActiveDowntimeRow[];
   initialRange: JobsRange;
   workSchedule?: WorkSchedule;
 }
@@ -65,6 +77,7 @@ export function JobsShell({
   operators,
   products,
   productionEntries,
+  activeDowntime = [],
   initialRange,
   workSchedule = DEFAULT_WORK_SCHEDULE,
 }: Props) {
@@ -73,6 +86,44 @@ export function JobsShell({
   const searchParams = useSearchParams();
   const [range, setRange] = useState<JobsRange>(initialRange);
   const [q, setQ] = useState("");
+
+  // ── Realtime: when a machine flips status (e.g. operator starts a
+  // breakdown from /machines or /breakdowns), or a downtime session
+  // opens/closes, refresh the page so cards reflect the new state
+  // immediately. The user's complaint "anlık olarak durması gerekir
+  // sayfa yenilendiğinde değil" — this is the fix.
+  useEffect(() => {
+    const supabase = createClient();
+    const ch = supabase
+      .channel("jobs-machine-status")
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "machines" },
+        () => router.refresh(),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "machine_downtime_sessions",
+        },
+        () => router.refresh(),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "production_entries",
+        },
+        () => router.refresh(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [router]);
 
   // Sync URL on range change so refresh preserves the view.
   useEffect(() => {
@@ -102,15 +153,53 @@ export function JobsShell({
     [operators],
   );
 
-  // Sum produced per job from production_entries.
-  const producedByJob = useMemo(() => {
-    const m = new Map<string, number>();
+  // Sum produced + total stats per job from production_entries.
+  // totalDowntime is what we subtract from elapsed in calcLiveProduced
+  // (it's the time the trigger has already credited from closed
+  // sessions). totalSetup/totalScrap power the completed-job summary.
+  const aggByJob = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        produced: number;
+        scrap: number;
+        setup: number;
+        downtime: number;
+      }
+    >();
     for (const e of productionEntries) {
       if (!e.job_id) continue;
-      m.set(e.job_id, (m.get(e.job_id) ?? 0) + (e.produced_qty ?? 0));
+      const cur = m.get(e.job_id) ?? {
+        produced: 0,
+        scrap: 0,
+        setup: 0,
+        downtime: 0,
+      };
+      cur.produced += e.produced_qty ?? 0;
+      cur.scrap += e.scrap_qty ?? 0;
+      cur.setup += e.setup_minutes ?? 0;
+      cur.downtime += e.downtime_minutes ?? 0;
+      m.set(e.job_id, cur);
     }
     return m;
   }, [productionEntries]);
+  const producedByJob = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const [k, v] of aggByJob) m.set(k, v.produced);
+    return m;
+  }, [aggByJob]);
+
+  // Open downtime sessions keyed by machine_id (one per machine).
+  const downtimeByMachine = useMemo(() => {
+    const m = new Map<string, ActiveDowntimeRow>();
+    for (const row of activeDowntime) m.set(row.machine_id, row);
+    return m;
+  }, [activeDowntime]);
+
+  const machineById = useMemo(
+    () => new Map(machines.map((mc) => [mc.id, mc])),
+    [machines],
+  );
 
   // Today's running entry stats per job (TR local date).
   const todayStr = useMemo(() => {
@@ -191,6 +280,18 @@ export function JobsShell({
           downtime: 0,
           setup: 0,
         };
+        const total = aggByJob.get(j.id) ?? {
+          produced: 0,
+          scrap: 0,
+          setup: 0,
+          downtime: 0,
+        };
+        const machine = j.machine_id
+          ? machineById.get(j.machine_id) ?? null
+          : null;
+        const machineDowntime = j.machine_id
+          ? downtimeByMachine.get(j.machine_id) ?? null
+          : null;
         return {
           job: j,
           product: product
@@ -212,9 +313,28 @@ export function JobsShell({
           todayScrap: today.scrap,
           todayDowntime: today.downtime,
           todaySetup: today.setup,
+          // ── New: total accumulated stats (all entries for this job)
+          totalScrap: total.scrap,
+          totalSetup: total.setup,
+          totalDowntime: total.downtime,
+          // ── New: machine status + open downtime → live ticker accuracy
+          machineStatus: (machine?.status ?? null) as MachineStatus | null,
+          openDowntimeStartedAt:
+            machineDowntime?.started_at ?? null,
+          openDowntimeStatus:
+            (machineDowntime?.status ?? null) as MachineStatus | null,
         };
       }),
-    [filtered, productById, operatorById, producedByJob, todayStatsByJob],
+    [
+      filtered,
+      productById,
+      operatorById,
+      producedByJob,
+      todayStatsByJob,
+      aggByJob,
+      machineById,
+      downtimeByMachine,
+    ],
   );
 
   // Group by machine (null = "Atanmamış")
