@@ -105,6 +105,173 @@ export async function openTodayEntryForJob(args: {
 }
 
 /**
+ * Add elapsed setup minutes to today's entry. Called by setJobStep
+ * when transitioning ayar → uretimde, with `elapsedMinutes` computed
+ * from (NOW - jobs.started_at). Idempotent at the entry level — re-
+ * clicking "Üretime Başla" would not be expected, but if it happens
+ * we just add the new delta which will be 0.
+ */
+export async function addSetupMinutesToToday(args: {
+  machine_id: string;
+  job_id: string;
+  operator_id?: string | null;
+  setup_minutes: number;
+}) {
+  if (!(args.setup_minutes > 0)) return { success: true };
+  const supabase = await createClient();
+  const ensured = await ensureTodayOpenEntry({
+    machine_id: args.machine_id,
+    job_id: args.job_id,
+    operator_id: args.operator_id ?? null,
+  });
+  if ("error" in ensured) return ensured;
+  const { data: cur } = await supabase
+    .from("production_entries")
+    .select("setup_minutes")
+    .eq("id", ensured.id)
+    .single();
+  await supabase
+    .from("production_entries")
+    .update({
+      setup_minutes:
+        (cur?.setup_minutes ?? 0) + Math.max(0, args.setup_minutes),
+    })
+    .eq("id", ensured.id);
+  revalidatePath("/production");
+  revalidatePath("/jobs");
+  return { success: true };
+}
+
+/**
+ * Complete a job: ask only for scrap, compute everything else.
+ *
+ * Flow:
+ *   1. Read job + sum of all produced_qty across its entries.
+ *   2. remaining = quantity - alreadyProduced
+ *   3. finalProduced = remaining - scrap   (assumes the rest are good)
+ *   4. Append finalProduced + scrap to today's open entry.
+ *   5. Stamp end_time (close shift for this entry).
+ *   6. Mark job as tamamlandi with completed_at.
+ *
+ * If there's no open entry yet (e.g. user jumped straight from
+ * beklemede), we still create one so the production form has a record.
+ */
+export async function completeJob(args: { job_id: string; scrap: number }) {
+  const supabase = await createClient();
+  const scrap = Math.max(0, args.scrap | 0);
+
+  const { data: job, error: jErr } = await supabase
+    .from("jobs")
+    .select(
+      "id, machine_id, operator_id, quantity, status, started_at, setup_completed_at",
+    )
+    .eq("id", args.job_id)
+    .single();
+  if (jErr || !job) return { error: jErr?.message ?? "İş bulunamadı" };
+  if (!job.machine_id) {
+    return { error: "İşin makinesi atanmamış" };
+  }
+  if (job.status === "tamamlandi") {
+    return { error: "Bu iş zaten tamamlandı" };
+  }
+
+  // How many parts have already been logged across all entries?
+  const { data: allEntries } = await supabase
+    .from("production_entries")
+    .select("produced_qty")
+    .eq("job_id", args.job_id);
+  const alreadyProduced = (allEntries ?? []).reduce(
+    (s, e) => s + (e.produced_qty ?? 0),
+    0,
+  );
+  const remaining = Math.max(0, job.quantity - alreadyProduced);
+  if (scrap > remaining) {
+    return {
+      error: `Hurda kalan adetten (${remaining}) fazla olamaz`,
+    };
+  }
+  const finalProduced = Math.max(0, remaining - scrap);
+
+  // Open / find today's entry
+  const ensured = await ensureTodayOpenEntry({
+    machine_id: job.machine_id,
+    job_id: args.job_id,
+    operator_id: job.operator_id ?? null,
+  });
+  if ("error" in ensured) return ensured;
+
+  // Read current cumulative values so we can append (idempotent re-clicks).
+  const { data: cur } = await supabase
+    .from("production_entries")
+    .select("produced_qty, scrap_qty, setup_minutes")
+    .eq("id", ensured.id)
+    .single();
+
+  // If setup hasn't been recorded yet (e.g. user skipped "Üretime
+  // Başla" and went straight to "Tamamla"), opportunistically backfill
+  // from started_at → setup_completed_at delta if both are present.
+  let extraSetup = 0;
+  if (
+    job.started_at &&
+    job.setup_completed_at &&
+    (cur?.setup_minutes ?? 0) === 0
+  ) {
+    extraSetup = Math.max(
+      0,
+      Math.floor(
+        (new Date(job.setup_completed_at).getTime() -
+          new Date(job.started_at).getTime()) /
+          60000,
+      ),
+    );
+  }
+
+  const nowHHMM = new Intl.DateTimeFormat("tr-TR", {
+    timeZone: "Europe/Istanbul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date());
+
+  const updates = {
+    produced_qty: (cur?.produced_qty ?? 0) + finalProduced,
+    scrap_qty: (cur?.scrap_qty ?? 0) + scrap,
+    setup_minutes: (cur?.setup_minutes ?? 0) + extraSetup,
+    end_time: nowHHMM,
+  };
+  const { error: uErr } = await supabase
+    .from("production_entries")
+    .update(updates)
+    .eq("id", ensured.id);
+  if (uErr) return { error: uErr.message };
+
+  // Mark the job complete + stamp wall-clock
+  const nowIso = new Date().toISOString();
+  const { error: jUpd } = await supabase
+    .from("jobs")
+    .update({ status: "tamamlandi", completed_at: nowIso })
+    .eq("id", args.job_id);
+  if (jUpd) return { error: jUpd.message };
+
+  // Close any open downtime session — work has stopped here.
+  // Trigger sync_machine_downtime closes on aktif transition; we don't
+  // touch the machine status, so any open session keeps running until
+  // the operator flips status. That's intentional: completing this job
+  // doesn't mean the machine is now aktif.
+
+  revalidatePath("/jobs");
+  revalidatePath("/production");
+  revalidatePath("/dashboard");
+  revalidatePath("/machines");
+  return {
+    success: true,
+    produced: finalProduced,
+    scrap,
+    setup_minutes_added: extraSetup,
+  };
+}
+
+/**
  * Append produced/scrap/downtime/setup to today's entry (creating if
  * needed). Inline use from the JobCard "+ Üretim" modal.
  */

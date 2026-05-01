@@ -197,6 +197,31 @@ export function MessagesClient({
     [supabase, profileById],
   );
 
+  // Direct cache mutation so the UI updates the moment a server action
+  // succeeds (delete / edit), even if the Realtime UPDATE event is
+  // dropped by a flaky websocket. ChatPanel calls this after deleteMessage
+  // and editMessage so we no longer depend on round-trip Realtime.
+  const applyMessageMutation = useCallback(
+    (
+      convId: string,
+      msgId: string,
+      patch: Partial<MessageWithRelations>,
+    ) => {
+      setMessageCache((prev) => {
+        const arr = prev.get(convId);
+        if (!arr) return prev;
+        const idx = arr.findIndex((m) => m.id === msgId);
+        if (idx === -1) return prev;
+        const next = new Map(prev);
+        const updated = [...arr];
+        updated[idx] = { ...updated[idx], ...patch };
+        next.set(convId, updated);
+        return next;
+      });
+    },
+    [],
+  );
+
   const selectConversation = useCallback(
     (id: string) => {
       // Optimistic: update UI immediately.
@@ -410,21 +435,29 @@ export function MessagesClient({
         (payload) => {
           const row = (payload.new ?? payload.old) as Conversation;
           if (!row) return;
+          // Capture "row is unknown" via a closure flag, then trigger
+          // router.refresh() OUTSIDE the React updater — calling it
+          // inside a setState updater throws "Cannot update a component
+          // while rendering a different component" because the updater
+          // can run during another component's render pass.
+          let isUnknownConversation = false;
           setConversations((prev) => {
             if (payload.eventType === "DELETE") {
               return prev.filter((c) => c.id !== row.id);
             }
             const idx = prev.findIndex((c) => c.id === row.id);
             if (idx === -1) {
-              // New conversation — only add if I'm a participant. We don't
-              // know yet, so trigger a server refresh as a safety net.
-              router.refresh();
+              isUnknownConversation = true;
               return prev;
             }
             const next = [...prev];
             next[idx] = row;
             return next;
           });
+          if (isUnknownConversation) {
+            // Defer past the current React work to avoid setState-in-render.
+            queueMicrotask(() => router.refresh());
+          }
         },
       )
       .subscribe();
@@ -550,6 +583,7 @@ export function MessagesClient({
               loadingConvIds.has(activeId) &&
               activeMessages.length === 0
             }
+            onApplyMessageMutation={applyMessageMutation}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center p-8">

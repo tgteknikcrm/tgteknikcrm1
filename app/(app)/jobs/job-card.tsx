@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,15 +24,13 @@ import {
   ExternalLink,
   Hourglass,
   Loader2,
-  PauseCircle,
+  Pause,
   Play,
-  Plus,
   Settings2,
-  StopCircle,
+  Trash2,
   TrendingUp,
   User,
   Wrench,
-  Pause,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -49,11 +47,8 @@ import {
   type Product,
   type WorkSchedule,
 } from "@/lib/supabase/types";
-import { setJobStep } from "./actions";
-import {
-  appendProduction,
-  closeShiftForMachine,
-} from "../production/actions";
+import { deleteJob, setJobStep } from "./actions";
+import { completeJob } from "../production/actions";
 import { JobDialog } from "./job-dialog";
 import { cn } from "@/lib/utils";
 
@@ -92,7 +87,7 @@ export function JobCard({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [productionOpen, setProductionOpen] = useState(false);
+  const [completionOpen, setCompletionOpen] = useState(false);
   const { job, product, operator, produced } = data;
 
   const isCancelled = job.status === "iptal";
@@ -126,6 +121,13 @@ export function JobCard({
     due.getTime() < Date.now();
 
   function move(next: JobStatus) {
+    // "Tamamla" goes through the completion modal so we can ask for
+    // scrap and stamp the production_entry — never call setJobStep
+    // directly for the complete step.
+    if (next === "tamamlandi") {
+      setCompletionOpen(true);
+      return;
+    }
     startTransition(async () => {
       const r = await setJobStep(job.id, next);
       if (r.error) {
@@ -133,6 +135,24 @@ export function JobCard({
         return;
       }
       toast.success(`İş ${JOB_STATUS_LABEL[next]}`);
+      router.refresh();
+    });
+  }
+
+  function onDelete() {
+    if (
+      !confirm(
+        `'${job.customer} – ${job.part_name}' işi silinsin mi? Geri alınamaz.`,
+      )
+    )
+      return;
+    startTransition(async () => {
+      const r = await deleteJob(job.id);
+      if (r.error) {
+        toast.error(r.error);
+        return;
+      }
+      toast.success("İş silindi");
       router.refresh();
     });
   }
@@ -251,6 +271,16 @@ export function JobCard({
               </Button>
             }
           />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onDelete}
+            disabled={pending}
+            className="size-7 text-rose-600 hover:text-rose-600 hover:bg-rose-500/10"
+            title="Sil"
+          >
+            <Trash2 className="size-3.5" />
+          </Button>
         </div>
       </div>
 
@@ -469,57 +499,6 @@ export function JobCard({
         </div>
 
         <div className="flex items-center gap-1 ml-auto">
-          {!isCancelled &&
-            (job.status === "ayar" || job.status === "uretimde") && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setProductionOpen(true)}
-                  disabled={pending}
-                  className="h-7 px-2 text-[11px] gap-1"
-                  title="Bugünkü üretim formuna ekle"
-                >
-                  <Plus className="size-3" /> Üretim
-                </Button>
-                <Button
-                  asChild
-                  size="sm"
-                  variant="outline"
-                  className="h-7 px-2 text-[11px] gap-1 text-rose-700 dark:text-rose-300 border-rose-500/30"
-                  title="Arıza aç"
-                >
-                  <Link
-                    href={`/breakdowns?machine=${job.machine_id ?? ""}&job=${job.id}`}
-                  >
-                    <AlertTriangle className="size-3" /> Arıza
-                  </Link>
-                </Button>
-              </>
-            )}
-          {job.status === "uretimde" && job.machine_id && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                if (!confirm("Bu makinede bugünkü açık vardiyaları kapat?"))
-                  return;
-                startTransition(async () => {
-                  const r = await closeShiftForMachine(job.machine_id!);
-                  if (r.error) toast.error(r.error);
-                  else {
-                    toast.success("Vardiya kapatıldı");
-                    router.refresh();
-                  }
-                });
-              }}
-              disabled={pending}
-              className="h-7 px-2 text-[11px] gap-1"
-              title="Bugünkü açık vardiyaları kapat"
-            >
-              <StopCircle className="size-3" />
-            </Button>
-          )}
           {primaryAction && (
             <Button
               size="sm"
@@ -535,14 +514,14 @@ export function JobCard({
               {primaryAction.label}
             </Button>
           )}
-          {job.status === "ayar" && (
+          {(job.status === "ayar" || job.status === "uretimde") && (
             <Button
               size="sm"
               variant="outline"
               onClick={() => move("beklemede")}
               disabled={pending}
               className="h-7 px-2 text-[11px] gap-1"
-              title="Bekleme listesine geri al"
+              title="Beklemeye al"
             >
               <Pause className="size-3" />
             </Button>
@@ -550,13 +529,18 @@ export function JobCard({
         </div>
       </div>
 
-      {/* + Üretim modal */}
-      <ProductionAppendDialog
-        open={productionOpen}
-        onOpenChange={setProductionOpen}
+      <CompletionDialog
+        open={completionOpen}
+        onOpenChange={setCompletionOpen}
         job={job}
+        product={product}
+        produced={produced}
+        todayProduced={data.todayProduced}
+        todayScrap={data.todayScrap}
+        todaySetup={data.todaySetup}
+        todayDowntime={data.todayDowntime}
         onSubmitted={() => {
-          setProductionOpen(false);
+          setCompletionOpen(false);
           router.refresh();
         }}
       />
@@ -564,148 +548,173 @@ export function JobCard({
   );
 }
 
-/** Quick "add to today's entry" form reachable from the JobCard. */
-function ProductionAppendDialog({
+/**
+ * Completion dialog — user clicks "Tamamla" → we ask ONLY for scrap.
+ * Everything else (produced, setup minutes, cycle minutes, downtime)
+ * was tracked automatically. Produced is computed as quantity - scrap
+ * which matches the user's mental model: "if I'm done, the rest are
+ * good unless I tell you otherwise".
+ *
+ * The server completeJob action persists the production_entry, marks
+ * the job tamamlandi, and stamps end_time.
+ */
+function CompletionDialog({
   open,
   onOpenChange,
   job,
+  product,
+  produced,
+  todayProduced,
+  todayScrap,
+  todaySetup,
+  todayDowntime,
   onSubmitted,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   job: Job;
+  product: JobCardData["product"];
+  produced: number;
+  todayProduced: number;
+  todayScrap: number;
+  todaySetup: number;
+  todayDowntime: number;
   onSubmitted: () => void;
 }) {
-  const [produced, setProduced] = useState("");
-  const [scrap, setScrap] = useState("");
-  const [downtime, setDowntime] = useState("");
-  const [setup, setSetup] = useState("");
+  const [scrap, setScrap] = useState("0");
   const [pending, startTransition] = useTransition();
 
-  function reset() {
-    setProduced("");
-    setScrap("");
-    setDowntime("");
-    setSetup("");
-  }
+  // Reset every time the dialog opens.
+  useEffect(() => {
+    if (open) setScrap("0");
+  }, [open]);
+
+  const remaining = Math.max(0, job.quantity - produced);
+  const scrapNum = Math.max(0, Number(scrap) || 0);
+  const finalProduced = Math.max(0, remaining - scrapNum);
 
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!job.machine_id) {
-      toast.error("Bu işin makinesi atanmamış");
+      toast.error("Bu işin makinesi atanmamış — önce makine ata");
       return;
     }
-    const p = Math.max(0, Number(produced) || 0);
-    const s = Math.max(0, Number(scrap) || 0);
-    const d = Math.max(0, Number(downtime) || 0);
-    const su = Math.max(0, Number(setup) || 0);
-    if (p + s + d + su === 0) {
-      toast.error("En az bir alan dolu olmalı");
+    if (scrapNum > remaining) {
+      toast.error(
+        `Hurda kalan adetten (${remaining}) fazla olamaz. Düşür.`,
+      );
       return;
     }
     startTransition(async () => {
-      const r = await appendProduction({
-        machine_id: job.machine_id!,
+      const r = await completeJob({
         job_id: job.id,
-        operator_id: job.operator_id ?? null,
-        produced: p,
-        scrap: s,
-        downtime_minutes: d,
-        setup_minutes: su,
+        scrap: scrapNum,
       });
       if ("error" in r && r.error) {
         toast.error(r.error);
         return;
       }
-      toast.success("Bugünkü üretim formuna eklendi");
-      reset();
+      toast.success("İş tamamlandı, üretim formuna işlendi");
       onSubmitted();
     });
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        onOpenChange(v);
-        if (!v) reset();
-      }}
-    >
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Üretim Ekle</DialogTitle>
+          <DialogTitle>İşi Tamamla</DialogTitle>
           <DialogDescription>
-            Bugünkü açık vardiyaya ekleniyor — yoksa otomatik açılır.
+            Sadece hurda adedini gir. Geri kalan otomatik hesaplanır ve
+            bugünkü üretim formuna işlenir.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="ap-produced">Üretilen Adet</Label>
-              <Input
-                id="ap-produced"
-                type="number"
-                min={0}
-                value={produced}
-                onChange={(e) => setProduced(e.target.value)}
-                placeholder="0"
-                className="tabular-nums"
-                autoFocus
-              />
+          {/* Auto-tracked summary */}
+          <div className="rounded-md border bg-muted/30 px-3 py-2.5 space-y-1.5 text-xs">
+            <div className="font-bold uppercase tracking-wider text-[10px] text-muted-foreground mb-1">
+              Otomatik Takip
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ap-scrap">Hurda Adet</Label>
-              <Input
-                id="ap-scrap"
-                type="number"
-                min={0}
-                value={scrap}
-                onChange={(e) => setScrap(e.target.value)}
-                placeholder="0"
-                className="tabular-nums"
+            <SumRow label="Planlanan adet" value={job.quantity} />
+            <SumRow label="Şimdiye kadar üretilen" value={produced} />
+            <SumRow label="Bu vardiyada üretilen" value={todayProduced} />
+            {todayScrap > 0 && (
+              <SumRow label="Bu vardiyada hurda" value={todayScrap} />
+            )}
+            {todaySetup > 0 && (
+              <SumRow
+                label="Bu vardiyada ayar"
+                value={`${todaySetup} dk`}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ap-setup">Ayar (dk)</Label>
-              <Input
-                id="ap-setup"
-                type="number"
-                min={0}
-                value={setup}
-                onChange={(e) => setSetup(e.target.value)}
-                placeholder="0"
-                className="tabular-nums"
+            )}
+            {todayDowntime > 0 && (
+              <SumRow
+                label="Bu vardiyada duruş"
+                value={`${todayDowntime} dk`}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ap-downtime">Duruş (dk)</Label>
-              <Input
-                id="ap-downtime"
-                type="number"
-                min={0}
-                value={downtime}
-                onChange={(e) => setDowntime(e.target.value)}
-                placeholder="0"
-                className="tabular-nums"
+            )}
+            {product?.cycle_time_minutes != null && (
+              <SumRow
+                label="Cycle (parça başı)"
+                value={`${product.cycle_time_minutes} dk`}
               />
+            )}
+          </div>
+
+          {/* Scrap question */}
+          <div className="space-y-1.5">
+            <Label htmlFor="cd-scrap">Hurda Adet</Label>
+            <Input
+              id="cd-scrap"
+              type="number"
+              min={0}
+              max={remaining}
+              value={scrap}
+              onChange={(e) => setScrap(e.target.value)}
+              className="tabular-nums text-base h-10"
+              autoFocus
+            />
+            <div className="text-[11px] text-muted-foreground tabular-nums">
+              Bu kapanışta {remaining} parça kaldı. Hurdadan sonra{" "}
+              <span className="font-semibold text-emerald-700 dark:text-emerald-300">
+                {finalProduced}
+              </span>{" "}
+              adet sağlam üretim eklenecek.
             </div>
           </div>
+
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
               onClick={() => onOpenChange(false)}
+              disabled={pending}
             >
               İptal
             </Button>
             <Button type="submit" disabled={pending}>
               {pending && <Loader2 className="size-4 animate-spin" />}
-              Ekle
+              Tamamla
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function SumRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-mono font-semibold tabular-nums">{value}</span>
+    </div>
   );
 }
 

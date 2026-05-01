@@ -98,6 +98,14 @@ interface Props {
   // messages from Supabase (cache miss). Drives a skeleton overlay
   // in the message feed — same UX as sidebar route navigation.
   isLoading?: boolean;
+  // Patch a message in the parent's cache directly. Lets us reflect
+  // delete/edit instantly without waiting on a Realtime round-trip
+  // (which can drop on flaky websockets / cellular).
+  onApplyMessageMutation?: (
+    convId: string,
+    msgId: string,
+    patch: Partial<MessageWithRelations>,
+  ) => void;
 }
 
 function initials(s: string | null | undefined): string {
@@ -145,6 +153,7 @@ export function ChatPanel({
   currentUserId,
   people,
   isLoading = false,
+  onApplyMessageMutation,
 }: Props) {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
@@ -399,15 +408,17 @@ export function ChatPanel({
   const lastConvIdRef = useRef<string | null>(null);
   const atBottomRef = useRef(true);
   const lastOptimisticLenRef = useRef(0);
+  const lastMsgCountRef = useRef(0);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
 
-    // Rule 1: conversation switch.
+    // Rule 1: conversation switch — INSTANT jump regardless of content.
     if (lastConvIdRef.current !== conversation.id) {
       lastConvIdRef.current = conversation.id;
       lastOptimisticLenRef.current = optimistic.length;
+      lastMsgCountRef.current = messages.length;
       el.scrollTop = el.scrollHeight;
       atBottomRef.current = true;
       return;
@@ -423,10 +434,27 @@ export function ChatPanel({
     if (optimisticGrew) {
       el.scrollTop = el.scrollHeight;
       atBottomRef.current = true;
+      lastMsgCountRef.current = messages.length;
       return;
     }
 
-    // Rule 2: server message landed. Smooth only if at bottom.
+    // Rule 2a: cache miss → first content batch lands AFTER conversation
+    // switch (we initially rendered with messages=[] then the cache fill
+    // populated N items). Use INSTANT jump — smooth-scrolling N rows
+    // looks like the "yukarı aşağı kendi yerine geliyor" jitter the
+    // user reported.
+    const wasEmpty =
+      lastMsgCountRef.current === 0 && messages.length > 0;
+    lastMsgCountRef.current = messages.length;
+    if (wasEmpty) {
+      el.scrollTop = el.scrollHeight;
+      atBottomRef.current = true;
+      return;
+    }
+
+    // Rule 2b: incremental message landed mid-thread. Smooth only if
+    // user is already near the bottom (otherwise leave them alone so
+    // they can read older messages without a snap).
     if (atBottomRef.current) {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
@@ -707,6 +735,9 @@ export function ChatPanel({
                     optimisticDeleted={optimisticDeletedIds.has(m.id)}
                     onOptimisticDelete={markOptimisticDeleted}
                     onOptimisticDeleteRollback={unmarkOptimisticDeleted}
+                    onCacheMutate={(patch) =>
+                      onApplyMessageMutation?.(conversation.id, m.id, patch)
+                    }
                   />
                 );
               })}
@@ -780,6 +811,7 @@ function MessageBubble({
   optimisticDeleted,
   onOptimisticDelete,
   onOptimisticDeleteRollback,
+  onCacheMutate,
 }: {
   message: MessageWithRelations;
   fromMe: boolean;
@@ -795,6 +827,7 @@ function MessageBubble({
   optimisticDeleted: boolean;
   onOptimisticDelete: (id: string) => void;
   onOptimisticDeleteRollback: (id: string) => void;
+  onCacheMutate?: (patch: Partial<MessageWithRelations>) => void;
 }) {
   const router = useRouter();
   const isOptimistic = m.id.startsWith("temp_");
@@ -821,8 +854,16 @@ function MessageBubble({
         onOptimisticDeleteRollback(m.id);
         return;
       }
-      // Pull fresh server data so the deleted_at lands even if the
-      // Realtime event got dropped (best-effort).
+      // Patch the parent's cache directly — no longer rely solely on
+      // Realtime UPDATE event (which can drop on flaky LAN/cellular).
+      // This is the durable fix for "mesaj silinmiyor": the cache now
+      // holds deleted_at the moment the server confirms.
+      onCacheMutate?.({
+        deleted_at: new Date().toISOString(),
+        body: null,
+      });
+      // Best-effort backstop: also nudge server-side cache so that
+      // any non-cached pages refresh too.
       router.refresh();
     });
   }

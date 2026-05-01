@@ -211,12 +211,29 @@ export async function setJobStep(jobId: string, step: JobStatus) {
   // auto-creating today's production entry.
   const { data: job } = await supabase
     .from("jobs")
-    .select("started_at, machine_id, operator_id")
+    .select("started_at, setup_completed_at, machine_id, operator_id")
     .eq("id", jobId)
     .single();
 
+  // Compute setup elapsed minutes if we're transitioning ayar→uretimde
+  // and started_at is already stamped. We do this BEFORE writing
+  // setup_completed_at so the diff is from the ayar start to "right
+  // now", not zero.
+  let setupElapsedMin = 0;
+  if (step === "uretimde" && job?.started_at && !job.setup_completed_at) {
+    setupElapsedMin = Math.max(
+      0,
+      Math.floor(
+        (Date.now() - new Date(job.started_at).getTime()) / 60000,
+      ),
+    );
+  }
+
   if (step === "ayar") {
-    if (!job?.started_at) updates.started_at = nowIso;
+    // Always re-stamp started_at when entering ayar — that's the
+    // anchor we measure setup time from. If the operator goes back
+    // to beklemede and re-enters ayar, we don't want stale timing.
+    updates.started_at = nowIso;
     updates.setup_completed_at = null;
     updates.completed_at = null;
   } else if (step === "uretimde") {
@@ -224,6 +241,9 @@ export async function setJobStep(jobId: string, step: JobStatus) {
     updates.setup_completed_at = nowIso;
     updates.completed_at = null;
   } else if (step === "tamamlandi") {
+    // Completion goes through completeJob() — it stamps everything.
+    // Direct setJobStep("tamamlandi") is allowed but won't fill the
+    // entry; UI funnels through the modal instead.
     updates.completed_at = nowIso;
   } else if (step === "beklemede") {
     updates.started_at = null;
@@ -247,7 +267,7 @@ export async function setJobStep(jobId: string, step: JobStatus) {
   // via the partial unique index so re-clicking is idempotent.
   if ((step === "ayar" || step === "uretimde") && job?.machine_id) {
     try {
-      const { openTodayEntryForJob } = await import(
+      const { openTodayEntryForJob, addSetupMinutesToToday } = await import(
         "../production/actions"
       );
       await openTodayEntryForJob({
@@ -255,6 +275,17 @@ export async function setJobStep(jobId: string, step: JobStatus) {
         job_id: jobId,
         operator_id: job.operator_id ?? null,
       });
+      // Record the auto-tracked setup minutes the moment the operator
+      // says "ayar bitti, üretime geçiyorum". This is the bug the user
+      // hit — clicking Üretime Başla didn't increment anything.
+      if (step === "uretimde" && setupElapsedMin > 0) {
+        await addSetupMinutesToToday({
+          machine_id: job.machine_id,
+          job_id: jobId,
+          operator_id: job.operator_id ?? null,
+          setup_minutes: setupElapsedMin,
+        });
+      }
     } catch (e) {
       console.error("openTodayEntryForJob failed:", e);
       // Don't fail the step transition if the entry create errored —
