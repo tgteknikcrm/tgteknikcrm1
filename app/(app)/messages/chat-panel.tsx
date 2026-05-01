@@ -182,6 +182,14 @@ export function ChatPanel({
     new Set(),
   );
 
+  // Bodies of optimistic messages the user canceled before they
+  // reached the server. When the real message lands via Realtime
+  // (matching body + author within a 10s window), we silently fire
+  // soft_delete_message on the real id so the cancel sticks. Without
+  // this, the canceled-but-then-sent message would reappear on the
+  // user's screen seconds after they thought they killed it.
+  const ghostDeletesRef = useRef<Map<string, number>>(new Map());
+
   // Drop the optimistic queue + per-thread UI state when the user
   // switches conversations. (Keyed off the conversation id so the
   // reset doesn't fire on every render.)
@@ -192,7 +200,40 @@ export function ChatPanel({
     setTagPickerOpen(false);
     setTypingMap(new Map());
     setOptimisticDeletedIds(new Set());
+    ghostDeletesRef.current = new Map();
   }, [conversation.id]);
+
+  // Reaper: when a real message arrives that matches a body the user
+  // canceled while it was still optimistic, soft-delete it server-side.
+  // GCs entries older than 10 seconds to bound memory.
+  useEffect(() => {
+    const map = ghostDeletesRef.current;
+    if (map.size === 0) return;
+    const now = Date.now();
+    for (const [body, ts] of map.entries()) {
+      if (now - ts > 10_000) map.delete(body);
+    }
+    for (const m of messages) {
+      if (m.author_id !== currentUserId) continue;
+      if (m.deleted_at) continue;
+      if (!m.body) continue;
+      if (!map.has(m.body)) continue;
+      const ts = map.get(m.body)!;
+      // Only delete real messages created after the cancel — protects
+      // against an unrelated older message with the same body.
+      if (new Date(m.created_at).getTime() < ts - 5_000) continue;
+      map.delete(m.body);
+      const realId = m.id;
+      void deleteMessage(realId).then((r) => {
+        if (!r.error) {
+          onApplyMessageMutation?.(conversation.id, realId, {
+            deleted_at: new Date().toISOString(),
+            body: null,
+          });
+        }
+      });
+    }
+  }, [messages, currentUserId, conversation.id, onApplyMessageMutation]);
 
   // Drop optimistic-deleted ids the moment the server prop reports
   // the same id with a deleted_at — drag-fix style sync, no timing.
@@ -263,6 +304,16 @@ export function ChatPanel({
           : m,
       ),
     );
+  }
+
+  // User clicked "Sil" on an optimistic (still-sending) message.
+  // Drop it from the local queue immediately and remember its body
+  // so the reaper can soft-delete the server copy if/when it lands.
+  function cancelOptimistic(tempId: string, body: string | null) {
+    setOptimistic((prev) => prev.filter((m) => m.id !== tempId));
+    if (body) {
+      ghostDeletesRef.current.set(body, Date.now());
+    }
   }
 
   const isPinned = !!myParticipant?.pinned_at;
@@ -735,6 +786,7 @@ export function ChatPanel({
                     optimisticDeleted={optimisticDeletedIds.has(m.id)}
                     onOptimisticDelete={markOptimisticDeleted}
                     onOptimisticDeleteRollback={unmarkOptimisticDeleted}
+                    onCancelOptimistic={cancelOptimistic}
                     onCacheMutate={(patch) =>
                       onApplyMessageMutation?.(conversation.id, m.id, patch)
                     }
@@ -811,6 +863,7 @@ function MessageBubble({
   optimisticDeleted,
   onOptimisticDelete,
   onOptimisticDeleteRollback,
+  onCancelOptimistic,
   onCacheMutate,
 }: {
   message: MessageWithRelations;
@@ -827,6 +880,7 @@ function MessageBubble({
   optimisticDeleted: boolean;
   onOptimisticDelete: (id: string) => void;
   onOptimisticDeleteRollback: (id: string) => void;
+  onCancelOptimistic: (tempId: string, body: string | null) => void;
   onCacheMutate?: (patch: Partial<MessageWithRelations>) => void;
 }) {
   const router = useRouter();
@@ -837,9 +891,15 @@ function MessageBubble({
     m.author?.full_name || formatPhoneForDisplay(m.author?.phone ?? null) || "?";
 
   function onDelete() {
-    // Don't try to soft-delete a message that hasn't been saved yet.
+    // Optimistic message — server hasn't seen it yet. We can't call
+    // soft_delete_message (no real id), but we CAN cancel it visually
+    // and arm the reaper to soft-delete the server copy when/if it
+    // arrives via Realtime. Net effect: user clicks Sil and the
+    // bubble vanishes immediately, no "henüz gönderilmedi" gate.
     if (isOptimistic) {
-      toast.error("Mesaj henüz gönderilmedi, biraz bekle.");
+      if (!confirm("Bu mesaj iptal edilsin mi?")) return;
+      onCancelOptimistic(m.id, m.body ?? null);
+      toast.success("Mesaj iptal edildi");
       return;
     }
     if (!confirm("Bu mesaj silinsin mi?")) return;

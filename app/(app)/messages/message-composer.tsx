@@ -451,7 +451,11 @@ export function MessageComposer({
           onOptimisticFail(tempId);
           return;
         }
-        setTimeout(() => onOptimisticClear(tempId), 1500);
+        // 3s gives Realtime plenty of slack on flaky LAN/cellular —
+        // most of the time the body-match clearer in chat-panel pops
+        // the temp the moment the real row lands, so this fallback
+        // only kicks in when Realtime drops the INSERT event.
+        setTimeout(() => onOptimisticClear(tempId), 3000);
       });
     }
   }

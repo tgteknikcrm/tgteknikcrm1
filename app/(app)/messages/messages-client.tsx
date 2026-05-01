@@ -245,6 +245,104 @@ export function MessagesClient({
     [messageCache, fetchConversationDetail],
   );
 
+  // Called by NewConversationDialog after it successfully creates a
+  // direct or group conversation. We can't rely on `router.refresh()`
+  // alone because MessagesClient's state was seeded from props in
+  // useState() initializers — those don't re-run on prop change. So
+  // we eagerly fetch the new conversation row + participants here and
+  // merge them into local state before selecting it. End result: the
+  // chat panel opens immediately, no manual refresh required.
+  const handleNewConversation = useCallback(
+    async (newConvId: string) => {
+      try {
+        const [cRes, pRes] = await Promise.all([
+          supabase
+            .from("conversations")
+            .select("*")
+            .eq("id", newConvId)
+            .maybeSingle(),
+          supabase
+            .from("conversation_participants")
+            .select("*")
+            .eq("conversation_id", newConvId),
+        ]);
+        const conv = cRes.data as Conversation | null;
+        const parts = (pRes.data ?? []) as ConversationParticipant[];
+        if (conv) {
+          setConversations((prev) =>
+            prev.some((c) => c.id === conv.id) ? prev : [conv, ...prev],
+          );
+        }
+        if (parts.length > 0) {
+          setAllParticipants((prev) => {
+            const remaining = prev.filter(
+              (p) => p.conversation_id !== newConvId,
+            );
+            return [...remaining, ...parts];
+          });
+          const myPart = parts.find((p) => p.user_id === currentUserId);
+          if (myPart) {
+            setMyParticipants((prev) => {
+              const idx = prev.findIndex(
+                (p) =>
+                  p.conversation_id === newConvId &&
+                  p.user_id === currentUserId,
+              );
+              if (idx === -1) return [...prev, myPart];
+              const next = [...prev];
+              next[idx] = myPart;
+              return next;
+            });
+          }
+          setParticipantsCache((prev) =>
+            setBounded(prev, newConvId, parts, activeIdRef.current),
+          );
+        }
+      } catch {
+        // Ignore — fall through to selectConversation, which will
+        // trigger a fresh fetch via fetchConversationDetail anyway.
+      }
+      selectConversation(newConvId);
+      // Best-effort backstop: keep server-rendered metadata fresh.
+      router.refresh();
+    },
+    [supabase, currentUserId, selectConversation, router],
+  );
+
+  // Defensive prop-sync: if `router.refresh()` happens elsewhere in
+  // the app and brings new conversations from the server, additively
+  // merge them into local state. We never DROP local conversations
+  // here — local state is the source of truth for client-only
+  // mutations. We only ADD what the server has but the client missed.
+  useEffect(() => {
+    setConversations((prev) => {
+      const known = new Set(prev.map((c) => c.id));
+      const additions = initialConversations.filter((c) => !known.has(c.id));
+      if (additions.length === 0) return prev;
+      return [...additions, ...prev];
+    });
+    setAllParticipants((prev) => {
+      const knownKeys = new Set(
+        prev.map((p) => `${p.conversation_id}:${p.user_id}`),
+      );
+      const additions = initialAllParticipants.filter(
+        (p) => !knownKeys.has(`${p.conversation_id}:${p.user_id}`),
+      );
+      if (additions.length === 0) return prev;
+      return [...prev, ...additions];
+    });
+    setMyParticipants((prev) => {
+      const knownKeys = new Set(
+        prev.map((p) => `${p.conversation_id}:${p.user_id}`),
+      );
+      const additions = initialMyParticipants.filter(
+        (p) => !knownKeys.has(`${p.conversation_id}:${p.user_id}`),
+      );
+      if (additions.length === 0) return prev;
+      return [...prev, ...additions];
+    });
+  }, [initialConversations, initialAllParticipants, initialMyParticipants]);
+
   /* ── Realtime: keep all caches fresh without page reloads ────── */
 
   // Track conversation ids for the realtime filter dependency
@@ -566,6 +664,7 @@ export function MessagesClient({
           activeId={activeId}
           people={people}
           onSelect={selectConversation}
+          onNewConversation={handleNewConversation}
         />
       </aside>
 

@@ -34,6 +34,12 @@ interface Props {
   trigger: React.ReactNode;
   currentUserId: string;
   people: Array<Pick<Profile, "id" | "full_name" | "phone">>;
+  // Optional callback invoked after a conversation is successfully
+  // created. When provided, the parent fully owns the post-create
+  // flow (merging into client state + selecting it). The dialog
+  // skips its own router.push/refresh in that case so we don't
+  // race against the parent's state mutation.
+  onCreated?: (convId: string) => void | Promise<void>;
 }
 
 function initials(s: string | null | undefined): string {
@@ -61,6 +67,7 @@ export function NewConversationDialog({
   trigger,
   currentUserId,
   people,
+  onCreated,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -140,14 +147,19 @@ export function NewConversationDialog({
         toast.error(msg);
         return;
       }
-      // Success — close dialog, navigate. We push BEFORE reset so the
-      // dialog doesn't briefly flash an empty state.
+      // Success — close dialog, hand the new id to the parent so it
+      // can merge the conversation into client state and open it
+      // immediately. Without the parent callback, useState() seeds in
+      // MessagesClient never re-run on prop change, so the chat panel
+      // wouldn't open until a manual refresh.
       setOpen(false);
       reset();
-      router.push(`/messages?c=${id}`);
-      // router.refresh ensures the conversation list re-renders with the
-      // new entry visible (in case Realtime push was missed).
-      router.refresh();
+      if (onCreated) {
+        await onCreated(id);
+      } else {
+        router.push(`/messages?c=${id}`);
+        router.refresh();
+      }
     });
   }
 
@@ -187,8 +199,12 @@ export function NewConversationDialog({
       setOpen(false);
       reset();
       toast.success("Grup oluşturuldu");
-      router.push(`/messages?c=${id}`);
-      router.refresh();
+      if (onCreated) {
+        await onCreated(id);
+      } else {
+        router.push(`/messages?c=${id}`);
+        router.refresh();
+      }
     });
   }
 

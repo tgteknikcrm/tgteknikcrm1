@@ -56,6 +56,10 @@ interface Props {
   activeId: string | null;
   people: Array<Pick<Profile, "id" | "full_name" | "phone" | "last_seen_at">>;
   onSelect: (id: string) => void;
+  // Called by NewConversationDialog after a successful create. The
+  // shell merges the new conv into client state and selects it — no
+  // manual refresh required.
+  onNewConversation?: (convId: string) => void | Promise<void>;
 }
 
 type TabKey = "inbox" | "archive" | string; // arbitrary tag key
@@ -99,6 +103,7 @@ export function ConversationList({
   activeId,
   people,
   onSelect,
+  onNewConversation,
 }: Props) {
   const router = useRouter();
   void router;
@@ -168,6 +173,7 @@ export function ConversationList({
         <NewConversationDialog
           currentUserId={currentUserId}
           people={people}
+          onCreated={onNewConversation}
           trigger={
             <Button size="sm" className="h-8 px-2.5 gap-1.5 transition hover:scale-[1.03]">
               <Plus className="size-4" /> Yeni
