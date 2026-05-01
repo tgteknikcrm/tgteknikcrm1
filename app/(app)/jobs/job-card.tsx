@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -28,10 +28,12 @@ import {
   Pause,
   Play,
   Settings2,
+  Sparkles,
   Trash2,
   TrendingUp,
   User,
   Wrench,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -160,6 +162,74 @@ export function JobCard({
     job.status !== "tamamlandi" &&
     job.status !== "iptal" &&
     due.getTime() < Date.now();
+
+  // ── Auto-complete countdown ────────────────────────────────────────
+  // The user's mental model: "1 piece × 1 min cycle + cleanup → iş
+  // kapansın, ben tıklamak zorunda kalmayayım". When the live ticker
+  // reaches the target piece count and the machine is still running,
+  // we start a 10-second countdown then auto-fire completeJob with
+  // scrap=0. Operator can hit "Beklet" to bail and use the manual
+  // modal if they need to record scrap.
+  const AUTO_COMPLETE_SECONDS = 10;
+  const [autoCountdown, setAutoCountdown] = useState<number | null>(null);
+  // One-shot lock per card lifetime — prevents the timer from firing
+  // a second time if the user re-enters üretimde after a cancel, and
+  // prevents flapping on remount. router.refresh after success will
+  // change job.status away from uretimde so the trigger goes away.
+  const autoFiredRef = useRef(false);
+
+  const eligibleForAutoComplete =
+    job.status === "uretimde" &&
+    !isCancelled &&
+    live.reachedTarget &&
+    !live.stoppedReason &&
+    !completionOpen &&
+    !autoFiredRef.current &&
+    !!job.machine_id;
+
+  useEffect(() => {
+    if (!eligibleForAutoComplete) {
+      setAutoCountdown(null);
+      return;
+    }
+    setAutoCountdown(AUTO_COMPLETE_SECONDS);
+    const handle = setInterval(() => {
+      setAutoCountdown((prev) => {
+        if (prev === null) return null;
+        if (prev <= 1) {
+          clearInterval(handle);
+          // Fire-and-forget — completeJob with scrap=0. If it errors,
+          // we unlock the ref so the user can retry (or it'll re-trigger
+          // on the next render if conditions are still met).
+          autoFiredRef.current = true;
+          startTransition(async () => {
+            const r = await completeJob({
+              job_id: job.id,
+              scrap: 0,
+            });
+            if ("error" in r && r.error) {
+              autoFiredRef.current = false;
+              toast.error(`Otomatik tamamlama başarısız: ${r.error}`);
+              return;
+            }
+            toast.success(`${job.part_name} otomatik tamamlandı`);
+            router.refresh();
+          });
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => {
+      clearInterval(handle);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligibleForAutoComplete]);
+
+  function cancelAutoComplete() {
+    setAutoCountdown(null);
+    autoFiredRef.current = true; // don't re-trigger automatically
+  }
 
   function move(next: JobStatus) {
     // "Tamamla" goes through the completion modal so we can ask for
@@ -487,6 +557,46 @@ export function JobCard({
               </span>
             </span>
           )}
+        </div>
+      )}
+
+      {/* Auto-completion countdown banner — appears when liveProduced
+          has hit quantity. Operator can hit "Beklet" to bail and use
+          the manual modal to record scrap. Otherwise auto-fires
+          completeJob({scrap: 0}) after 10 seconds. */}
+      {autoCountdown !== null && (
+        <div className="rounded-md border-2 border-emerald-500 bg-emerald-500/10 px-2.5 py-2 mb-2 flex items-center gap-2 animate-tg-fade-in">
+          <Sparkles className="size-4 text-emerald-600 dark:text-emerald-400 animate-pulse shrink-0" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 leading-tight">
+              Tahmin tamamlandı
+            </div>
+            <div className="text-[10px] text-emerald-700/80 dark:text-emerald-300/80 tabular-nums">
+              {autoCountdown} sn sonra otomatik kapanır (hurda 0)
+            </div>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={cancelAutoComplete}
+            className="h-7 px-2 text-[11px] gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 bg-background"
+            title="Otomatik kapatmayı iptal et — hurda girmek için manuel Tamamla'yı kullan"
+          >
+            <X className="size-3" />
+            Beklet
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              cancelAutoComplete();
+              setCompletionOpen(true);
+            }}
+            className="h-7 px-2 text-[11px] gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+            title="Şimdi modalı aç (hurda gir)"
+          >
+            <CheckCircle2 className="size-3" />
+            Şimdi
+          </Button>
         </div>
       )}
 

@@ -292,6 +292,9 @@ export function calcLiveProduced(input: {
   effectiveCycleMin: number;
   liveActive: boolean;
   stoppedReason: MachineStatus | null;
+  /** True when liveProduced has hit the requested quantity. Drives
+   *  the auto-completion countdown on the JobCard. */
+  reachedTarget: boolean;
 } {
   const cycle = Math.max(0, input.cycleMinutes ?? 0);
   const cleanup = Math.max(0, input.cleanupMinutes ?? 0);
@@ -318,6 +321,7 @@ export function calcLiveProduced(input: {
       effectiveCycleMin,
       liveActive: false,
       stoppedReason,
+      reachedTarget: false,
     };
   }
 
@@ -342,19 +346,26 @@ export function calcLiveProduced(input: {
 
   const wholePieces = Math.floor(effectiveMin / effectiveCycleMin);
   const remainderMin = effectiveMin - wholePieces * effectiveCycleMin;
-  const pieceProgressPct = Math.min(
-    100,
-    (remainderMin / effectiveCycleMin) * 100,
-  );
   const cappedPieces = Math.min(wholePieces, remaining);
   const liveProduced = input.alreadyProduced + cappedPieces;
+  const reachedTarget = cappedPieces >= remaining; // hit quantity
+  // Once we've hit the target piece count, freeze the per-piece progress
+  // bar at 100% — there's no "next piece" anymore. Otherwise show the
+  // partial progress toward the next cycle.
+  const pieceProgressPct = reachedTarget
+    ? 100
+    : Math.min(100, (remainderMin / effectiveCycleMin) * 100);
 
   return {
     liveProduced,
     pieceProgressPct: isMachineDown ? 0 : pieceProgressPct,
     effectiveCycleMin,
-    liveActive: !isMachineDown && remaining > 0,
+    // liveActive = true while we're still ticking forward. Once the
+    // target piece count is reached the machine is "done waiting" —
+    // surface that to the UI so it can fire auto-completion.
+    liveActive: !isMachineDown && remaining > 0 && !reachedTarget,
     stoppedReason,
+    reachedTarget,
   };
 }
 
