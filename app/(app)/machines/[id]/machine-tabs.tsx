@@ -289,7 +289,7 @@ function ProfilTab({
   kpis: KpiData;
 }) {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* SOL RAIL — Canlı Durum (kompakt) */}
       <aside className="space-y-6 min-w-0">
         <section>
