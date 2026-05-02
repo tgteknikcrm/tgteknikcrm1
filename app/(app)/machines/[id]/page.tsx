@@ -8,6 +8,7 @@ import {
   MACHINE_STATUS_LABEL,
   MACHINE_STATUS_TONE,
   SHIFT_LABEL,
+  toolImagePublicUrl,
   type Machine,
   type MachineStatus,
   type ProductionEntry,
@@ -66,6 +67,7 @@ type JobToolRow = {
     name: string;
     type: string | null;
     size: string | null;
+    image_path: string | null;
   } | null;
 };
 
@@ -349,7 +351,7 @@ export default async function MachineDetailPage({
   if (currentJobRaw) {
     const toolsRes = await supabase
       .from("job_tools")
-      .select(`quantity_used, tool:tools(id, code, name, type, size)`)
+      .select(`quantity_used, tool:tools(id, code, name, type, size, image_path)`)
       .eq("job_id", currentJobRaw.id);
     currentJobToolsRaw = (toolsRes.data ?? []) as unknown as JobToolRow[];
   }
@@ -398,6 +400,7 @@ export default async function MachineDetailPage({
     code: jt.tool?.code ?? null,
     size: jt.tool?.size ?? null,
     quantity_used: jt.quantity_used,
+    image_url: toolImagePublicUrl(jt.tool?.image_path ?? null),
   }));
   const toolHints = currentJobToolsRaw.map((jt) => ({
     name: jt.tool?.name ?? "",

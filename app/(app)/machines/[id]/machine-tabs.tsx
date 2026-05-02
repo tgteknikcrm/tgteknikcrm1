@@ -67,6 +67,8 @@ export interface MachineToolRow {
   code: string | null;
   size: string | null;
   quantity_used: number;
+  /** Public storage URL for the tool's image, null if no image. */
+  image_url: string | null;
 }
 
 export interface ProducedProductRow {
@@ -343,8 +345,23 @@ function ProfilTab({
                   {tools.map((t, i) => (
                     <li
                       key={i}
-                      className="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/50 transition border"
+                      className="flex items-center gap-2.5 p-2 rounded-md hover:bg-muted/50 transition border"
                     >
+                      {/* Thumbnail — image if uploaded, otherwise wrench
+                          icon placeholder */}
+                      <div className="size-12 rounded-md bg-muted overflow-hidden shrink-0 flex items-center justify-center border">
+                        {t.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={t.image_url}
+                            alt={t.name}
+                            className="size-full object-cover"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <WrenchIcon className="size-5 text-muted-foreground/50" />
+                        )}
+                      </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-medium text-sm truncate">
                           {t.name}
