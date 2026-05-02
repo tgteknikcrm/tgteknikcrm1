@@ -1,30 +1,15 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { createClient } from "@/lib/supabase/server";
 import {
   MACHINE_STATUS_LABEL,
   MACHINE_STATUS_TONE,
-  JOB_STATUS_LABEL,
   SHIFT_LABEL,
   type Machine,
+  type MachineStatus,
   type ProductionEntry,
   type Job,
   type JobStatus,
@@ -33,38 +18,24 @@ import {
 import {
   ArrowLeft,
   Factory,
-  Clock,
-  User as UserIcon,
-  Package,
-  Target,
-  TrendingUp,
-  AlertTriangle,
-  Percent,
-  Activity,
-  Wrench as WrenchIcon,
-  Calendar,
   MapPin,
   Hash,
-  History,
-  ListChecks,
-  ClipboardCheck,
-  Stamp,
-  ArrowRight,
 } from "lucide-react";
-import {
-  QC_REVIEWER_ROLE_LABEL,
-  QC_REVIEW_STATUS_TONE,
-  QC_REVIEW_STATUS_LABEL,
-  type QcResult,
-} from "@/lib/supabase/types";
 import { MachineDialog } from "../machine-dialog";
 import { StatusButton } from "../status-button";
-import { LiveTelemetry } from "./live-telemetry";
 import { MachineInfoDialog } from "./machine-info-dialog";
-// MachineTimeline removed from this page (2026-04-29) — kept available
-// in components for future use elsewhere.
+import {
+  MachineTabs,
+  type CurrentJobInfo,
+  type DowntimeRow,
+  type KpiData,
+  type MachineToolRow,
+  type ProducedProductRow,
+  type ProductionEntryRow,
+  type TimelineEntryRow,
+} from "./machine-tabs";
 import { getProfile } from "@/lib/supabase/server";
-import { cn, formatDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 type EntryWithJoins = ProductionEntry & {
   operators?: { full_name: string } | null;
@@ -120,12 +91,20 @@ export default async function MachineDetailPage({
   const profile = await getProfile();
   void profile;
 
-  const [entriesRes, weekRes, todayStatsRes, jobsRes] = await Promise.all([
+  const [
+    entriesRes,
+    weekRes,
+    todayStatsRes,
+    jobsRes,
+    downtimesRes,
+    timelineRes,
+    productLogRes,
+  ] = await Promise.all([
     supabase
       .from("production_entries")
       .select(
         `*, operators(full_name),
-         jobs(id, job_no, customer, part_name, part_no, quantity, status, start_date, due_date)`,
+         jobs(id, job_no, customer, part_name, part_no, quantity, status, start_date, due_date, product_id)`,
       )
       .eq("machine_id", id)
       .order("entry_date", { ascending: false })
@@ -143,10 +122,40 @@ export default async function MachineDetailPage({
       .eq("entry_date", today),
     supabase
       .from("jobs")
-      .select("id, job_no, customer, part_name, part_no, quantity, status, start_date, due_date, completed_at")
+      .select(
+        "id, job_no, customer, part_name, part_no, quantity, status, start_date, due_date, completed_at, product_id",
+      )
       .eq("machine_id", id)
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("machine_downtime_sessions")
+      .select(
+        `id, status, started_at, ended_at, notes,
+         job:jobs(id, part_name)`,
+      )
+      .eq("machine_id", id)
+      .order("started_at", { ascending: false })
+      .limit(50),
+    supabase
+      .from("machine_timeline_entries")
+      .select(
+        `id, kind, title, body, duration_minutes, happened_at, author_name,
+         entry_status, fix_description, severity_level`,
+      )
+      .eq("machine_id", id)
+      .in("kind", ["bakim", "ariza", "temizlik", "duzeltme", "parca_degisimi"])
+      .order("happened_at", { ascending: false })
+      .limit(80),
+    supabase
+      .from("production_entries")
+      .select(
+        `id, job_id, produced_qty, scrap_qty, entry_date, created_at,
+         job:jobs(id, part_name, product:products(id, code, name))`,
+      )
+      .eq("machine_id", id)
+      .order("entry_date", { ascending: false })
+      .limit(500),
   ]);
 
   const entries = (entriesRes.data ?? []) as EntryWithJoins[];
@@ -162,91 +171,157 @@ export default async function MachineDetailPage({
     downtime_minutes: number;
   }>;
   const jobs = (jobsRes.data ?? []) as JobRow[];
+  void jobs;
+
+  // ── Downtime sessions ─────────────────────────────────────────
+  type DowntimeRowRaw = {
+    id: string;
+    status: MachineStatus;
+    started_at: string;
+    ended_at: string | null;
+    notes: string | null;
+    job: { id: string; part_name: string } | null;
+  };
+  const downtimes: DowntimeRow[] = (
+    (downtimesRes.data ?? []) as unknown as DowntimeRowRaw[]
+  ).map((d) => {
+    const start = new Date(d.started_at).getTime();
+    const end = d.ended_at ? new Date(d.ended_at).getTime() : Date.now();
+    return {
+      id: d.id,
+      status: d.status,
+      started_at: d.started_at,
+      ended_at: d.ended_at,
+      elapsed_minutes: Math.max(0, Math.floor((end - start) / 60000)),
+      job_part_name: d.job?.part_name ?? null,
+      notes: d.notes,
+    };
+  });
+
+  // ── Timeline entries (manual bakım/arıza/temizlik) ────────────
+  type TimelineRaw = {
+    id: string;
+    kind: string;
+    title: string | null;
+    body: string | null;
+    duration_minutes: number | null;
+    happened_at: string;
+    author_name: string | null;
+    entry_status: string | null;
+    fix_description: string | null;
+    severity_level: number | null;
+  };
+  const allTimeline = (timelineRes.data ?? []) as TimelineRaw[];
+  const bakimEntries: TimelineEntryRow[] = allTimeline.filter(
+    (e) => e.kind === "bakim" || e.kind === "duzeltme" || e.kind === "parca_degisimi",
+  );
+  const arizaEntries: TimelineEntryRow[] = allTimeline.filter(
+    (e) => e.kind === "ariza",
+  );
+  const temizlikEntries: TimelineEntryRow[] = allTimeline.filter(
+    (e) => e.kind === "temizlik",
+  );
+
+  // ── Products produced on this machine (aggregated) ──────────
+  type ProductLogRaw = {
+    id: string;
+    job_id: string | null;
+    produced_qty: number;
+    scrap_qty: number;
+    entry_date: string;
+    job: {
+      id: string;
+      part_name: string;
+      product: { id: string; code: string; name: string } | null;
+    } | null;
+  };
+  const productLog = (productLogRes.data ?? []) as unknown as ProductLogRaw[];
+  const productAgg = new Map<
+    string,
+    {
+      product_id: string | null;
+      product_code: string | null;
+      product_name: string | null;
+      job_set: Set<string>;
+      total_produced: number;
+      total_scrap: number;
+      last_seen: string | null;
+    }
+  >();
+  for (const e of productLog) {
+    const pid = e.job?.product?.id ?? null;
+    const key = pid ?? `__job__${e.job?.id ?? "none"}`;
+    const cur = productAgg.get(key) ?? {
+      product_id: pid,
+      product_code: e.job?.product?.code ?? null,
+      product_name: e.job?.product?.name ?? e.job?.part_name ?? null,
+      job_set: new Set<string>(),
+      total_produced: 0,
+      total_scrap: 0,
+      last_seen: null,
+    };
+    if (e.job?.id) cur.job_set.add(e.job.id);
+    cur.total_produced += e.produced_qty ?? 0;
+    cur.total_scrap += e.scrap_qty ?? 0;
+    if (!cur.last_seen || e.entry_date > cur.last_seen) {
+      cur.last_seen = e.entry_date;
+    }
+    productAgg.set(key, cur);
+  }
+  const products: ProducedProductRow[] = Array.from(productAgg.values())
+    .map((p) => ({
+      product_id: p.product_id,
+      product_code: p.product_code,
+      product_name: p.product_name,
+      job_count: p.job_set.size,
+      total_produced: p.total_produced,
+      total_scrap: p.total_scrap,
+      last_seen: p.last_seen,
+    }))
+    .sort((a, b) => b.total_produced - a.total_produced);
+
+  // ── Production entries log (last 30 for the rapor view) ─────
+  const productionLog: ProductionEntryRow[] = entries.map((e) => ({
+    id: e.id,
+    entry_date: e.entry_date,
+    shift: e.shift,
+    start_time: e.start_time,
+    end_time: e.end_time,
+    produced_qty: e.produced_qty ?? 0,
+    scrap_qty: e.scrap_qty ?? 0,
+    setup_minutes: e.setup_minutes ?? 0,
+    downtime_minutes: e.downtime_minutes ?? 0,
+    operator_name: e.operators?.full_name ?? null,
+    job_part_name: e.jobs?.part_name ?? null,
+    job_status: (e.jobs?.status ?? null) as JobStatus | null,
+  }));
+  void productionLog;
 
   // Currently producing
   const currentEntry = entries.find(
     (e) => e.entry_date === today && e.jobs && e.jobs.status === "uretimde",
   ) ?? entries.find((e) => e.entry_date === today && e.jobs);
-  const currentJob = currentEntry?.jobs ?? null;
+  const currentJobRaw = currentEntry?.jobs ?? null;
 
   let currentJobTotal = 0;
-  if (currentJob) {
+  if (currentJobRaw) {
     const jobTotalRes = await supabase
       .from("production_entries")
       .select("produced_qty")
-      .eq("job_id", currentJob.id);
+      .eq("job_id", currentJobRaw.id);
     currentJobTotal = (jobTotalRes.data ?? []).reduce(
       (s, e: { produced_qty: number }) => s + (e.produced_qty ?? 0),
       0,
     );
   }
 
-  let currentJobTools: JobToolRow[] = [];
-  if (currentJob) {
+  let currentJobToolsRaw: JobToolRow[] = [];
+  if (currentJobRaw) {
     const toolsRes = await supabase
       .from("job_tools")
       .select(`quantity_used, tool:tools(id, code, name, type, size)`)
-      .eq("job_id", currentJob.id);
-    currentJobTools = (toolsRes.data ?? []) as unknown as JobToolRow[];
-  }
-
-  // Quality control rollup for the current job
-  let currentJobQc: {
-    spec_count: number;
-    measurement_count: number;
-    ok: number;
-    sinirda: number;
-    nok: number;
-    last_review: {
-      reviewer_name: string | null;
-      role: string;
-      status: string;
-      reviewed_at: string;
-    } | null;
-  } | null = null;
-  if (currentJob) {
-    const [specsRes, measRes, lastRevRes] = await Promise.all([
-      supabase
-        .from("quality_specs")
-        .select("id", { count: "exact", head: true })
-        .eq("job_id", currentJob.id),
-      supabase
-        .from("quality_measurements")
-        .select("result")
-        .eq("job_id", currentJob.id),
-      supabase
-        .from("quality_reviews")
-        .select(
-          `reviewer_role, status, reviewed_at,
-           reviewer:profiles!quality_reviews_reviewer_id_fkey(full_name)`,
-        )
-        .eq("job_id", currentJob.id)
-        .order("reviewed_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-    ]);
-    const meas = (measRes.data ?? []) as Array<{ result: QcResult }>;
-    const lr = lastRevRes.data as {
-      reviewer_role: string;
-      status: string;
-      reviewed_at: string;
-      reviewer: { full_name: string | null } | null;
-    } | null;
-    currentJobQc = {
-      spec_count: specsRes.count ?? 0,
-      measurement_count: meas.length,
-      ok: meas.filter((m) => m.result === "ok").length,
-      sinirda: meas.filter((m) => m.result === "sinirda").length,
-      nok: meas.filter((m) => m.result === "nok").length,
-      last_review: lr
-        ? {
-            reviewer_name: lr.reviewer?.full_name ?? null,
-            role: lr.reviewer_role,
-            status: lr.status,
-            reviewed_at: lr.reviewed_at,
-          }
-        : null,
-    };
+      .eq("job_id", currentJobRaw.id);
+    currentJobToolsRaw = (toolsRes.data ?? []) as unknown as JobToolRow[];
   }
 
   const todayTotal = todayEntries.reduce((s, e) => s + (e.produced_qty ?? 0), 0);
@@ -265,14 +340,50 @@ export default async function MachineDetailPage({
     shiftMinutes > 0 ? Math.max(0, 1 - weekDown / shiftMinutes) * 100 : 100;
 
   const tone = MACHINE_STATUS_TONE[machine.status];
-  const operatorInitials = currentEntry?.operators?.full_name
-    ? currentEntry.operators.full_name
-        .split(" ")
-        .map((s) => s[0])
-        .slice(0, 2)
-        .join("")
-        .toUpperCase()
+
+  // ── Map for client tabs ────────────────────────────────────────
+  const currentJob: CurrentJobInfo | null = currentJobRaw
+    ? {
+        id: currentJobRaw.id,
+        job_no: currentJobRaw.job_no,
+        customer: currentJobRaw.customer,
+        part_name: currentJobRaw.part_name,
+        part_no: currentJobRaw.part_no,
+        quantity: currentJobRaw.quantity,
+        due_date: currentJobRaw.due_date,
+        produced_total: currentJobTotal,
+        operator_name: currentEntry?.operators?.full_name ?? null,
+        shift_label: currentEntry?.shift
+          ? SHIFT_LABEL[currentEntry.shift as Shift]
+          : null,
+        start_time: currentEntry?.start_time ?? null,
+        end_time: currentEntry?.end_time ?? null,
+        today_produced: todayTotal,
+        today_scrap: todayScrap,
+        today_downtime: todayDown,
+      }
     : null;
+  const tools: MachineToolRow[] = currentJobToolsRaw.map((jt) => ({
+    name: jt.tool?.name ?? "—",
+    code: jt.tool?.code ?? null,
+    size: jt.tool?.size ?? null,
+    quantity_used: jt.quantity_used,
+  }));
+  const toolHints = currentJobToolsRaw.map((jt) => ({
+    name: jt.tool?.name ?? "",
+    code: jt.tool?.code ?? null,
+    size: jt.tool?.size ?? null,
+  }));
+  const kpis: KpiData = {
+    todayTotal,
+    todayScrap,
+    todayDown,
+    weekTotal,
+    weekScrap,
+    weekDown,
+    scrapPct,
+    uptimePct,
+  };
 
   return (
     <>
@@ -358,564 +469,28 @@ export default async function MachineDetailPage({
         </div>
       </Card>
 
-      {/* LIVE TELEMETRY (left) + KPI strip (right) — split 2-column on lg */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* SOL — Canlı Durum (mock, swappable for real MTConnect/FOCAS) */}
-        <div className="min-w-0">
-          <LiveTelemetry
-            machineId={machine.id}
-            status={machine.status}
-            toolHints={currentJobTools.map((jt) => ({
-              name: jt.tool?.name ?? "",
-              code: jt.tool?.code ?? null,
-              size: jt.tool?.size ?? null,
-            }))}
-          />
-        </div>
+      {/* Tabs replace the previous card layout — Profil / İstatistik /
+          Üretim / Duruşlar / Bakım / Arıza / Temizlik. Soldan sağa
+          underline indicator. */}
+      <MachineTabs
+        machineId={machine.id}
+        machineStatus={machine.status}
+        currentJob={currentJob}
+        toolHints={toolHints}
+        tools={tools}
+        products={products}
+        downtimes={downtimes}
+        bakimEntries={bakimEntries}
+        arizaEntries={arizaEntries}
+        temizlikEntries={temizlikEntries}
+        productionLog={productionLog}
+        kpis={kpis}
+      />
 
-        {/* SAĞ — KPI 2x2 */}
-        <div className="grid grid-cols-2 gap-3 content-start">
-          <KpiTile
-            icon={TrendingUp}
-            label="Bugün Üretilen"
-            value={todayTotal}
-            unit="adet"
-            accent="emerald"
-          />
-          <KpiTile
-            icon={Target}
-            label="7 Günlük Toplam"
-            value={weekTotal}
-            unit="adet"
-            accent="blue"
-            sub={`fire: ${weekScrap}`}
-          />
-          <KpiTile
-            icon={AlertTriangle}
-            label="Fire Oranı (7g)"
-            value={`%${scrapPct.toFixed(1)}`}
-            unit=""
-            accent={scrapPct > 5 ? "red" : "amber"}
-          />
-          <KpiTile
-            icon={Percent}
-            label="Çalışma Verimi (7g)"
-            value={`%${uptimePct.toFixed(0)}`}
-            unit=""
-            accent={uptimePct < 80 ? "amber" : "emerald"}
-            sub={`duruş: ${weekDown}dk`}
-          />
-        </div>
-      </div>
-
-      {/* Machine detail content below (full width) */}
-      <div className="space-y-4">
-
-      {/* CURRENTLY PRODUCING — full-width visual hero */}
-      <Card
-        className={cn(
-          "overflow-hidden gap-0 py-0",
-          currentJob && "ring-1 ring-emerald-500/20",
-        )}
-      >
-        <div
-          className={cn(
-            "h-1.5 w-full",
-            currentJob ? "bg-emerald-500" : tone.dot,
-          )}
-        />
-        <CardContent className="p-6">
-          {currentJob ? (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2 space-y-5">
-                <div>
-                  <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Şu An Üretiliyor
-                  </div>
-                  <h2 className="text-3xl font-bold tracking-tight">
-                    {currentJob.part_name}
-                  </h2>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground mt-1">
-                    <span className="inline-flex items-center gap-1 font-mono text-xs">
-                      <Hash className="size-3.5" /> {currentJob.job_no || "—"}
-                    </span>
-                    <span className="font-medium text-foreground/80">
-                      {currentJob.customer}
-                    </span>
-                    {currentJob.part_no && (
-                      <span className="font-mono text-xs">
-                        P/N: {currentJob.part_no}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-baseline justify-between mb-2">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      İlerleme
-                    </span>
-                    <span className="text-sm font-bold tabular-nums">
-                      %
-                      {currentJob.quantity > 0
-                        ? Math.round((currentJobTotal / currentJob.quantity) * 100)
-                        : 0}
-                    </span>
-                  </div>
-                  <div className="flex items-baseline gap-2 mb-3">
-                    <span className="text-5xl font-bold font-mono tabular-nums leading-none">
-                      {currentJobTotal}
-                    </span>
-                    <span className="text-xl text-muted-foreground tabular-nums">
-                      / {currentJob.quantity}
-                    </span>
-                    <span className="text-sm text-muted-foreground ml-1">adet</span>
-                  </div>
-                  <div className="h-2.5 w-full rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
-                      style={{
-                        width: `${Math.min(
-                          100,
-                          currentJob.quantity > 0
-                            ? (currentJobTotal / currentJob.quantity) * 100
-                            : 0,
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                  {currentJob.due_date && (
-                    <p className="text-xs text-muted-foreground mt-2.5 inline-flex items-center gap-1.5">
-                      <Calendar className="size-3" />
-                      Teslim: {formatDate(currentJob.due_date)}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              <div className="space-y-4 lg:border-l lg:pl-6">
-                {/* Operator avatar block */}
-                <div className="flex items-start gap-3">
-                  {operatorInitials ? (
-                    <Avatar className="size-11 shrink-0">
-                      <AvatarFallback className="font-semibold bg-primary/15 text-primary">
-                        {operatorInitials}
-                      </AvatarFallback>
-                    </Avatar>
-                  ) : (
-                    <div className="size-11 rounded-full bg-muted flex items-center justify-center shrink-0">
-                      <UserIcon className="size-5 text-muted-foreground" />
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                      Operatör
-                    </div>
-                    <div className="text-sm font-bold leading-tight truncate">
-                      {currentEntry?.operators?.full_name || "—"}
-                    </div>
-                    {currentEntry?.shift && (
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        {SHIFT_LABEL[currentEntry.shift as Shift]} vardiyası
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <InfoLine
-                  icon={Clock}
-                  label="Başlama / Bitiş"
-                  value={`${formatTime(currentEntry?.start_time ?? null)} → ${formatTime(
-                    currentEntry?.end_time ?? null,
-                  )}`}
-                />
-
-                <div className="grid grid-cols-3 gap-2 pt-3 border-t">
-                  <MiniStat label="Bugün" value={todayTotal} tone="default" />
-                  <MiniStat label="Fire" value={todayScrap} tone="warn" />
-                  <MiniStat label="Duruş" value={`${todayDown}dk`} tone="muted" />
-                </div>
-              </div>
-            </div>
-          ) : (
-            <EmptyCurrentJob status={machine.status} />
-          )}
-        </CardContent>
-      </Card>
-
-      {/* QUALITY CONTROL — only when there's a current job */}
-      {currentJob && currentJobQc && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <ClipboardCheck className="size-4 text-muted-foreground" />
-              Kalite Kontrol — Aktif İş
-              <Button asChild size="sm" variant="ghost" className="ml-auto h-7">
-                <Link href={`/quality/${currentJob.id}`}>
-                  Yönet <ArrowRight className="size-3.5" />
-                </Link>
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            {currentJobQc.spec_count === 0 ? (
-              <div className="text-center py-4">
-                <p className="text-sm text-muted-foreground mb-2">
-                  Bu iş için kalite spec'i tanımlanmamış.
-                </p>
-                <Button asChild size="sm" variant="outline">
-                  <Link href={`/quality/${currentJob.id}`}>
-                    Spec Ekle
-                  </Link>
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  <QcStat label="Spec" value={currentJobQc.spec_count} />
-                  <QcStat label="Ölçüm" value={currentJobQc.measurement_count} />
-                  <QcStat
-                    label="Kabul"
-                    value={
-                      currentJobQc.measurement_count > 0
-                        ? `%${Math.round(
-                            (currentJobQc.ok / currentJobQc.measurement_count) * 100,
-                          )}`
-                        : "—"
-                    }
-                    tone="ok"
-                  />
-                  <QcStat
-                    label="NOK"
-                    value={currentJobQc.nok}
-                    tone={currentJobQc.nok > 0 ? "bad" : undefined}
-                  />
-                </div>
-
-                {currentJobQc.last_review && (
-                  <div className="flex items-center gap-2 pt-2 border-t flex-wrap">
-                    <Stamp className="size-3.5 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">
-                      Son onay:
-                    </span>
-                    <span className="text-xs font-medium">
-                      {currentJobQc.last_review.reviewer_name || "—"}
-                    </span>
-                    <Badge variant="outline" className="font-normal h-5 text-[10px]">
-                      {
-                        QC_REVIEWER_ROLE_LABEL[
-                          currentJobQc.last_review.role as keyof typeof QC_REVIEWER_ROLE_LABEL
-                        ]
-                      }
-                    </Badge>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "h-5 text-[10px]",
-                        QC_REVIEW_STATUS_TONE[
-                          currentJobQc.last_review
-                            .status as keyof typeof QC_REVIEW_STATUS_TONE
-                        ],
-                      )}
-                    >
-                      {
-                        QC_REVIEW_STATUS_LABEL[
-                          currentJobQc.last_review
-                            .status as keyof typeof QC_REVIEW_STATUS_LABEL
-                        ]
-                      }
-                    </Badge>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {formatDate(currentJobQc.last_review.reviewed_at)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ACTIVE JOB TOOLS — full width */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center gap-2">
-            <WrenchIcon className="size-4 text-muted-foreground" />
-            Aktif İş Takımları
-            {currentJobTools.length > 0 && (
-              <Badge variant="outline" className="ml-auto font-normal">
-                {currentJobTools.length}
-              </Badge>
-            )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {!currentJob ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">
-              <WrenchIcon className="size-6 mx-auto opacity-30 mb-2" />
-              Aktif iş yok.
-            </div>
-          ) : currentJobTools.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              Bu iş için takım atanmamış.
-            </p>
-          ) : (
-            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {currentJobTools.map((jt, i) => (
-                <li
-                  key={jt.tool?.id ?? i}
-                  className="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/50 transition border"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-sm truncate">
-                      {jt.tool?.name ?? "—"}
-                    </div>
-                    <div className="text-xs text-muted-foreground truncate font-mono">
-                      {jt.tool?.code ?? ""}
-                      {jt.tool?.size ? ` · ${jt.tool.size}` : ""}
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="tabular-nums shrink-0">
-                    {jt.quantity_used}x
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      </div>
 
     </>
   );
 }
 
-/* ────────────────────────────────────────────────────────── */
-/* Sub-components                                            */
-/* ────────────────────────────────────────────────────────── */
-
-function KpiTile({
-  icon: Icon,
-  label,
-  value,
-  unit,
-  sub,
-  accent,
-}: {
-  icon: typeof Factory;
-  label: string;
-  value: number | string;
-  unit?: string;
-  sub?: string;
-  accent: "emerald" | "blue" | "amber" | "red";
-}) {
-  const tones = {
-    emerald: {
-      bg: "bg-emerald-500/10",
-      text: "text-emerald-600",
-      border: "border-emerald-500/20",
-    },
-    blue: {
-      bg: "bg-blue-500/10",
-      text: "text-blue-600",
-      border: "border-blue-500/20",
-    },
-    amber: {
-      bg: "bg-amber-500/10",
-      text: "text-amber-600",
-      border: "border-amber-500/20",
-    },
-    red: {
-      bg: "bg-red-500/10",
-      text: "text-red-600",
-      border: "border-red-500/20",
-    },
-  };
-  const t = tones[accent];
-  return (
-    <Card className={cn("hover:shadow-md transition-shadow", t.border)}>
-      <CardContent className="p-4">
-        <div className="flex items-start gap-3">
-          <div
-            className={cn(
-              "size-10 rounded-xl flex items-center justify-center shrink-0",
-              t.bg,
-              t.text,
-            )}
-          >
-            <Icon className="size-5" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-              {label}
-            </div>
-            <div className="flex items-baseline gap-1 mt-0.5">
-              <span className="text-2xl font-bold tabular-nums leading-tight">
-                {value}
-              </span>
-              {unit && (
-                <span className="text-xs text-muted-foreground">{unit}</span>
-              )}
-            </div>
-            {sub && (
-              <div className="text-[11px] text-muted-foreground mt-0.5">
-                {sub}
-              </div>
-            )}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function InfoLine({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Factory;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-start gap-2.5">
-      <div className="size-8 rounded-md bg-muted/60 flex items-center justify-center shrink-0">
-        <Icon className="size-4 text-muted-foreground" />
-      </div>
-      <div className="min-w-0">
-        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-          {label}
-        </div>
-        <div className="text-sm font-semibold leading-tight truncate">
-          {value}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function QcStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number | string;
-  tone?: "ok" | "bad";
-}) {
-  return (
-    <div className="rounded-lg border p-2.5 bg-muted/20">
-      <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "text-xl font-bold tabular-nums mt-0.5",
-          tone === "ok" && "text-emerald-600",
-          tone === "bad" && "text-red-600",
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function MiniStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number | string;
-  tone: "default" | "warn" | "muted";
-}) {
-  return (
-    <div>
-      <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "text-lg font-bold font-mono tabular-nums mt-0.5 leading-tight",
-          tone === "warn" && "text-amber-600",
-          tone === "muted" && "text-muted-foreground",
-        )}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function EmptyCurrentJob({ status }: { status: Machine["status"] }) {
-  const config = {
-    ariza: {
-      title: "Arızalı",
-      note: "Bu makine şu an üretim yapmıyor.",
-      bg: "bg-red-500/10",
-      text: "text-red-600",
-    },
-    bakim: {
-      title: "Bakımda",
-      note: "Planlı bakım nedeniyle üretim duruyor.",
-      bg: "bg-amber-500/10",
-      text: "text-amber-600",
-    },
-    durus: {
-      title: "Duruşta",
-      note: "Üretim durduruldu.",
-      bg: "bg-zinc-500/10",
-      text: "text-zinc-600",
-    },
-    aktif: {
-      title: "Boşta",
-      note: "Bugün için atanmış iş yok.",
-      bg: "bg-muted",
-      text: "text-muted-foreground",
-    },
-  } as const;
-  const c = config[status];
-  return (
-    <div className="py-8 text-center">
-      <div
-        className={cn(
-          "size-14 rounded-2xl flex items-center justify-center mx-auto mb-3",
-          c.bg,
-          c.text,
-        )}
-      >
-        <Activity className="size-7" />
-      </div>
-      <p className="text-lg font-semibold">{c.title}</p>
-      <p className="text-sm text-muted-foreground mt-1">{c.note}</p>
-    </div>
-  );
-}
-
-function JobStatusBadge({ status }: { status: JobStatus }) {
-  const cls: Record<JobStatus, string> = {
-    beklemede:
-      "bg-zinc-500/15 text-zinc-700 dark:text-zinc-300 border-zinc-500/30",
-    ayar:
-      "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
-    uretimde:
-      "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
-    tamamlandi:
-      "bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30",
-    iptal: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30",
-  };
-  return (
-    <Badge variant="outline" className={cn("border font-medium", cls[status])}>
-      {JOB_STATUS_LABEL[status]}
-    </Badge>
-  );
-}
-
-function formatTime(t: string | null): string {
-  if (!t) return "—";
-  return t.slice(0, 5);
-}
+// All sub-components moved into machine-tabs.tsx — page.tsx is now a
+// thin server wrapper that fetches data and hands off to the tabs.
