@@ -86,6 +86,13 @@ export function JobsShell({
   const searchParams = useSearchParams();
   const [range, setRange] = useState<JobsRange>(initialRange);
   const [q, setQ] = useState("");
+  // Status tab — splits the page into Aktif (beklemede/ayar/uretimde),
+  // Biten (tamamlandi) and İptal (iptal). User asked: "biten devam
+  // eden ve iptal edilenlerde görünsün". Default is "aktif" because
+  // that's where work-in-progress lives.
+  const [statusTab, setStatusTab] = useState<"aktif" | "biten" | "iptal">(
+    "aktif",
+  );
 
   // ── Realtime: when a machine flips status (e.g. operator starts a
   // breakdown from /machines or /breakdowns), or a downtime session
@@ -354,10 +361,35 @@ export function JobsShell({
     ],
   );
 
+  // Per-tab counts so the tab pills always show accurate badges,
+  // independent of the user's current selection.
+  const tabCounts = useMemo(() => {
+    let aktif = 0;
+    let biten = 0;
+    let iptal = 0;
+    for (const c of cards) {
+      if (c.job.status === "tamamlandi") biten++;
+      else if (c.job.status === "iptal") iptal++;
+      else aktif++;
+    }
+    return { aktif, biten, iptal };
+  }, [cards]);
+
+  // Filter to the active status tab BEFORE machine grouping so empty
+  // groups vanish from the page automatically.
+  const tabFilteredCards = useMemo(() => {
+    return cards.filter((c) => {
+      if (statusTab === "biten") return c.job.status === "tamamlandi";
+      if (statusTab === "iptal") return c.job.status === "iptal";
+      // aktif: everything that isn't completed or cancelled
+      return c.job.status !== "tamamlandi" && c.job.status !== "iptal";
+    });
+  }, [cards, statusTab]);
+
   // Group by machine (null = "Atanmamış")
   const groups = useMemo(() => {
-    const map = new Map<string | "none", typeof cards>();
-    for (const c of cards) {
+    const map = new Map<string | "none", typeof tabFilteredCards>();
+    for (const c of tabFilteredCards) {
       const key = c.job.machine_id ?? "none";
       const arr = map.get(key) ?? [];
       arr.push(c);
@@ -366,7 +398,7 @@ export function JobsShell({
     // Render machines in sidebar order; append "none" at end if non-empty.
     const out: Array<{
       machine: Machine | null;
-      cards: typeof cards;
+      cards: typeof tabFilteredCards;
     }> = [];
     for (const m of machines) {
       const list = map.get(m.id);
@@ -378,7 +410,7 @@ export function JobsShell({
       out.push({ machine: null, cards: orphan });
     }
     return out;
-  }, [cards, machines]);
+  }, [tabFilteredCards, machines]);
 
   // Aggregate KPI strip across all currently-visible cards
   const kpis = useMemo(() => {
@@ -480,7 +512,7 @@ export function JobsShell({
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-2 flex-wrap mb-4">
+      <div className="flex items-center gap-2 flex-wrap mb-3">
         <DateRangeFilter value={range} onChange={setRange} />
         <div className="relative ml-auto w-full sm:w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
@@ -493,6 +525,36 @@ export function JobsShell({
         </div>
       </div>
 
+      {/* Status tabs — Aktif / Biten / İptal. Defaults to Aktif so the
+          page lands on work-in-progress; counts always reflect the
+          current date+search filter. */}
+      <div className="flex items-center gap-1.5 mb-4 overflow-x-auto pb-1">
+        <StatusTab
+          active={statusTab === "aktif"}
+          onClick={() => setStatusTab("aktif")}
+          icon={<Cog className="size-3.5" />}
+          label="Devam Eden"
+          count={tabCounts.aktif}
+          tone="emerald"
+        />
+        <StatusTab
+          active={statusTab === "biten"}
+          onClick={() => setStatusTab("biten")}
+          icon={<CheckCircle2 className="size-3.5" />}
+          label="Biten"
+          count={tabCounts.biten}
+          tone="blue"
+        />
+        <StatusTab
+          active={statusTab === "iptal"}
+          onClick={() => setStatusTab("iptal")}
+          icon={<AlertTriangle className="size-3.5" />}
+          label="İptal Edilen"
+          count={tabCounts.iptal}
+          tone="rose"
+        />
+      </div>
+
       {/* Empty state */}
       {groups.length === 0 ? (
         <Card>
@@ -502,12 +564,20 @@ export function JobsShell({
               title={
                 jobs.length === 0
                   ? "Henüz iş yok"
-                  : "Bu filtreye uyan iş yok"
+                  : statusTab === "biten"
+                    ? "Henüz biten iş yok"
+                    : statusTab === "iptal"
+                      ? "İptal edilen iş yok"
+                      : "Bu filtreye uyan iş yok"
               }
               description={
                 jobs.length === 0
                   ? "İlk işi oluşturarak üretim takibine başla."
-                  : "Tarih aralığını veya aramayı değiştir."
+                  : statusTab === "biten"
+                    ? "İşler tamamlandığında burada görünür."
+                    : statusTab === "iptal"
+                      ? "İptal edilen işler burada listelenir."
+                      : "Tarih aralığını veya aramayı değiştir."
               }
               action={
                 jobs.length === 0 ? (
@@ -623,6 +693,71 @@ function Kpi({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Pill-style status tab with a count badge — same visual pattern as
+ * the messaging conversation list. Shrinks/scrolls cleanly on mobile.
+ */
+function StatusTab({
+  active,
+  onClick,
+  icon,
+  label,
+  count,
+  tone,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  count: number;
+  tone: "emerald" | "blue" | "rose";
+}) {
+  const tones: Record<string, { bg: string; text: string; ring: string }> = {
+    emerald: {
+      bg: "bg-emerald-500",
+      text: "text-emerald-700 dark:text-emerald-300",
+      ring: "ring-emerald-500/40",
+    },
+    blue: {
+      bg: "bg-blue-500",
+      text: "text-blue-700 dark:text-blue-300",
+      ring: "ring-blue-500/40",
+    },
+    rose: {
+      bg: "bg-rose-500",
+      text: "text-rose-700 dark:text-rose-300",
+      ring: "ring-rose-500/40",
+    },
+  };
+  const t = tones[tone];
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        active
+          ? `${t.bg} text-white border-transparent shadow-sm`
+          : `bg-card border-border hover:bg-muted ${t.text}`,
+      )}
+    >
+      {icon}
+      <span>{label}</span>
+      {count > 0 && (
+        <span
+          className={cn(
+            "h-4 min-w-4 px-1 rounded-full text-[10px] font-bold tabular-nums flex items-center justify-center",
+            active ? "bg-white/25 text-white" : "bg-muted-foreground/15",
+          )}
+        >
+          {count}
+        </span>
+      )}
+    </button>
   );
 }
 
