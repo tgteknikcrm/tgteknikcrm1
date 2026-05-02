@@ -287,63 +287,66 @@ function ProfilTab({
 }) {
   return (
     <div className="space-y-4">
+      {/* TOP ROW — Sol: Canlı Durum · Sağ: Üretim kartı */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <LiveTelemetry
-          machineId={machineId}
-          status={machineStatus}
-          toolHints={toolHints}
-        />
-        <div className="grid grid-cols-2 gap-3 content-start">
-          <KpiTile
-            icon={TrendingUp}
-            label="Bugün"
-            value={kpis.todayTotal}
-            unit="adet"
-            tone="emerald"
-          />
-          <KpiTile
-            icon={AlertTriangle}
-            label="Bugün Fire"
-            value={kpis.todayScrap}
-            unit="adet"
-            tone={kpis.todayScrap > 0 ? "amber" : "zinc"}
-          />
-          <KpiTile
-            icon={Pause}
-            label="Bugün Duruş"
-            value={kpis.todayDown}
-            unit="dk"
-            tone={kpis.todayDown > 60 ? "rose" : "zinc"}
-          />
-          <KpiTile
-            icon={Cog}
-            label="7g Verim"
-            value={`%${kpis.uptimePct.toFixed(0)}`}
-            unit=""
-            tone={kpis.uptimePct < 80 ? "amber" : "emerald"}
+        <div className="min-w-0">
+          <LiveTelemetry
+            machineId={machineId}
+            status={machineStatus}
+            toolHints={toolHints}
           />
         </div>
+        <Card className="overflow-hidden gap-0 py-0 min-w-0">
+          <div
+            className={cn(
+              "h-1.5 w-full",
+              currentJob ? "bg-emerald-500" : "bg-muted",
+            )}
+          />
+          <CardContent className="p-5">
+            {currentJob ? (
+              <CurrentJobHero job={currentJob} compact />
+            ) : (
+              <div className="text-center py-8 text-sm text-muted-foreground">
+                <Cog className="size-8 mx-auto opacity-30 mb-2" />
+                Şu an üretimde iş yok.
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Current job hero */}
-      <Card className="overflow-hidden gap-0 py-0">
-        <div
-          className={cn(
-            "h-1.5 w-full",
-            currentJob ? "bg-emerald-500" : "bg-muted",
-          )}
+      {/* KPI strip — full width below */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KpiTile
+          icon={TrendingUp}
+          label="Bugün"
+          value={kpis.todayTotal}
+          unit="adet"
+          tone="emerald"
         />
-        <CardContent className="p-5">
-          {currentJob ? (
-            <CurrentJobHero job={currentJob} />
-          ) : (
-            <div className="text-center py-8 text-sm text-muted-foreground">
-              <Cog className="size-8 mx-auto opacity-30 mb-2" />
-              Şu an üretimde iş yok.
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        <KpiTile
+          icon={AlertTriangle}
+          label="Bugün Fire"
+          value={kpis.todayScrap}
+          unit="adet"
+          tone={kpis.todayScrap > 0 ? "amber" : "zinc"}
+        />
+        <KpiTile
+          icon={Pause}
+          label="Bugün Duruş"
+          value={kpis.todayDown}
+          unit="dk"
+          tone={kpis.todayDown > 60 ? "rose" : "zinc"}
+        />
+        <KpiTile
+          icon={Cog}
+          label="7g Verim"
+          value={`%${kpis.uptimePct.toFixed(0)}`}
+          unit=""
+          tone={kpis.uptimePct < 80 ? "amber" : "emerald"}
+        />
+      </div>
 
       {/* Active job tools */}
       <Card>
@@ -388,23 +391,43 @@ function ProfilTab({
   );
 }
 
-function CurrentJobHero({ job }: { job: CurrentJobInfo }) {
+function CurrentJobHero({
+  job,
+  compact = false,
+}: {
+  job: CurrentJobInfo;
+  compact?: boolean;
+}) {
   const pct =
     job.quantity > 0 ? Math.round((job.produced_total / job.quantity) * 100) : 0;
+  // In compact mode (sidebar-style narrow column) we collapse to a
+  // single stack so progress + operator info read top-to-bottom instead
+  // of squeezing into a 3-column grid that would overflow.
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-      <div className="lg:col-span-2 space-y-4">
+    <div
+      className={cn(
+        compact ? "space-y-4" : "grid grid-cols-1 lg:grid-cols-3 gap-5",
+      )}
+    >
+      <div className={cn(compact ? "space-y-4" : "lg:col-span-2 space-y-4")}>
         <div>
           <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
             <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
             Şu An Üretiliyor
           </div>
-          <h2 className="text-2xl font-bold tracking-tight">{job.part_name}</h2>
+          <h2
+            className={cn(
+              "font-bold tracking-tight truncate",
+              compact ? "text-xl" : "text-2xl",
+            )}
+          >
+            {job.part_name}
+          </h2>
           <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground mt-1">
             <span className="inline-flex items-center gap-1 font-mono text-xs">
               <Hash className="size-3.5" /> {job.job_no || "—"}
             </span>
-            <span className="font-medium text-foreground/80">
+            <span className="font-medium text-foreground/80 truncate">
               {job.customer}
             </span>
             {job.part_no && (
@@ -421,7 +444,12 @@ function CurrentJobHero({ job }: { job: CurrentJobInfo }) {
             <span className="text-sm font-bold tabular-nums">%{pct}</span>
           </div>
           <div className="flex items-baseline gap-2 mb-3">
-            <span className="text-4xl font-bold font-mono tabular-nums leading-none">
+            <span
+              className={cn(
+                "font-bold font-mono tabular-nums leading-none",
+                compact ? "text-3xl" : "text-4xl",
+              )}
+            >
               {job.produced_total}
             </span>
             <span className="text-lg text-muted-foreground tabular-nums">
@@ -451,14 +479,19 @@ function CurrentJobHero({ job }: { job: CurrentJobInfo }) {
         </Button>
       </div>
 
-      <div className="space-y-3 lg:border-l lg:pl-5">
+      <div
+        className={cn(
+          "space-y-3",
+          compact ? "pt-3 border-t" : "lg:border-l lg:pl-5",
+        )}
+      >
         <div>
           <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             Operatör
           </div>
           <div className="flex items-center gap-2 mt-1">
             <UserIcon className="size-4 text-muted-foreground" />
-            <span className="font-semibold text-sm">
+            <span className="font-semibold text-sm truncate">
               {job.operator_name || "—"}
             </span>
           </div>
