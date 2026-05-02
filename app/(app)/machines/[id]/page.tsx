@@ -178,7 +178,6 @@ export default async function MachineDetailPage({
     downtime_minutes: number;
   }>;
   const jobs = (jobsRes.data ?? []) as JobRow[];
-  void jobs;
 
   // ── Downtime sessions ─────────────────────────────────────────
   type DowntimeRowRaw = {
@@ -307,11 +306,32 @@ export default async function MachineDetailPage({
   }));
   void productionLog;
 
-  // Currently producing
-  const currentEntry = entries.find(
-    (e) => e.entry_date === today && e.jobs && e.jobs.status === "uretimde",
-  ) ?? entries.find((e) => e.entry_date === today && e.jobs);
-  const currentJobRaw = currentEntry?.jobs ?? null;
+  // Currently producing — primary source is the JOBS table (any
+  // ayar/uretimde job assigned to this machine), not production_entries.
+  // Operators sometimes have a job in flight without a fresh entry today
+  // (e.g., long-running setup that started yesterday); we still want to
+  // show the job + its tools. Today's entry, if any, is used only to
+  // surface operator/shift metadata.
+  const activeJobFromList = jobs.find(
+    (j) => j.status === "uretimde" || j.status === "ayar",
+  ) ?? null;
+  const currentEntry = activeJobFromList
+    ? entries.find(
+        (e) => e.entry_date === today && e.jobs?.id === activeJobFromList.id,
+      ) ??
+      entries.find(
+        (e) => e.entry_date === today && e.jobs && e.jobs.status === "uretimde",
+      ) ??
+      null
+    : entries.find(
+        (e) => e.entry_date === today && e.jobs && e.jobs.status === "uretimde",
+      ) ?? null;
+  // Use the jobs-table row as source of truth so we always have the
+  // canonical fields even when there's no entry today.
+  const currentJobRaw =
+    activeJobFromList ??
+    (currentEntry?.jobs as typeof activeJobFromList | null) ??
+    null;
 
   let currentJobTotal = 0;
   if (currentJobRaw) {
