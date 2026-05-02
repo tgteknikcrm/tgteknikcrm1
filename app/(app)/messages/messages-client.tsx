@@ -318,11 +318,22 @@ export function MessagesClient({
         );
       }
 
+      // Pre-seed messageCache with empty array so selectConversation()
+      // skips fetchConversationDetail — no skeleton flash, no second
+      // round-trip. A brand-new conversation has zero messages by
+      // definition; Realtime will push any future ones.
+      setMessageCache((prev) =>
+        setBounded(prev, newConvId, [], activeIdRef.current),
+      );
+
       selectConversation(newConvId);
-      // Best-effort backstop: keep server-rendered metadata fresh.
-      router.refresh();
+      // No router.refresh() — the bundle already gave us the canonical
+      // conversation + participants and revalidatePath('/messages') in
+      // the action handles the next natural navigation. A refresh here
+      // forces a full server re-render right as the panel opens, which
+      // the user perceives as the panel "refreshing" when they click.
     },
-    [supabase, currentUserId, selectConversation, router],
+    [supabase, currentUserId, selectConversation],
   );
 
   // Defensive prop-sync. The server's view (initial* props) is
