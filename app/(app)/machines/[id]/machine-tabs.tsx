@@ -228,9 +228,6 @@ export function MachineTabs(props: Props) {
           toolHints={props.toolHints}
           tools={props.tools}
           kpis={props.kpis}
-          downtimes={props.downtimes}
-          bakimEntries={props.bakimEntries}
-          arizaEntries={props.arizaEntries}
         />
       )}
       {tab === "istatistik" && <IstatistikTab kpis={props.kpis} />}
@@ -283,9 +280,6 @@ function ProfilTab({
   toolHints,
   tools,
   kpis,
-  downtimes,
-  bakimEntries,
-  arizaEntries,
 }: {
   machineId: string;
   machineStatus: MachineStatus;
@@ -293,42 +287,11 @@ function ProfilTab({
   toolHints: Array<{ name: string; code: string | null; size: string | null }>;
   tools: MachineToolRow[];
   kpis: KpiData;
-  downtimes: DowntimeRow[];
-  bakimEntries: TimelineEntryRow[];
-  arizaEntries: TimelineEntryRow[];
 }) {
-  // Recent activity feed = newest 5 events from downtime + bakim + ariza,
-  // merged & sorted desc. Drives the left rail timeline (referans görseldeki
-  // "Recent Activity" bölümünün muadili).
-  const recentEvents = buildRecentActivity({
-    downtimes,
-    bakimEntries,
-    arizaEntries,
-  });
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
-      {/* SOL RAIL — küçük başlık satırları, recent activity, telemetri özeti */}
+      {/* SOL RAIL — Canlı Durum (kompakt) */}
       <aside className="space-y-6 min-w-0">
-        {/* RECENT ACTIVITY */}
-        <section>
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-3">
-            Son Olaylar
-          </h3>
-          {recentEvents.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic">
-              Kayıtlı olay yok.
-            </p>
-          ) : (
-            <ul className="space-y-3">
-              {recentEvents.map((e) => (
-                <ActivityRow key={e.id} event={e} />
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* CANLI DURUM — telemetri kompakt mod */}
         <section>
           <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-3">
             Canlı Durum
@@ -465,112 +428,6 @@ function ProfilTab({
   );
 }
 
-/* ── Recent activity helpers ──────────────────────────────────────── */
-
-interface ActivityEvent {
-  id: string;
-  kind: "downtime" | "bakim" | "ariza";
-  status?: MachineStatus;
-  title: string;
-  subtitle: string | null;
-  at: string;
-}
-
-function buildRecentActivity({
-  downtimes,
-  bakimEntries,
-  arizaEntries,
-}: {
-  downtimes: DowntimeRow[];
-  bakimEntries: TimelineEntryRow[];
-  arizaEntries: TimelineEntryRow[];
-}): ActivityEvent[] {
-  const events: ActivityEvent[] = [];
-  for (const d of downtimes.slice(0, 5)) {
-    events.push({
-      id: `d-${d.id}`,
-      kind: "downtime",
-      status: d.status,
-      title: `${MACHINE_STATUS_LABEL[d.status]} ${
-        d.ended_at ? "kapandı" : "açıldı"
-      }`,
-      subtitle: d.notes ?? d.job_part_name ?? null,
-      at: d.ended_at ?? d.started_at,
-    });
-  }
-  for (const b of bakimEntries.slice(0, 5)) {
-    events.push({
-      id: `b-${b.id}`,
-      kind: "bakim",
-      title: b.title ?? "Bakım",
-      subtitle: b.body ?? b.fix_description ?? null,
-      at: b.happened_at,
-    });
-  }
-  for (const a of arizaEntries.slice(0, 5)) {
-    events.push({
-      id: `a-${a.id}`,
-      kind: "ariza",
-      title: a.title ?? "Arıza",
-      subtitle: a.body ?? a.fix_description ?? null,
-      at: a.happened_at,
-    });
-  }
-  return events
-    .sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime())
-    .slice(0, 6);
-}
-
-function ActivityRow({ event }: { event: ActivityEvent }) {
-  const dot =
-    event.kind === "ariza"
-      ? "bg-rose-500"
-      : event.kind === "bakim"
-        ? "bg-amber-500"
-        : event.status === "aktif"
-          ? "bg-emerald-500"
-          : "bg-zinc-400";
-  const when = new Date(event.at);
-  const same = isSameDay(when, new Date());
-  const whenLabel = same
-    ? `Bugün ${when.toLocaleTimeString("tr-TR", {
-        hour: "2-digit",
-        minute: "2-digit",
-      })}`
-    : when.toLocaleString("tr-TR", {
-        day: "numeric",
-        month: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-  return (
-    <li className="flex gap-3 min-w-0">
-      <div className="flex flex-col items-center shrink-0">
-        <span className={cn("size-2 rounded-full mt-1.5", dot)} />
-        <span className="w-px flex-1 bg-border mt-1" />
-      </div>
-      <div className="min-w-0 pb-1">
-        <div className="text-sm font-medium leading-tight">{event.title}</div>
-        <div className="text-[10px] text-muted-foreground mt-0.5">
-          {whenLabel}
-        </div>
-        {event.subtitle && (
-          <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
-            {event.subtitle}
-          </div>
-        )}
-      </div>
-    </li>
-  );
-}
-
-function isSameDay(a: Date, b: Date): boolean {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
 
 function CurrentJobHero({
   job,
