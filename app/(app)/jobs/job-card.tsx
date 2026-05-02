@@ -113,11 +113,11 @@ export function JobCard({
   const [completionOpen, setCompletionOpen] = useState(false);
   const { job, product, operator, produced } = data;
 
-  // Re-render every 10 seconds so the live ticker on cards in the
-  // "uretimde" step stays current. setState bumps the React lane the
-  // same way a Realtime push would; we don't actually do anything in
-  // the body of the hook other than scheduling the wake-up.
-  useTick(job.status === "uretimde" ? 10_000 : 60_000);
+  // Re-render every 1 s while in uretimde so the live ticker + cycle
+  // progress bar advance smoothly (otherwise the bar jumps once every
+  // 10s, which the user reads as "yorulmasın diye yavaş ilerliyor").
+  // 1 Hz × few cards is negligible; outside uretimde we drop to 1 min.
+  useTick(job.status === "uretimde" ? 1_000 : 60_000);
 
   const isCancelled = job.status === "iptal";
   const stepIdx = jobStepIndex(job.status);
@@ -489,43 +489,88 @@ export function JobCard({
               : timeline.remaining.toLocaleString("tr-TR")
           }
         />
-        <Stat
-          icon={CalendarDays}
-          label="Tam Süre"
-          value={
-            timeline.totalMinutes > 0
-              ? formatMinutes(timeline.totalMinutes)
-              : "—"
+        {(() => {
+          // For completed/cancelled jobs the "Tam Süre" planned figure
+          // is misleading — we already know what happened. Swap to the
+          // actual elapsed work time: recorded setup + downtime + real
+          // batch machining (batches_done × (cycle + cleanup)).
+          const isDone =
+            job.status === "tamamlandi" || job.status === "iptal";
+          if (isDone) {
+            const pps =
+              product?.parts_per_setup && product.parts_per_setup > 0
+                ? product.parts_per_setup
+                : 1;
+            const cycle = Math.max(0, product?.cycle_time_minutes ?? 0);
+            const cleanup = Math.max(0, product?.cleanup_time_minutes ?? 0);
+            const batchesDone =
+              produced > 0 ? Math.ceil(produced / pps) : 0;
+            const actualProduction = batchesDone * (cycle + cleanup);
+            const actualTotal =
+              (data.totalSetup ?? 0) +
+              (data.totalDowntime ?? 0) +
+              actualProduction;
+            return (
+              <Stat
+                icon={CalendarDays}
+                label={
+                  job.status === "iptal" ? "Geçen Süre" : "Bitti · Toplam"
+                }
+                value={actualTotal > 0 ? formatMinutes(actualTotal) : "—"}
+                subtitle={
+                  job.completed_at
+                    ? new Date(job.completed_at).toLocaleString("tr-TR", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : undefined
+                }
+                tone="emerald"
+              />
+            );
           }
-          subtitle={
-            timeline.remainingTotalMinutes > 0
-              ? `Kalan ${formatMinutes(timeline.remainingTotalMinutes)}${
-                  eta
-                    ? " · biter " +
+          return (
+            <Stat
+              icon={CalendarDays}
+              label="Tam Süre"
+              value={
+                timeline.totalMinutes > 0
+                  ? formatMinutes(timeline.totalMinutes)
+                  : "—"
+              }
+              subtitle={
+                timeline.remainingTotalMinutes > 0
+                  ? `Kalan ${formatMinutes(timeline.remainingTotalMinutes)}${
+                      eta
+                        ? " · biter " +
+                          eta.toLocaleString("tr-TR", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : ""
+                    }`
+                  : eta
+                    ? "biter " +
                       eta.toLocaleString("tr-TR", {
                         day: "numeric",
                         month: "short",
                         hour: "2-digit",
                         minute: "2-digit",
                       })
-                    : ""
-                }`
-              : eta
-                ? "biter " +
-                  eta.toLocaleString("tr-TR", {
-                    day: "numeric",
-                    month: "short",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })
-                : undefined
-          }
-          tone={
-            timeline.remainingTotalMinutes > 0 && eta && due && eta > due
-              ? "rose"
-              : "emerald"
-          }
-        />
+                    : undefined
+              }
+              tone={
+                timeline.remainingTotalMinutes > 0 && eta && due && eta > due
+                  ? "rose"
+                  : "emerald"
+              }
+            />
+          );
+        })()}
       </div>
 
       {/* Progress bar */}
@@ -714,7 +759,7 @@ export function JobCard({
               <div className="space-y-0.5">
                 <div className="h-1 rounded-full bg-emerald-500/15 overflow-hidden">
                   <div
-                    className="h-full bg-emerald-500 transition-[width] duration-700"
+                    className="h-full bg-emerald-500 transition-[width] duration-1000 ease-linear"
                     style={{
                       width: `${Math.min(100, live.pieceProgressPct)}%`,
                     }}

@@ -432,6 +432,7 @@ export function JobsShell({
         cleanupMinutes: c.product?.cleanup_time_minutes,
         setupMinutes: c.product?.setup_time_minutes,
         partsPerSetup: c.product?.parts_per_setup,
+        actualAvgSetupMinutes: c.actualAvgSetupMinutes,
       });
       totalRemainingMinutes += t.remainingTotalMinutes;
       producedTotal += c.produced;
@@ -608,8 +609,10 @@ export function JobsShell({
                 quantity: c.job.quantity,
                 produced: c.produced,
                 cycleMinutes: c.product?.cycle_time_minutes,
+                cleanupMinutes: c.product?.cleanup_time_minutes,
                 setupMinutes: c.product?.setup_time_minutes,
                 partsPerSetup: c.product?.parts_per_setup,
+                actualAvgSetupMinutes: c.actualAvgSetupMinutes,
               });
               machineRemaining += t.remainingTotalMinutes;
             }

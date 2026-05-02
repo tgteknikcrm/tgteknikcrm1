@@ -107,6 +107,26 @@ export async function updateMachineStatus(id: string, status: MachineStatus) {
     .select("name, status")
     .eq("id", id)
     .single();
+
+  // Guard: 'aktif' requires an actual job to work on. Without that the
+  // live ticker has nothing to count and the operator just turned a
+  // dormant machine "on" for no reason. The job-side flow auto-flips
+  // via direct UPDATE (bypasses this action), so only manual toggles
+  // hit this check.
+  if (status === "aktif" && existing?.status !== "aktif") {
+    const { data: activeJobs, count } = await supabase
+      .from("jobs")
+      .select("id", { count: "exact", head: false })
+      .eq("machine_id", id)
+      .in("status", ["ayar", "uretimde"]);
+    if (!activeJobs || activeJobs.length === 0 || (count ?? 0) === 0) {
+      return {
+        error:
+          "Bu makineye atanmış aktif (ayar/üretimde) iş yok — önce işi başlat.",
+      };
+    }
+  }
+
   const { error } = await supabase
     .from("machines")
     .update({ status })

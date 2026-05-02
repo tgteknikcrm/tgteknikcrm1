@@ -149,9 +149,12 @@ export function MachineGroup({
             {counts.beklemede > 0 && (
               <span>⏳ {counts.beklemede} beklemede</span>
             )}
-            {totalRemainingMinutes > 0 && (
-              <span className="ml-auto font-mono">
-                ~{formatMinutes(totalRemainingMinutes)} kalan
+            {totalRemainingMinutes > 0 && counts.uretimde + counts.ayar + counts.beklemede > 0 && (
+              <span
+                className="ml-auto font-mono text-foreground"
+                title="Bu makineye atanmış aktif işlerin toplam kalan süresi"
+              >
+                Kalan iş: {formatMinutes(totalRemainingMinutes)}
               </span>
             )}
           </div>
