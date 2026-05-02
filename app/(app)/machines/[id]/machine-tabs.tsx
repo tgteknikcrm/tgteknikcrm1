@@ -171,8 +171,10 @@ export function MachineTabs(props: Props) {
 
   return (
     <>
-      {/* Horizontal tab nav with underline indicator */}
-      <div className="border-b mb-4 -mx-1 overflow-x-auto">
+      {/* Horizontal tab nav — minimal, foreground (siyah) thick underline
+          for active. Reference UI dili: ikonsuz başlık + count pill,
+          aktif tab'ın altında 2px foreground çizgi. */}
+      <div className="border-b border-border mb-6 -mx-1 overflow-x-auto">
         <div className="flex items-center gap-1 px-1 min-w-max">
           {TABS.map((t) => {
             const active = tab === t.key;
@@ -183,32 +185,31 @@ export function MachineTabs(props: Props) {
                 type="button"
                 onClick={() => setTab(t.key)}
                 className={cn(
-                  "relative flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium transition whitespace-nowrap",
+                  "relative flex items-center gap-1.5 px-3 py-3 text-sm transition whitespace-nowrap",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-t",
                   active
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
+                    ? "text-foreground font-semibold"
+                    : "text-muted-foreground font-medium hover:text-foreground",
                 )}
               >
-                <t.icon className="size-4" />
                 <span>{t.label}</span>
                 {count != null && count > 0 && (
                   <span
                     className={cn(
                       "h-4 min-w-4 px-1 rounded-full text-[10px] font-bold tabular-nums flex items-center justify-center",
                       active
-                        ? "bg-primary/15 text-primary"
-                        : "bg-muted-foreground/15",
+                        ? "bg-foreground text-background"
+                        : "bg-muted text-muted-foreground",
                     )}
                   >
                     {count}
                   </span>
                 )}
-                {/* Underline indicator */}
+                {/* Underline indicator — kalın foreground çizgi */}
                 <span
                   className={cn(
-                    "absolute left-0 right-0 -bottom-px h-0.5 transition-all",
-                    active ? "bg-primary" : "bg-transparent",
+                    "absolute left-0 right-0 -bottom-px h-[2.5px] transition-all",
+                    active ? "bg-foreground" : "bg-transparent",
                   )}
                   aria-hidden
                 />
@@ -227,6 +228,9 @@ export function MachineTabs(props: Props) {
           toolHints={props.toolHints}
           tools={props.tools}
           kpis={props.kpis}
+          downtimes={props.downtimes}
+          bakimEntries={props.bakimEntries}
+          arizaEntries={props.arizaEntries}
         />
       )}
       {tab === "istatistik" && <IstatistikTab kpis={props.kpis} />}
@@ -279,6 +283,9 @@ function ProfilTab({
   toolHints,
   tools,
   kpis,
+  downtimes,
+  bakimEntries,
+  arizaEntries,
 }: {
   machineId: string;
   machineStatus: MachineStatus;
@@ -286,135 +293,282 @@ function ProfilTab({
   toolHints: Array<{ name: string; code: string | null; size: string | null }>;
   tools: MachineToolRow[];
   kpis: KpiData;
+  downtimes: DowntimeRow[];
+  bakimEntries: TimelineEntryRow[];
+  arizaEntries: TimelineEntryRow[];
 }) {
+  // Recent activity feed = newest 5 events from downtime + bakim + ariza,
+  // merged & sorted desc. Drives the left rail timeline (referans görseldeki
+  // "Recent Activity" bölümünün muadili).
+  const recentEvents = buildRecentActivity({
+    downtimes,
+    bakimEntries,
+    arizaEntries,
+  });
+
   return (
-    <div className="space-y-4">
-      {/* TOP ROW — Sol: Canlı Durum · Sağ: Üretim kartı + altında Aktif Takımlar.
-          items-stretch (default grid behavior) + h-full inside both columns
-          → her iki ana kart aynı yükseklikte oluyor. Sağ kolon iki kart
-          stack'liyor; sol kolon LiveTelemetry yüksekliğine kendi kendine
-          gerinerek eşitleniyor. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
-        {/* SOL — Canlı Durum (root Card artık h-full + flex flex-col) */}
-        <div className="min-w-0 flex flex-col">
+    <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6">
+      {/* SOL RAIL — küçük başlık satırları, recent activity, telemetri özeti */}
+      <aside className="space-y-6 min-w-0">
+        {/* RECENT ACTIVITY */}
+        <section>
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-3">
+            Son Olaylar
+          </h3>
+          {recentEvents.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic">
+              Kayıtlı olay yok.
+            </p>
+          ) : (
+            <ul className="space-y-3">
+              {recentEvents.map((e) => (
+                <ActivityRow key={e.id} event={e} />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* CANLI DURUM — telemetri kompakt mod */}
+        <section>
+          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground mb-3">
+            Canlı Durum
+          </h3>
           <LiveTelemetry
             machineId={machineId}
             status={machineStatus}
             toolHints={toolHints}
           />
-        </div>
+        </section>
+      </aside>
 
-        {/* SAĞ — Üretim kartı + Aktif Takımlar stack */}
-        <div className="min-w-0 flex flex-col gap-4">
-          <Card className="overflow-hidden gap-0 py-0 min-w-0 flex-1 flex flex-col">
+      {/* ANA İÇERİK — referans görseldeki "Upcoming Tasks" alanının muadili */}
+      <div className="min-w-0 space-y-6">
+        {/* CURRENT JOB BLOCK */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-bold tracking-tight">Aktif İş</h2>
+          </div>
+          <div
+            className={cn(
+              "rounded-xl border bg-card overflow-hidden",
+              currentJob && "ring-1 ring-emerald-500/20",
+            )}
+          >
             <div
               className={cn(
-                "h-1.5 w-full shrink-0",
+                "h-1 w-full",
                 currentJob ? "bg-emerald-500" : "bg-muted",
               )}
             />
-            <CardContent className="p-5 flex-1">
+            <div className="p-5">
               {currentJob ? (
                 <CurrentJobHero job={currentJob} compact />
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-sm text-muted-foreground">
+                <div className="py-10 flex flex-col items-center justify-center text-sm text-muted-foreground">
                   <Cog className="size-8 opacity-30 mb-2" />
                   Şu an üretimde iş yok.
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
+        </section>
 
-          <Card className="shrink-0">
-            <CardContent className="p-4">
-              <div className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <WrenchIcon className="size-4 text-muted-foreground" />
-                Aktif İş Takımları
-                {tools.length > 0 && (
-                  <Badge variant="outline" className="ml-auto font-normal">
-                    {tools.length}
-                  </Badge>
-                )}
-              </div>
-              {tools.length === 0 ? (
-                <div className="text-sm text-muted-foreground py-3 text-center italic">
-                  {currentJob ? "Bu iş için takım atanmamış." : "Aktif iş yok."}
-                </div>
-              ) : (
-                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {tools.map((t, i) => (
-                    <li
-                      key={i}
-                      className="flex items-center gap-2.5 p-2 rounded-md hover:bg-muted/50 transition border"
-                    >
-                      {/* Thumbnail — image if uploaded, otherwise wrench
-                          icon placeholder */}
-                      <div className="size-12 rounded-md bg-muted overflow-hidden shrink-0 flex items-center justify-center border">
-                        {t.image_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={t.image_url}
-                            alt={t.name}
-                            className="size-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <WrenchIcon className="size-5 text-muted-foreground/50" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-medium text-sm truncate">
-                          {t.name}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate font-mono">
-                          {t.code ?? ""}
-                          {t.size ? ` · ${t.size}` : ""}
-                        </div>
-                      </div>
-                      <Badge variant="outline" className="tabular-nums shrink-0">
-                        {t.quantity_used}x
-                      </Badge>
-                    </li>
-                  ))}
-                </ul>
+        {/* TOOLS BLOCK */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-bold tracking-tight flex items-center gap-2">
+              Aktif Takımlar
+              {tools.length > 0 && (
+                <span className="text-xs font-medium text-muted-foreground bg-muted rounded-full px-2 py-0.5 tabular-nums">
+                  {tools.length}
+                </span>
               )}
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+            </h2>
+          </div>
+          {tools.length === 0 ? (
+            <div className="rounded-xl border bg-card p-6 text-center text-sm text-muted-foreground italic">
+              {currentJob ? "Bu iş için takım atanmamış." : "Aktif iş yok."}
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {tools.map((t, i) => (
+                <li
+                  key={i}
+                  className="rounded-xl border bg-card p-3 flex items-center gap-3 hover:bg-muted/30 transition"
+                >
+                  <div className="size-12 rounded-lg bg-muted overflow-hidden shrink-0 flex items-center justify-center border">
+                    {t.image_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={t.image_url}
+                        alt={t.name}
+                        className="size-full object-cover"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <WrenchIcon className="size-5 text-muted-foreground/50" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-sm truncate">
+                      {t.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate font-mono">
+                      {t.code ?? ""}
+                      {t.size ? ` · ${t.size}` : ""}
+                    </div>
+                  </div>
+                  <span className="text-xs font-medium text-muted-foreground bg-muted rounded-full px-2 py-1 tabular-nums shrink-0">
+                    {t.quantity_used}x
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
 
-      {/* KPI strip — full width below */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiTile
-          icon={TrendingUp}
-          label="Bugün"
-          value={kpis.todayTotal}
-          unit="adet"
-          tone="emerald"
-        />
-        <KpiTile
-          icon={AlertTriangle}
-          label="Bugün Fire"
-          value={kpis.todayScrap}
-          unit="adet"
-          tone={kpis.todayScrap > 0 ? "amber" : "zinc"}
-        />
-        <KpiTile
-          icon={Pause}
-          label="Bugün Duruş"
-          value={kpis.todayDown}
-          unit="dk"
-          tone={kpis.todayDown > 60 ? "rose" : "zinc"}
-        />
-        <KpiTile
-          icon={Cog}
-          label="7g Verim"
-          value={`%${kpis.uptimePct.toFixed(0)}`}
-          unit=""
-          tone={kpis.uptimePct < 80 ? "amber" : "emerald"}
-        />
+        {/* KPI strip */}
+        <section>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <KpiTile
+              icon={TrendingUp}
+              label="Bugün"
+              value={kpis.todayTotal}
+              unit="adet"
+              tone="emerald"
+            />
+            <KpiTile
+              icon={AlertTriangle}
+              label="Bugün Fire"
+              value={kpis.todayScrap}
+              unit="adet"
+              tone={kpis.todayScrap > 0 ? "amber" : "zinc"}
+            />
+            <KpiTile
+              icon={Pause}
+              label="Bugün Duruş"
+              value={kpis.todayDown}
+              unit="dk"
+              tone={kpis.todayDown > 60 ? "rose" : "zinc"}
+            />
+            <KpiTile
+              icon={Cog}
+              label="7g Verim"
+              value={`%${kpis.uptimePct.toFixed(0)}`}
+              unit=""
+              tone={kpis.uptimePct < 80 ? "amber" : "emerald"}
+            />
+          </div>
+        </section>
       </div>
     </div>
+  );
+}
+
+/* ── Recent activity helpers ──────────────────────────────────────── */
+
+interface ActivityEvent {
+  id: string;
+  kind: "downtime" | "bakim" | "ariza";
+  status?: MachineStatus;
+  title: string;
+  subtitle: string | null;
+  at: string;
+}
+
+function buildRecentActivity({
+  downtimes,
+  bakimEntries,
+  arizaEntries,
+}: {
+  downtimes: DowntimeRow[];
+  bakimEntries: TimelineEntryRow[];
+  arizaEntries: TimelineEntryRow[];
+}): ActivityEvent[] {
+  const events: ActivityEvent[] = [];
+  for (const d of downtimes.slice(0, 5)) {
+    events.push({
+      id: `d-${d.id}`,
+      kind: "downtime",
+      status: d.status,
+      title: `${MACHINE_STATUS_LABEL[d.status]} ${
+        d.ended_at ? "kapandı" : "açıldı"
+      }`,
+      subtitle: d.notes ?? d.job_part_name ?? null,
+      at: d.ended_at ?? d.started_at,
+    });
+  }
+  for (const b of bakimEntries.slice(0, 5)) {
+    events.push({
+      id: `b-${b.id}`,
+      kind: "bakim",
+      title: b.title ?? "Bakım",
+      subtitle: b.body ?? b.fix_description ?? null,
+      at: b.happened_at,
+    });
+  }
+  for (const a of arizaEntries.slice(0, 5)) {
+    events.push({
+      id: `a-${a.id}`,
+      kind: "ariza",
+      title: a.title ?? "Arıza",
+      subtitle: a.body ?? a.fix_description ?? null,
+      at: a.happened_at,
+    });
+  }
+  return events
+    .sort((x, y) => new Date(y.at).getTime() - new Date(x.at).getTime())
+    .slice(0, 6);
+}
+
+function ActivityRow({ event }: { event: ActivityEvent }) {
+  const dot =
+    event.kind === "ariza"
+      ? "bg-rose-500"
+      : event.kind === "bakim"
+        ? "bg-amber-500"
+        : event.status === "aktif"
+          ? "bg-emerald-500"
+          : "bg-zinc-400";
+  const when = new Date(event.at);
+  const same = isSameDay(when, new Date());
+  const whenLabel = same
+    ? `Bugün ${when.toLocaleTimeString("tr-TR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`
+    : when.toLocaleString("tr-TR", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+  return (
+    <li className="flex gap-3 min-w-0">
+      <div className="flex flex-col items-center shrink-0">
+        <span className={cn("size-2 rounded-full mt-1.5", dot)} />
+        <span className="w-px flex-1 bg-border mt-1" />
+      </div>
+      <div className="min-w-0 pb-1">
+        <div className="text-sm font-medium leading-tight">{event.title}</div>
+        <div className="text-[10px] text-muted-foreground mt-0.5">
+          {whenLabel}
+        </div>
+        {event.subtitle && (
+          <div className="text-xs text-muted-foreground mt-1 line-clamp-2">
+            {event.subtitle}
+          </div>
+        )}
+      </div>
+    </li>
+  );
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   );
 }
 

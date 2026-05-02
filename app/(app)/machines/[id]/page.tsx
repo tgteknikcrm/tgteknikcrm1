@@ -36,7 +36,7 @@ import {
   type TimelineEntryRow,
 } from "./machine-tabs";
 import { getProfile } from "@/lib/supabase/server";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 type EntryWithJoins = ProductionEntry & {
   operators?: { full_name: string } | null;
@@ -373,6 +373,21 @@ export default async function MachineDetailPage({
 
   const tone = MACHINE_STATUS_TONE[machine.status];
 
+  // "Son aktivite" — newest of (latest production entry, latest timeline
+  // event, latest downtime session). Drives the green-dot indicator at
+  // the top right of the hero.
+  const latestSignals = [
+    entries[0]?.created_at,
+    allTimeline[0]?.happened_at,
+    downtimes[0]?.started_at,
+  ].filter((x): x is string => !!x);
+  const lastActivityAt =
+    latestSignals.length > 0
+      ? new Date(
+          Math.max(...latestSignals.map((s) => new Date(s).getTime())),
+        )
+      : null;
+
   // ── Map for client tabs ────────────────────────────────────────
   const currentJob: CurrentJobInfo | null = currentJobRaw
     ? {
@@ -420,87 +435,102 @@ export default async function MachineDetailPage({
 
   return (
     <>
-      <div className="mb-4">
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/machines">
-            <ArrowLeft className="size-4" /> Tüm Makineler
-          </Link>
-        </Button>
+      {/* Breadcrumb row — "← Tüm Makineler > Makine Adı" sol, son aktivite sağda */}
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-5">
+        <div className="flex items-center gap-2 text-sm">
+          <Button
+            asChild
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 -ml-2 text-muted-foreground hover:text-foreground"
+          >
+            <Link href="/machines">
+              <ArrowLeft className="size-4" /> Tüm Makineler
+            </Link>
+          </Button>
+          <span className="text-muted-foreground">/</span>
+          <span className="font-medium">{machine.name}</span>
+        </div>
+        {lastActivityAt && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="size-2 rounded-full bg-emerald-500" />
+            Son aktivite{" "}
+            <span className="font-medium text-foreground">
+              {lastActivityAt.toLocaleString("tr-TR", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* HERO — gradient + status ring */}
-      <Card
-        className={cn(
-          "mb-6 overflow-hidden gap-0 py-0 border-l-4",
-          tone.border,
-        )}
-      >
-        <div
-          className={cn(
-            "p-6 bg-gradient-to-br from-card via-card to-muted/40",
-            "flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4",
-          )}
-        >
-          <div className="flex items-center gap-4">
-            <div
-              className={cn(
-                "size-16 rounded-2xl flex items-center justify-center border-2 shrink-0 relative",
-                tone.badge,
-              )}
-            >
-              <Factory className="size-8" />
-              {machine.status === "aktif" && (
-                <span className="absolute -top-1 -right-1 size-3.5 rounded-full bg-emerald-500 border-2 border-card animate-pulse" />
-              )}
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <h1 className="text-3xl font-bold tracking-tight">
-                  {machine.name}
-                </h1>
-                <MachineInfoDialog machine={machine} />
-                <Badge
-                  variant="outline"
-                  className={cn("border gap-1.5 font-semibold", tone.badge)}
-                >
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      tone.dot,
-                      machine.status === "aktif" && "animate-pulse",
-                    )}
-                  />
-                  {MACHINE_STATUS_LABEL[machine.status]}
-                </Badge>
-              </div>
-              <div className="flex items-center gap-x-3 gap-y-0.5 text-sm text-muted-foreground mt-1.5 flex-wrap">
-                <span className="inline-flex items-center gap-1">
-                  <Hash className="size-3.5" />
-                  {machine.type}
-                </span>
-                {machine.model && <span>· {machine.model}</span>}
-                {machine.serial_no && (
-                  <span className="font-mono text-xs">
-                    · S/N {machine.serial_no}
-                  </span>
-                )}
-                {machine.location && (
-                  <span className="inline-flex items-center gap-1">
-                    <MapPin className="size-3.5" /> {machine.location}
-                  </span>
-                )}
-              </div>
-            </div>
+      {/* HERO — minimal: ikon + ad + meta · sağda action grubu */}
+      <div className="flex items-start sm:items-center justify-between gap-4 flex-wrap mb-6">
+        <div className="flex items-center gap-4 min-w-0">
+          <div
+            className={cn(
+              "size-14 rounded-xl bg-muted flex items-center justify-center shrink-0 relative",
+            )}
+          >
+            <Factory className="size-7 text-foreground" />
+            {machine.status === "aktif" && (
+              <span className="absolute -top-1 -right-1 size-3 rounded-full bg-emerald-500 border-2 border-background" />
+            )}
           </div>
-          <div className="flex gap-2 flex-wrap">
-            <StatusButton machineId={machine.id} current={machine.status} />
-            <MachineDialog
-              machine={machine}
-              trigger={<Button variant="outline">Düzenle</Button>}
-            />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-bold tracking-tight leading-tight">
+                {machine.name}
+              </h1>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "h-6 gap-1.5 text-[11px] font-medium",
+                  tone.badge,
+                )}
+              >
+                <span
+                  className={cn(
+                    "size-1.5 rounded-full",
+                    tone.dot,
+                    machine.status === "aktif" && "animate-pulse",
+                  )}
+                />
+                {MACHINE_STATUS_LABEL[machine.status]}
+              </Badge>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1 flex items-center gap-x-2 gap-y-0.5 flex-wrap">
+              <span>Eklendi: {formatDate(machine.created_at)}</span>
+              {machine.type && <span>· {machine.type}</span>}
+              {machine.model && <span>· {machine.model}</span>}
+              {machine.serial_no && (
+                <span className="font-mono">· S/N {machine.serial_no}</span>
+              )}
+              {machine.location && (
+                <span className="inline-flex items-center gap-1">
+                  · <MapPin className="size-3" /> {machine.location}
+                </span>
+              )}
+            </div>
           </div>
         </div>
-      </Card>
+        <div className="flex items-center gap-2 flex-wrap">
+          <StatusButton machineId={machine.id} current={machine.status} />
+          <MachineDialog
+            machine={machine}
+            trigger={
+              <Button variant="outline" size="sm">
+                Düzenle
+              </Button>
+            }
+          />
+          <MachineInfoDialog machine={machine} />
+        </div>
+      </div>
 
       {/* Tabs replace the previous card layout — Profil / İstatistik /
           Üretim / Duruşlar / Bakım / Arıza / Temizlik. Soldan sağa
