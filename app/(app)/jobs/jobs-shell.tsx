@@ -164,6 +164,7 @@ export function JobsShell({
         produced: number;
         scrap: number;
         setup: number;
+        setupEntryCount: number;
         downtime: number;
       }
     >();
@@ -173,11 +174,18 @@ export function JobsShell({
         produced: 0,
         scrap: 0,
         setup: 0,
+        setupEntryCount: 0,
         downtime: 0,
       };
       cur.produced += e.produced_qty ?? 0;
       cur.scrap += e.scrap_qty ?? 0;
-      cur.setup += e.setup_minutes ?? 0;
+      const entrySetup = e.setup_minutes ?? 0;
+      cur.setup += entrySetup;
+      // Count entries that actually recorded a setup — drives the
+      // "average actual setup time" override for ETA. Skipping zeros
+      // means a single 5 dk measurement isn't diluted by other shifts'
+      // entries that didn't include any ayar.
+      if (entrySetup > 0) cur.setupEntryCount += 1;
       cur.downtime += e.downtime_minutes ?? 0;
       m.set(e.job_id, cur);
     }
@@ -284,8 +292,16 @@ export function JobsShell({
           produced: 0,
           scrap: 0,
           setup: 0,
+          setupEntryCount: 0,
           downtime: 0,
         };
+        // Average actual setup minutes (across recorded ayar events)
+        // — fed to calcJobTimeline so future setups use what THIS job
+        // really takes, not the product's planned figure.
+        const actualAvgSetup =
+          total.setupEntryCount > 0
+            ? total.setup / total.setupEntryCount
+            : 0;
         const machine = j.machine_id
           ? machineById.get(j.machine_id) ?? null
           : null;
@@ -317,6 +333,7 @@ export function JobsShell({
           totalScrap: total.scrap,
           totalSetup: total.setup,
           totalDowntime: total.downtime,
+          actualAvgSetupMinutes: actualAvgSetup,
           // ── New: machine status + open downtime → live ticker accuracy
           machineStatus: (machine?.status ?? null) as MachineStatus | null,
           openDowntimeStartedAt:

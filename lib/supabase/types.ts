@@ -192,10 +192,22 @@ export function calcJobTimeline(input: {
   cleanupMinutes?: number | null | undefined;
   setupMinutes: number | null | undefined;
   partsPerSetup: number | null | undefined;
+  /**
+   * Average actual setup minutes recorded so far for THIS job (across
+   * all production_entries). When > 0, takes precedence over the
+   * product's planned setupMinutes — the user's mental model:
+   * "ayar 20 dk planladım ama gerçek 5 dk sürüyor; sonraki bağlamalar
+   * için planlı 20 değil benim ölçtüğüm 5 dk kullanılsın."
+   */
+  actualAvgSetupMinutes?: number | null | undefined;
 }): {
   remaining: number;
   setupsLeft: number;
   effectiveCycle: number;
+  /** The setup minutes value actually used (planned or actual). */
+  effectiveSetupMinutes: number;
+  /** True if effectiveSetupMinutes came from real measurements. */
+  setupFromActual: boolean;
   remainingSetupMinutes: number;
   remainingProductionMinutes: number;
   remainingTotalMinutes: number;
@@ -208,7 +220,12 @@ export function calcJobTimeline(input: {
   const produced = Math.max(0, Math.min(input.produced ?? 0, quantity));
   const cycle = Math.max(0, input.cycleMinutes ?? 0);
   const cleanup = Math.max(0, input.cleanupMinutes ?? 0);
-  const setup = Math.max(0, input.setupMinutes ?? 0);
+  const plannedSetup = Math.max(0, input.setupMinutes ?? 0);
+  const actualSetup = Math.max(0, input.actualAvgSetupMinutes ?? 0);
+  // Prefer actual measurements when available — the operator already
+  // proved how long a setup really takes for THIS job/machine combo.
+  const setupFromActual = actualSetup > 0;
+  const setup = setupFromActual ? actualSetup : plannedSetup;
   const pps =
     input.partsPerSetup && input.partsPerSetup > 0 ? input.partsPerSetup : 1;
 
@@ -234,6 +251,8 @@ export function calcJobTimeline(input: {
     remaining,
     setupsLeft,
     effectiveCycle,
+    effectiveSetupMinutes: setup,
+    setupFromActual,
     remainingSetupMinutes,
     remainingProductionMinutes,
     remainingTotalMinutes,

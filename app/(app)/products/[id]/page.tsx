@@ -321,7 +321,7 @@ export default async function ProductDetailPage({
                   mono
                 />
                 <Stat
-                  label="Cycle Time"
+                  label="İşleme Süresi"
                   value={
                     product.cycle_time_minutes != null
                       ? `${product.cycle_time_minutes} dk/parça`

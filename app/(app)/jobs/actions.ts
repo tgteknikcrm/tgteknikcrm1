@@ -215,6 +215,16 @@ export async function setJobStep(jobId: string, step: JobStatus) {
     .eq("id", jobId)
     .single();
 
+  // Hard-stop: starting setup or production without a machine doesn't
+  // make sense — we can't auto-create a production_entry, can't track
+  // downtime, can't link to live ticker. Block at the server so the UI
+  // can't bypass it.
+  if ((step === "ayar" || step === "uretimde") && !job?.machine_id) {
+    return {
+      error: "Önce işe makine atamalısın — makinesiz ayar/üretim başlatılamaz.",
+    };
+  }
+
   // Compute setup elapsed minutes if we're transitioning ayar→uretimde
   // and started_at is already stamped. We do this BEFORE writing
   // setup_completed_at so the diff is from the ayar start to "right

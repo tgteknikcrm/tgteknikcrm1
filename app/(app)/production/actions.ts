@@ -160,6 +160,16 @@ export async function completeJob(args: { job_id: string; scrap: number }) {
   const supabase = await createClient();
   const scrap = Math.max(0, Math.floor(args.scrap || 0));
 
+  // Look up the job's machine BEFORE the RPC so we can flip the
+  // machine to 'durus' (bekleme) right after completion. The RPC
+  // requires job_no_machine != NULL, so this lookup is also a cheap
+  // pre-validation.
+  const { data: jobRow } = await supabase
+    .from("jobs")
+    .select("machine_id")
+    .eq("id", args.job_id)
+    .maybeSingle();
+
   // Atomic RPC — handles jobs UPDATE + production_entries INSERT/UPDATE
   // in one transaction with SECURITY DEFINER, so RLS edge-cases on
   // either table can never leave us with a half-completed state.
@@ -181,6 +191,27 @@ export async function completeJob(args: { job_id: string; scrap: number }) {
       return { error: "Hurda kalan adetten fazla olamaz" };
     }
     return { error: msg };
+  }
+
+  // After successful completion: machine has nothing to do, so flip
+  // it to 'durus' (bekleme). The user's mental model: "iş bittikten
+  // sonra makine bekleme moduna girmeli". Best-effort — failure here
+  // doesn't undo the completion.
+  if (jobRow?.machine_id) {
+    const { data: machineRow } = await supabase
+      .from("machines")
+      .select("status")
+      .eq("id", jobRow.machine_id)
+      .maybeSingle();
+    // Only auto-flip if the machine was running ('aktif'). Don't
+    // override an active arıza/bakım state — that's real-world
+    // information the operator already set.
+    if (machineRow?.status === "aktif") {
+      await supabase
+        .from("machines")
+        .update({ status: "durus" })
+        .eq("id", jobRow.machine_id);
+    }
   }
 
   revalidatePath("/jobs");

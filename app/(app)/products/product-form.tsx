@@ -576,11 +576,11 @@ export function ProductForm({
             hint="bir bağlama"
           />
           <NumberField
-            label="Cycle Time (dk)"
+            label="İşleme Süresi (dk)"
             value={cycleTime}
             onChange={setCycleTime}
             step="0.1"
-            hint="makine"
+            hint="parça başı makine"
           />
           <NumberField
             label="Temizlik (dk)"
@@ -599,15 +599,19 @@ export function ProductForm({
         <div className="rounded-lg bg-muted/40 border border-dashed p-3 text-[11px] text-muted-foreground space-y-1">
           <div>
             <span className="font-semibold text-foreground">
-              Etkin cycle:
+              Etkin İşleme:
             </span>{" "}
-            cycle + temizlik (parça başı net süre — kapı açma + parça koy/al
+            işleme + temizlik (parça başı net süre — kapı açma + parça koy/al
             dahil)
           </div>
           <div>
             <span className="font-semibold text-foreground">Toplam:</span>{" "}
-            ⌈adet / bağlama⌉ × ayar + adet × etkin_cycle. ETA hesabı{" "}
+            ⌈adet / bağlama⌉ × ayar + adet × etkin_işleme. ETA hesabı{" "}
             <strong>çalışma çizelgesini</strong> bilir (yemek, hafta sonu).
+          </div>
+          <div className="text-[10px] opacity-70">
+            Ayar süresi tahminidir — gerçek ayar bittiğinde sistem ölçtüğü
+            süreyi kaydeder ve sonraki bağlamalar için ETA bunu kullanır.
           </div>
         </div>
       </Section>

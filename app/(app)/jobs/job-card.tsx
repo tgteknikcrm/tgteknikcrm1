@@ -81,6 +81,12 @@ export interface JobCardData {
   totalScrap: number;
   totalSetup: number;
   totalDowntime: number;
+  /**
+   * Average ACTUAL setup minutes recorded for this job (across all
+   * production_entries with setup > 0). Drives the "use what really
+   * happened, not what we planned" ETA refresh.
+   */
+  actualAvgSetupMinutes: number;
   /** Machine status drives the live-ticker freeze. */
   machineStatus: MachineStatus | null;
   /** If a downtime session is open right now, the moment it started. */
@@ -123,6 +129,10 @@ export function JobCard({
     cleanupMinutes: product?.cleanup_time_minutes,
     setupMinutes: product?.setup_time_minutes,
     partsPerSetup: product?.parts_per_setup,
+    // Once at least one ayar has been measured for this job, the ETA
+    // switches to using that real average. Falls back to the product's
+    // planned figure for the very first setup.
+    actualAvgSetupMinutes: data.actualAvgSetupMinutes,
   });
 
   // Client-side live ticker: how many parts SHOULD have come off the
@@ -192,33 +202,31 @@ export function JobCard({
       setAutoCountdown(null);
       return;
     }
-    setAutoCountdown(AUTO_COMPLETE_SECONDS);
+    // Local counter — keeps the side-effect (startTransition) out of
+    // the setState updater. React calls updaters during render in
+    // StrictMode/replay scenarios; calling startTransition there
+    // throws "Cannot call startTransition while rendering."
+    let remaining = AUTO_COMPLETE_SECONDS;
+    setAutoCountdown(remaining);
     const handle = setInterval(() => {
-      setAutoCountdown((prev) => {
-        if (prev === null) return null;
-        if (prev <= 1) {
-          clearInterval(handle);
-          // Fire-and-forget — completeJob with scrap=0. If it errors,
-          // we unlock the ref so the user can retry (or it'll re-trigger
-          // on the next render if conditions are still met).
-          autoFiredRef.current = true;
-          startTransition(async () => {
-            const r = await completeJob({
-              job_id: job.id,
-              scrap: 0,
-            });
-            if ("error" in r && r.error) {
-              autoFiredRef.current = false;
-              toast.error(`Otomatik tamamlama başarısız: ${r.error}`);
-              return;
-            }
-            toast.success(`${job.part_name} otomatik tamamlandı`);
-            router.refresh();
-          });
-          return null;
-        }
-        return prev - 1;
-      });
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(handle);
+        setAutoCountdown(null);
+        autoFiredRef.current = true;
+        startTransition(async () => {
+          const r = await completeJob({ job_id: job.id, scrap: 0 });
+          if ("error" in r && r.error) {
+            autoFiredRef.current = false;
+            toast.error(`Otomatik tamamlama başarısız: ${r.error}`);
+            return;
+          }
+          toast.success(`${job.part_name} otomatik tamamlandı`);
+          router.refresh();
+        });
+        return;
+      }
+      setAutoCountdown(remaining);
     }, 1000);
     return () => {
       clearInterval(handle);
@@ -527,18 +535,30 @@ export function JobCard({
         <div className="text-[10px] text-muted-foreground mb-2 flex items-center gap-2 flex-wrap">
           {product?.cycle_time_minutes != null && (
             <span>
-              Cycle:{" "}
+              İşleme:{" "}
               <span className="font-mono text-foreground">
                 {product.cycle_time_minutes} dk
               </span>
             </span>
           )}
-          {product?.setup_time_minutes != null && (
+          {(timeline.effectiveSetupMinutes > 0 ||
+            product?.setup_time_minutes != null) && (
             <span>
               Ayar:{" "}
               <span className="font-mono text-foreground">
-                {product.setup_time_minutes} dk × {timeline.setupsLeft}
+                {timeline.effectiveSetupMinutes.toFixed(
+                  timeline.setupFromActual ? 1 : 0,
+                )}{" "}
+                dk × {timeline.setupsLeft}
               </span>
+              {timeline.setupFromActual && (
+                <span
+                  className="ml-1 text-[8px] font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-300"
+                  title="Bu işteki gerçek ölçüm — planlanan değil"
+                >
+                  GERÇEK
+                </span>
+              )}
             </span>
           )}
           {product?.parts_per_setup && product.parts_per_setup > 1 && (
@@ -689,7 +709,7 @@ export function JobCard({
                 </div>
                 <div className="text-[9px] text-muted-foreground tabular-nums flex items-center justify-between">
                   <span>
-                    Sıradaki parça · cycle{" "}
+                    Sıradaki parça · işleme{" "}
                     {live.effectiveCycleMin.toFixed(1)} dk
                   </span>
                   <span>%{live.pieceProgressPct.toFixed(0)}</span>
@@ -780,19 +800,35 @@ export function JobCard({
 
         <div className="flex items-center gap-1 ml-auto">
           {primaryAction && (
-            <Button
-              size="sm"
-              onClick={() => move(primaryAction.next)}
-              disabled={pending}
-              className="h-7 px-2.5 text-[11px] gap-1"
-            >
-              {pending ? (
-                <Loader2 className="size-3 animate-spin" />
-              ) : (
-                <primaryAction.icon className="size-3" />
-              )}
-              {primaryAction.label}
-            </Button>
+            (() => {
+              // Block ayar/uretimde transitions when no machine is assigned —
+              // server enforces this too, but disabling the button gives
+              // immediate feedback (and a hint to use Düzenle).
+              const needsMachine =
+                (primaryAction.next === "ayar" ||
+                  primaryAction.next === "uretimde") &&
+                !job.machine_id;
+              return (
+                <Button
+                  size="sm"
+                  onClick={() => move(primaryAction.next)}
+                  disabled={pending || needsMachine}
+                  className="h-7 px-2.5 text-[11px] gap-1"
+                  title={
+                    needsMachine
+                      ? "Önce iş kartında makine ata (Düzenle)"
+                      : primaryAction.label
+                  }
+                >
+                  {pending ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : (
+                    <primaryAction.icon className="size-3" />
+                  )}
+                  {needsMachine ? "Makine Ata →" : primaryAction.label}
+                </Button>
+              );
+            })()
           )}
           {(job.status === "ayar" || job.status === "uretimde") && (
             <Button
@@ -935,7 +971,7 @@ function CompletionDialog({
             )}
             {product?.cycle_time_minutes != null && (
               <SumRow
-                label="Cycle (parça başı)"
+                label="İşleme (parça başı)"
                 value={`${product.cycle_time_minutes} dk`}
               />
             )}
