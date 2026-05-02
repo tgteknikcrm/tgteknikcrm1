@@ -569,25 +569,23 @@ export function ProductForm({
               </SelectContent>
             </Select>
           </Field>
-          <NumberField
-            label="Ayar Süresi (dk)"
+          <MinSecField
+            label="Ayar Süresi"
             value={setupTime}
             onChange={setSetupTime}
             hint="bir bağlama"
           />
-          <NumberField
-            label="İşleme Süresi (dk)"
+          <MinSecField
+            label="İşleme Süresi"
             value={cycleTime}
             onChange={setCycleTime}
-            step="0.1"
-            hint="parça başı makine"
+            hint="bir bağlama (cycle)"
           />
-          <NumberField
-            label="Temizlik (dk)"
+          <MinSecField
+            label="Temizlik"
             value={cleanupTime}
             onChange={setCleanupTime}
-            step="0.1"
-            hint="parça başı"
+            hint="bağlama başı swap"
           />
           <NumberField
             label="Bağlanan Adet"
@@ -935,6 +933,102 @@ function NumberField({
         onChange={(e) => onChange(e.target.value)}
         className="tabular-nums"
       />
+    </Field>
+  );
+}
+
+/**
+ * MinSecField — twin inputs for "X dk Y sn", stored externally as a
+ * decimal-minutes string (e.g. 5.5 for 5 dk 30 sn). Some shop
+ * operations finish in seconds, not whole minutes — INT-only fields
+ * silently truncated those to 0 and broke the timeline math.
+ *
+ * Internal: keep both panes as separate strings so users can clear
+ * either independently; merge to "M.X" decimal-minutes on commit.
+ */
+function MinSecField({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  hint?: string;
+}) {
+  const decimal = parseFloat(value);
+  const totalSeconds =
+    Number.isFinite(decimal) && decimal >= 0 ? Math.round(decimal * 60) : 0;
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+
+  function commit(nextMins: number, nextSecs: number) {
+    const totalSec = Math.max(0, nextMins * 60 + nextSecs);
+    if (totalSec === 0) {
+      onChange("");
+      return;
+    }
+    const decimalMin = totalSec / 60;
+    // Trim trailing zeros so "5.50" → "5.5" and integers stay "5".
+    onChange(
+      Number.isInteger(decimalMin)
+        ? String(decimalMin)
+        : decimalMin.toFixed(4).replace(/\.?0+$/, ""),
+    );
+  }
+
+  return (
+    <Field label={label} hint={hint ? `${hint} · dk + sn` : "dk + sn"}>
+      <div className="flex items-center gap-1.5">
+        <div className="relative flex-1">
+          <Input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            step="1"
+            value={value === "" && mins === 0 ? "" : String(mins)}
+            onChange={(e) => {
+              const v = e.target.value;
+              const next = v === "" ? 0 : Math.max(0, parseInt(v, 10) || 0);
+              commit(next, secs);
+            }}
+            className="tabular-nums pr-8"
+            placeholder="0"
+          />
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">
+            dk
+          </span>
+        </div>
+        <div className="relative flex-1">
+          <Input
+            type="number"
+            inputMode="numeric"
+            min="0"
+            max="59"
+            step="1"
+            value={value === "" && secs === 0 ? "" : String(secs)}
+            onChange={(e) => {
+              const v = e.target.value;
+              let next = v === "" ? 0 : Math.max(0, parseInt(v, 10) || 0);
+              // Allow operator to type "75" and have it roll into 1 dk 15 sn
+              // — friendlier than a hard cap.
+              if (next >= 60) {
+                const extraMin = Math.floor(next / 60);
+                next = next % 60;
+                commit(mins + extraMin, next);
+                return;
+              }
+              commit(mins, next);
+            }}
+            className="tabular-nums pr-8"
+            placeholder="0"
+          />
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">
+            sn
+          </span>
+        </div>
+      </div>
     </Field>
   );
 }

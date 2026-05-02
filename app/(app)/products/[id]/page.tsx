@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/tabs";
 import { createClient } from "@/lib/supabase/server";
 import {
+  formatDurationDkSn,
   PRODUCT_PROCESS_LABEL,
   PRODUCT_STATUS_LABEL,
   PRODUCT_STATUS_TONE,
@@ -324,7 +325,7 @@ export default async function ProductDetailPage({
                   label="İşleme Süresi"
                   value={
                     product.cycle_time_minutes != null
-                      ? `${product.cycle_time_minutes} dk/parça`
+                      ? `${formatDurationDkSn(product.cycle_time_minutes)} / bağlama`
                       : "—"
                   }
                   mono
@@ -333,7 +334,7 @@ export default async function ProductDetailPage({
                   label="Ayar Süresi"
                   value={
                     product.setup_time_minutes != null
-                      ? `${product.setup_time_minutes} dk`
+                      ? formatDurationDkSn(product.setup_time_minutes)
                       : "—"
                   }
                   mono

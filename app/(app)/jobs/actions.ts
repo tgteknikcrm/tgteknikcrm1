@@ -229,14 +229,16 @@ export async function setJobStep(jobId: string, step: JobStatus) {
   // and started_at is already stamped. We do this BEFORE writing
   // setup_completed_at so the diff is from the ayar start to "right
   // now", not zero.
+  //
+  // Math.round + min(1) when ANY time elapsed: a 50-second ayar would
+  // floor to 0 and never get recorded (the user's bug — "1 dakika ayar
+  // yaptım, ETA değişmiyor"). Any real ayar→uretimde transition logs
+  // at least 1 dk so the actual-setup ETA override kicks in.
   let setupElapsedMin = 0;
   if (step === "uretimde" && job?.started_at && !job.setup_completed_at) {
-    setupElapsedMin = Math.max(
-      0,
-      Math.floor(
-        (Date.now() - new Date(job.started_at).getTime()) / 60000,
-      ),
-    );
+    const elapsedRaw =
+      (Date.now() - new Date(job.started_at).getTime()) / 60000;
+    setupElapsedMin = elapsedRaw > 0 ? Math.max(1, Math.round(elapsedRaw)) : 0;
   }
 
   if (step === "ayar") {

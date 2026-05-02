@@ -40,6 +40,7 @@ import {
   calcEtaCalendarAware,
   calcJobTimeline,
   calcLiveProduced,
+  formatDurationDkSn,
   formatMinutes,
   JOB_STATUS_LABEL,
   JOB_STATUS_TONE,
@@ -150,6 +151,7 @@ export function JobCard({
     machineStatus: data.machineStatus,
     cycleMinutes: product?.cycle_time_minutes,
     cleanupMinutes: product?.cleanup_time_minutes,
+    partsPerSetup: product?.parts_per_setup,
     alreadyProduced: produced,
     quantity: job.quantity,
     creditedDowntimeMinutes: data.totalDowntime,
@@ -489,21 +491,34 @@ export function JobCard({
         />
         <Stat
           icon={CalendarDays}
-          label="Tahmini Bitiş"
+          label="Tam Süre"
           value={
-            timeline.remainingTotalMinutes > 0
-              ? formatMinutes(timeline.remainingTotalMinutes)
+            timeline.totalMinutes > 0
+              ? formatMinutes(timeline.totalMinutes)
               : "—"
           }
           subtitle={
-            eta
-              ? eta.toLocaleString("tr-TR", {
-                  day: "numeric",
-                  month: "short",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : undefined
+            timeline.remainingTotalMinutes > 0
+              ? `Kalan ${formatMinutes(timeline.remainingTotalMinutes)}${
+                  eta
+                    ? " · biter " +
+                      eta.toLocaleString("tr-TR", {
+                        day: "numeric",
+                        month: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : ""
+                }`
+              : eta
+                ? "biter " +
+                  eta.toLocaleString("tr-TR", {
+                    day: "numeric",
+                    month: "short",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : undefined
           }
           tone={
             timeline.remainingTotalMinutes > 0 && eta && due && eta > due
@@ -537,7 +552,7 @@ export function JobCard({
             <span>
               İşleme:{" "}
               <span className="font-mono text-foreground">
-                {product.cycle_time_minutes} dk
+                {formatDurationDkSn(product.cycle_time_minutes)}
               </span>
             </span>
           )}
@@ -546,10 +561,8 @@ export function JobCard({
             <span>
               Ayar:{" "}
               <span className="font-mono text-foreground">
-                {timeline.effectiveSetupMinutes.toFixed(
-                  timeline.setupFromActual ? 1 : 0,
-                )}{" "}
-                dk × {timeline.setupsLeft}
+                {formatDurationDkSn(timeline.effectiveSetupMinutes)} ×{" "}
+                {timeline.setupsLeft}
               </span>
               {timeline.setupFromActual && (
                 <span
@@ -971,8 +984,8 @@ function CompletionDialog({
             )}
             {product?.cycle_time_minutes != null && (
               <SumRow
-                label="İşleme (parça başı)"
-                value={`${product.cycle_time_minutes} dk`}
+                label="İşleme (bağlama başı)"
+                value={formatDurationDkSn(product.cycle_time_minutes)}
               />
             )}
           </div>

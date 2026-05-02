@@ -229,20 +229,24 @@ export function calcJobTimeline(input: {
   const pps =
     input.partsPerSetup && input.partsPerSetup > 0 ? input.partsPerSetup : 1;
 
-  // Effective cycle includes operator cleanup/swap per piece.
-  const effectiveCycle = cycle + cleanup;
+  // BATCH-BASED MATH (user's mental model):
+  //   "10 parça aynı bağlamada 1 dakikada işleniyor" — the cycle and
+  //   cleanup minutes are per FIXTURE LOAD (batch), not per piece.
+  //   Formula: batches × (setup + cycle + cleanup), where each batch
+  //   produces `pps` pieces.
+  const effectiveCycle = cycle + cleanup; // dk per BATCH
 
   const remaining = Math.max(0, quantity - produced);
   const setupsLeft = remaining > 0 ? Math.ceil(remaining / pps) : 0;
   const totalSetups = quantity > 0 ? Math.ceil(quantity / pps) : 0;
 
   const remainingSetupMinutes = setupsLeft * setup;
-  const remainingProductionMinutes = remaining * effectiveCycle;
+  const remainingProductionMinutes = setupsLeft * effectiveCycle;
   const remainingTotalMinutes =
     remainingSetupMinutes + remainingProductionMinutes;
 
   const totalSetupMinutes = totalSetups * setup;
-  const totalProductionMinutes = quantity * effectiveCycle;
+  const totalProductionMinutes = totalSetups * effectiveCycle;
   const totalMinutes = totalSetupMinutes + totalProductionMinutes;
 
   const progressPct = quantity > 0 ? (produced / quantity) * 100 : 0;
@@ -289,6 +293,8 @@ export function calcLiveProduced(input: {
   machineStatus?: MachineStatus | null;
   cycleMinutes: number | null | undefined;
   cleanupMinutes: number | null | undefined;
+  /** Pieces per fixture load — drives batch-based piece counting. */
+  partsPerSetup?: number | null | undefined;
   alreadyProduced: number;
   quantity: number;
   /**
@@ -317,7 +323,9 @@ export function calcLiveProduced(input: {
 } {
   const cycle = Math.max(0, input.cycleMinutes ?? 0);
   const cleanup = Math.max(0, input.cleanupMinutes ?? 0);
-  const effectiveCycleMin = cycle + cleanup;
+  const pps =
+    input.partsPerSetup && input.partsPerSetup > 0 ? input.partsPerSetup : 1;
+  const effectiveCycleMin = cycle + cleanup; // dk per BATCH
   const remaining = Math.max(
     0,
     input.quantity - Math.max(0, input.alreadyProduced),
@@ -363,14 +371,17 @@ export function calcLiveProduced(input: {
   const credited = Math.max(0, input.creditedDowntimeMinutes ?? 0);
   const effectiveMin = Math.max(0, grossElapsedMin - credited);
 
-  const wholePieces = Math.floor(effectiveMin / effectiveCycleMin);
-  const remainderMin = effectiveMin - wholePieces * effectiveCycleMin;
-  const cappedPieces = Math.min(wholePieces, remaining);
+  // BATCH-BASED: each completed batch yields `pps` pieces. A 1 dk
+  // cycle on a fixture holding 10 parts → 10 parts produced per minute.
+  const wholeBatches = Math.floor(effectiveMin / effectiveCycleMin);
+  const remainderMin = effectiveMin - wholeBatches * effectiveCycleMin;
+  const piecesFromBatches = wholeBatches * pps;
+  const cappedPieces = Math.min(piecesFromBatches, remaining);
   const liveProduced = input.alreadyProduced + cappedPieces;
   const reachedTarget = cappedPieces >= remaining; // hit quantity
   // Once we've hit the target piece count, freeze the per-piece progress
-  // bar at 100% — there's no "next piece" anymore. Otherwise show the
-  // partial progress toward the next cycle.
+  // bar at 100% — there's no "next batch" anymore. Otherwise show the
+  // partial progress toward the next batch cycle.
   const pieceProgressPct = reachedTarget
     ? 100
     : Math.min(100, (remainderMin / effectiveCycleMin) * 100);
@@ -400,6 +411,21 @@ export function formatMinutes(mins: number): string {
   if (hours > 0) parts.push(`${hours} sa`);
   if (minutes > 0 || parts.length === 0) parts.push(`${minutes} dk`);
   return parts.join(" ");
+}
+
+/**
+ * Sub-minute aware formatter — keeps seconds visible for short
+ * operations ("30 sn", "1 dk 30 sn"). Falls through to formatMinutes
+ * once we cross 60 minutes (long jobs don't benefit from sn precision).
+ */
+export function formatDurationDkSn(mins: number | null | undefined): string {
+  if (mins == null || !Number.isFinite(mins) || mins <= 0) return "0 dk";
+  if (mins >= 60) return formatMinutes(mins);
+  const totalSeconds = Math.round(mins * 60);
+  if (totalSeconds < 60) return `${totalSeconds} sn`;
+  const m = Math.floor(totalSeconds / 60);
+  const s = totalSeconds % 60;
+  return s > 0 ? `${m} dk ${s} sn` : `${m} dk`;
 }
 
 export interface ProductionEntry {
