@@ -225,6 +225,34 @@ export async function setJobStep(jobId: string, step: JobStatus) {
     };
   }
 
+  // Machine readiness check — if the operator is starting work on this
+  // job, the machine must not be broken or in maintenance. If it's just
+  // 'durus' (idle), we auto-flip to 'aktif' below so the live ticker
+  // ticks. Without this, calcLiveProduced freezes at the downtime
+  // session start and the produced count never advances — the user's
+  // bug report "üretimde iken step ilerlemiyor".
+  let needMachineActivation = false;
+  if ((step === "ayar" || step === "uretimde") && job?.machine_id) {
+    const { data: mc } = await supabase
+      .from("machines")
+      .select("status")
+      .eq("id", job.machine_id)
+      .maybeSingle();
+    if (mc?.status === "ariza") {
+      return {
+        error:
+          "Makine ARIZALI — önce arızayı kapat (makine durumunu aktife çek), sonra başlat.",
+      };
+    }
+    if (mc?.status === "bakim") {
+      return {
+        error:
+          "Makine BAKIMDA — bakımı bitir (makine durumunu aktife çek), sonra başlat.",
+      };
+    }
+    if (mc?.status !== "aktif") needMachineActivation = true;
+  }
+
   // Compute setup elapsed minutes if we're transitioning ayar→uretimde
   // and started_at is already stamped. We do this BEFORE writing
   // setup_completed_at so the diff is from the ayar start to "right
@@ -273,6 +301,16 @@ export async function setJobStep(jobId: string, step: JobStatus) {
     .maybeSingle();
   if (error) return { error: error.message };
   if (!data) return { error: "İş güncellenemedi (yetki yok ya da silinmiş)" };
+
+  // Flip the machine to 'aktif' the moment ayar/uretimde begins. This
+  // also closes any open downtime session (via the 0030 trigger) so
+  // calcLiveProduced unfreezes and the produced count starts ticking.
+  if (needMachineActivation && job?.machine_id) {
+    await supabase
+      .from("machines")
+      .update({ status: "aktif" })
+      .eq("id", job.machine_id);
+  }
 
   // Auto-create today's production entry the moment work starts —
   // either at "Ayara Başla" or "Üretime Başla". Uses UPSERT semantics
