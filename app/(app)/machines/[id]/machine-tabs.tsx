@@ -13,6 +13,7 @@ import {
   ClipboardCheck,
   ClipboardList,
   Cog,
+  Droplets,
   Hash,
   Package,
   Pause,
@@ -40,7 +41,8 @@ export type TabKey =
   | "duruslar"
   | "bakim"
   | "ariza"
-  | "temizlik";
+  | "temizlik"
+  | "yag_kontrol";
 
 export interface CurrentJobInfo {
   id: string;
@@ -137,6 +139,7 @@ interface Props {
   bakimEntries: TimelineEntryRow[];
   arizaEntries: TimelineEntryRow[];
   temizlikEntries: TimelineEntryRow[];
+  yagKontrolEntries: TimelineEntryRow[];
   productionLog: ProductionEntryRow[];
   kpis: KpiData;
 }
@@ -151,6 +154,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: React.ComponentType<{ clas
   { key: "bakim", label: "Bakım", icon: WrenchIcon },
   { key: "ariza", label: "Arıza", icon: AlertOctagon },
   { key: "temizlik", label: "Temizlik", icon: Sparkles },
+  { key: "yag_kontrol", label: "Yağ Kontrol", icon: Droplets },
 ];
 
 const STATUS_TONE: Record<MachineStatus, string> = {
@@ -235,6 +239,12 @@ export function MachineTabs(props: Props) {
       {tab === "temizlik" && (
         <TimelineList rows={props.temizlikEntries} emptyText="Temizlik kaydı yok" />
       )}
+      {tab === "yag_kontrol" && (
+        <TimelineList
+          rows={props.yagKontrolEntries}
+          emptyText="Yağ kontrol kaydı yok"
+        />
+      )}
     </>
   );
 }
@@ -251,6 +261,8 @@ function countForTab(k: TabKey, p: Props): number | null {
       return p.arizaEntries.length;
     case "temizlik":
       return p.temizlikEntries.length;
+    case "yag_kontrol":
+      return p.yagKontrolEntries.length;
     default:
       return null;
   }

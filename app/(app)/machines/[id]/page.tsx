@@ -144,7 +144,14 @@ export default async function MachineDetailPage({
          entry_status, fix_description, severity_level`,
       )
       .eq("machine_id", id)
-      .in("kind", ["bakim", "ariza", "temizlik", "duzeltme", "parca_degisimi"])
+      .in("kind", [
+        "bakim",
+        "ariza",
+        "temizlik",
+        "yag_kontrol",
+        "duzeltme",
+        "parca_degisimi",
+      ])
       .order("happened_at", { ascending: false })
       .limit(80),
     supabase
@@ -220,6 +227,9 @@ export default async function MachineDetailPage({
   );
   const temizlikEntries: TimelineEntryRow[] = allTimeline.filter(
     (e) => e.kind === "temizlik",
+  );
+  const yagKontrolEntries: TimelineEntryRow[] = allTimeline.filter(
+    (e) => e.kind === "yag_kontrol",
   );
 
   // ── Products produced on this machine (aggregated) ──────────
@@ -483,6 +493,7 @@ export default async function MachineDetailPage({
         bakimEntries={bakimEntries}
         arizaEntries={arizaEntries}
         temizlikEntries={temizlikEntries}
+        yagKontrolEntries={yagKontrolEntries}
         productionLog={productionLog}
         kpis={kpis}
       />
