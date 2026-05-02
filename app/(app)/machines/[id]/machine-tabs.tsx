@@ -287,33 +287,83 @@ function ProfilTab({
 }) {
   return (
     <div className="space-y-4">
-      {/* TOP ROW — Sol: Canlı Durum · Sağ: Üretim kartı */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="min-w-0">
+      {/* TOP ROW — Sol: Canlı Durum · Sağ: Üretim kartı + altında Aktif Takımlar.
+          items-stretch (default grid behavior) + h-full inside both columns
+          → her iki ana kart aynı yükseklikte oluyor. Sağ kolon iki kart
+          stack'liyor; sol kolon LiveTelemetry yüksekliğine kendi kendine
+          gerinerek eşitleniyor. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
+        {/* SOL — Canlı Durum (root Card artık h-full + flex flex-col) */}
+        <div className="min-w-0 flex flex-col">
           <LiveTelemetry
             machineId={machineId}
             status={machineStatus}
             toolHints={toolHints}
           />
         </div>
-        <Card className="overflow-hidden gap-0 py-0 min-w-0">
-          <div
-            className={cn(
-              "h-1.5 w-full",
-              currentJob ? "bg-emerald-500" : "bg-muted",
-            )}
-          />
-          <CardContent className="p-5">
-            {currentJob ? (
-              <CurrentJobHero job={currentJob} compact />
-            ) : (
-              <div className="text-center py-8 text-sm text-muted-foreground">
-                <Cog className="size-8 mx-auto opacity-30 mb-2" />
-                Şu an üretimde iş yok.
+
+        {/* SAĞ — Üretim kartı + Aktif Takımlar stack */}
+        <div className="min-w-0 flex flex-col gap-4">
+          <Card className="overflow-hidden gap-0 py-0 min-w-0 flex-1 flex flex-col">
+            <div
+              className={cn(
+                "h-1.5 w-full shrink-0",
+                currentJob ? "bg-emerald-500" : "bg-muted",
+              )}
+            />
+            <CardContent className="p-5 flex-1">
+              {currentJob ? (
+                <CurrentJobHero job={currentJob} compact />
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-sm text-muted-foreground">
+                  <Cog className="size-8 opacity-30 mb-2" />
+                  Şu an üretimde iş yok.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="shrink-0">
+            <CardContent className="p-4">
+              <div className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <WrenchIcon className="size-4 text-muted-foreground" />
+                Aktif İş Takımları
+                {tools.length > 0 && (
+                  <Badge variant="outline" className="ml-auto font-normal">
+                    {tools.length}
+                  </Badge>
+                )}
               </div>
-            )}
-          </CardContent>
-        </Card>
+              {tools.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-3 text-center italic">
+                  {currentJob ? "Bu iş için takım atanmamış." : "Aktif iş yok."}
+                </div>
+              ) : (
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {tools.map((t, i) => (
+                    <li
+                      key={i}
+                      className="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/50 transition border"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-sm truncate">
+                          {t.name}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate font-mono">
+                          {t.code ?? ""}
+                          {t.size ? ` · ${t.size}` : ""}
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="tabular-nums shrink-0">
+                        {t.quantity_used}x
+                      </Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* KPI strip — full width below */}
@@ -347,46 +397,6 @@ function ProfilTab({
           tone={kpis.uptimePct < 80 ? "amber" : "emerald"}
         />
       </div>
-
-      {/* Active job tools */}
-      <Card>
-        <CardContent className="p-4">
-          <div className="text-sm font-semibold mb-3 flex items-center gap-2">
-            <WrenchIcon className="size-4 text-muted-foreground" />
-            Aktif İş Takımları
-            {tools.length > 0 && (
-              <Badge variant="outline" className="ml-auto font-normal">
-                {tools.length}
-              </Badge>
-            )}
-          </div>
-          {tools.length === 0 ? (
-            <div className="text-sm text-muted-foreground py-4 text-center italic">
-              {currentJob ? "Bu iş için takım atanmamış." : "Aktif iş yok."}
-            </div>
-          ) : (
-            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-              {tools.map((t, i) => (
-                <li
-                  key={i}
-                  className="flex items-center justify-between gap-2 p-2 rounded-md hover:bg-muted/50 transition border"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="font-medium text-sm truncate">{t.name}</div>
-                    <div className="text-xs text-muted-foreground truncate font-mono">
-                      {t.code ?? ""}
-                      {t.size ? ` · ${t.size}` : ""}
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="tabular-nums shrink-0">
-                    {t.quantity_used}x
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }

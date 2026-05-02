@@ -341,9 +341,9 @@ export function LiveTelemetry({ machineId, status, toolHints }: Props) {
   const StateIcon = m.icon;
 
   return (
-    <Card className="mb-6 overflow-hidden gap-0 py-0 border-2">
-      <div className={cn("h-1 w-full", m.pulse)} />
-      <CardContent className="p-0">
+    <Card className="h-full overflow-hidden gap-0 py-0 border-2 flex flex-col">
+      <div className={cn("h-1 w-full shrink-0", m.pulse)} />
+      <CardContent className="p-0 flex-1 flex flex-col">
         {/* HEADER STRIP */}
         <div className="flex items-center justify-between gap-3 flex-wrap p-4 border-b">
           <div className="flex items-center gap-3">
