@@ -4,18 +4,20 @@
 -- ║  KULLANIM (Supabase Dashboard):                                  ║
 -- ║    1. Sol menüden "SQL Editor"a git                              ║
 -- ║    2. "+ New query" tıkla                                        ║
--- ║    3. Bu dosyanın TAMAMINI kopyala-yapıştır                      ║
+-- ║    3. Bu dosyanın TAMAMINI kopyala-yapıştır (401 satır)          ║
 -- ║    4. Sağ alttaki "RUN" tuşuna bas                               ║
 -- ║    5. Hata yoksa hepsi uygulanmıştır                             ║
 -- ║                                                                  ║
--- ║  İÇİNDEKİLER (sırasıyla 4 migration):                            ║
--- ║    0033  machine_inspections      (Temizlik + Yağ checklist)     ║
--- ║    0034  kesim_module             (Hammadde + cut_pieces)        ║
--- ║    0035  setup_overrun_+_cycles   (Per-makine + setup variance)  ║
--- ║    0036  downtime_reason          (Duruş sebep kategorisi)       ║
+-- ║  İÇİNDEKİLER (4 migration, repo'da 0038-0041 numaralandı):       ║
+-- ║    0038  machine_inspections      (Temizlik + Yağ checklist)     ║
+-- ║    0039  kesim_module             (Hammadde + cut_pieces)        ║
+-- ║    0040  setup_overrun_+_cycles   (Per-makine + setup variance)  ║
+-- ║    0041  downtime_reason          (Duruş sebep kategorisi)       ║
 -- ║                                                                  ║
 -- ║  GÜVENLİK: Her şey "if not exists" ya da "drop policy if exists" ║
 -- ║  ile yazıldı — birden fazla kez RUN basmak güvenli (idempotent). ║
+-- ║  Diğer PC'den gelen 0033-0037 migration'ları zaten uygulanmış —  ║
+-- ║  bu dosya onlara dokunmaz, sadece eksik 4 tanesini ekler.        ║
 -- ╚══════════════════════════════════════════════════════════════════╝
 
 
