@@ -330,8 +330,15 @@ tgteknikcrm/
 | 0030 | machine_downtime_sync.sql | machine_downtime_sessions tablosu + `_close_open_downtime_session` + `_active_job_entry_for_machine` helpers + AFTER UPDATE OF status ON machines trigger — makine `aktif → durus/bakim/ariza` olunca session açar, `aktif`'e dönünce kapatır + elapsed dk'ı active job'ın production_entry.downtime_minutes'ına credit eder. v_machine_active_downtime view (security_invoker). |
 | 0031 | complete_job_rpc.sql | İki SECURITY DEFINER RPC: `soft_delete_message(uuid)` — RLS read-after-update sessiz 0-row trap'i bypass + spesifik errcodes (auth_required / not_your_message / message_not_found). `complete_job_rpc(uuid, int)` — atomik jobs.UPDATE + production_entries INSERT/UPDATE + setup backfill (started_at→setup_completed_at delta) + scrap validation. Her ikisi de authenticated grant. |
 | 0032 | messaging_rls_recursion_fix.sql | `is_conversation_participant` + yeni `is_conversation_admin` SECURITY DEFINER fonksiyonlarına `set row_security = off` eklendi → "infinite recursion detected in policy for relation conversation_participants" hatası bitti. Calendar 0021'de yapılan recursion fix'in messaging eşdeğeri. Eski "delete participants" + "insert participants" policy'leri inline subquery yerine helper kullanır. |
-| 0033 | machine_inspections.sql | Yapılandırılmış temizlik + yağ kontrol kayıtları. `machine_inspections` tablosu (machine_id, type='temizlik'\|'yag_kontrol', items jsonb checklist, photo_paths text[], shift, performer) + private `machine-inspections` storage bucket. Operator vardiya başında/sonunda kontrol yapar — checklist + 1-3 fotoğraf + not. Eski `machine_timeline_entries (kind='temizlik')` plain-text yöntemini değiştirir. |
-| 0034 | kesim_module.sql | Kesim/Stok prep modülü. `raw_materials` (kod, malzeme grade, şekil, çap/en/boy/kalınlık, bar_length, quantity, lokasyon) + `cut_pieces` (raw_material_id FK, product_id FK opsiyonel, cut_length_mm, quantity_cut, quantity_remaining, lot_no, location). Kesim akışı: hammadde stoğundan boy düşer, cut_pieces stoğuna parça eklenir. raw_material_shape enum ile şekil kategorisi. |
+| 0033 | conversation_membership.sql | _(diğer PC, uygulanmış)_ Messaging RLS membership fix |
+| 0034 | complete_job_rpc_time_cast.sql | _(diğer PC, uygulanmış)_ complete_job_rpc time/timestamp cast düzeltmesi |
+| 0035 | messaging_post_membership_fixes.sql | _(diğer PC, uygulanmış)_ messaging post-membership patch |
+| 0036 | product_time_fields_numeric.sql | _(diğer PC, uygulanmış)_ Ürün cycle/setup/cleanup minutes int → numeric (dk+sn için) |
+| 0037 | timeline_kind_yag_kontrol.sql | _(diğer PC, uygulanmış)_ machine_timeline_entries.kind enum'a 'yag_kontrol' değeri eklendi |
+| **0038** | **machine_inspections.sql** | **(YENİ — UYGULANMA BEKLİYOR)** Yapılandırılmış temizlik + yağ kontrol kayıtları. `machine_inspections` tablosu (machine_id, type='temizlik'\|'yag_kontrol', items jsonb checklist, photo_paths text[], shift, performer) + private `machine-inspections` storage bucket. Operator vardiya başında/sonunda kontrol yapar — checklist + 1-3 fotoğraf + not. |
+| **0039** | **kesim_module.sql** | **(YENİ — UYGULANMA BEKLİYOR)** Kesim/Stok prep modülü. `raw_materials` (kod, malzeme grade, şekil, çap/en/boy/kalınlık, bar_length, quantity, lokasyon) + `cut_pieces` (raw_material_id FK, product_id FK opsiyonel, cut_length_mm, quantity_cut, quantity_remaining, lot_no, location). Kesim akışı: hammadde stoğundan boy düşer, cut_pieces stoğuna parça eklenir. |
+| **0040** | **setup_overrun_and_machine_cycles.sql** | **(YENİ — UYGULANMA BEKLİYOR)** `product_machine_cycles` tablosu (per-makine cycle/swap/setup/pps override) + `production_entries.setup_planned_minutes` + `setup_overrun_reason` text + `setup_overrun_category` enum (8 değer: program_hatasi/mengene_fixture/sifirlama_uzadi/...). |
+| **0041** | **downtime_reason.sql** | **(YENİ — UYGULANMA BEKLİYOR)** `downtime_reason_category` enum (12 değer: mola/operator_yok/malzeme/ayar/vardiya/bakim_planli/bakim_plansiz/ariza_mekanik/elektrik/yazilim/kalite_sorunu/diger) + `machine_downtime_sessions.reason_category` kolonu. |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -542,6 +549,49 @@ Tüm liste sayfalarında ortak hook + sticky toolbar:
 
 - **Security (son)**: 1 WARN — `leaked_password_protection` (dashboard'dan açılır, MCP'den ayarlanamaz)
 - **Performance (son)**: sadece `unused_index` INFO'ları (veri az/yok, beklenen)
+
+---
+
+## 🔥 ŞU ANKİ DURUM (2026-05-05 sonu) — yeni session başlatınca öncelik
+
+**Supabase MCP kuruldu** (`.mcp.json`, `.gitignore`'lı). Project ref: `qikxnbgfaangeyrxzxxl`. Restart sonrası `apply_migration` / `execute_sql` / `list_tables` tools'ları aktif olur.
+
+**4 migration UYGULANMA BEKLİYOR** (DB'de yok, repo'da var):
+- `supabase/migrations/0038_machine_inspections.sql`
+- `supabase/migrations/0039_kesim_module.sql`
+- `supabase/migrations/0040_setup_overrun_and_machine_cycles.sql`
+- `supabase/migrations/0041_downtime_reason.sql`
+
+VEYA tek dosyada: `supabase/APPLY_ALL_PENDING.sql` (4'ünün birleşimi, idempotent).
+
+**Yeni session açıldığında ilk yapacak:** User "migrationları uygula" derse:
+1. Her migration dosyasını sırayla `apply_migration` ile uygula
+2. Hata gelirse "already exists" benzeri ise atla, başka hata varsa user'a göster
+3. Sonra istersen `cleanOrphanQualityData()` action'ının SQL'ini çalıştır (orphan kalite kayıtlarını sil — eski silinmiş ürünlerden)
+4. Özet ver: "X tablo + Y kolon + Z policy eklendi, A orphan kayıt silindi"
+
+**User halihazırda yaşadığı sorunlar (migration uygulanınca biter):**
+- Resim yükleme hatası ("Could not find the table 'public.machine_inspections'") → 0038
+- Kesim modülü 404 → 0039
+- Setup overrun popup boş ("kolon yok" log) → 0040
+- Duruş sebep kaydedilemiyor → 0041
+
+**Son 5 commit (push edildi):**
+- `8aa2979` Ürün wizard İmalat: Varsayılan Makine alanı kaldırıldı
+- `e88439d` İmalat zaman modeli: cycle=parça başı + per-makine override + setup overrun + sebep akışı
+- `4a0d1b8` Duruş sebep popup + İstatistik 4 periyot + ürün kayıt defansif
+- `a4b3284` Sahipsiz kalan kalite verisi temizleme + APPLY_ALL_PENDING.sql
+- `59ff138` Migration numara çakışması: 0033-0036 → 0038-0041 yeniden numaralandı
+
+**Yeni model özet (CNC zaman hesabı):**
+```
+toplam = setup(1 sefer) + qty × cycle/parça + ⌈qty/bağlanan⌉ × swap
+```
+- Cycle = TEK PARÇA için (twin-spindle 2 parça 5:30 → 2:45/parça yaz)
+- Swap = bağlama değişiminde tezgah duruyorsa 1 dk; paralel yükleme yapılan twin-spindle/pallet'te **0**
+- Setup = iş başında 1 KEZ
+- Bağlanan adet = swap sıklığı (1/2/4)
+- Per-makine override → `product_machine_cycles` tablosu
 
 ---
 
