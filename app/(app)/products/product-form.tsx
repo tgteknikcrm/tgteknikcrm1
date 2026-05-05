@@ -25,6 +25,8 @@ import {
   CircleDollarSign,
   Cog,
   FileText,
+  HardDrive,
+  Image as ImageIcon,
   Loader2,
   Plus,
   Search,
@@ -34,6 +36,9 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import { ProductImageGallery } from "./product-image-gallery";
+import { ProductDrawingsTab } from "./[id]/product-drawings-tab";
+import { ProductCadTab } from "./[id]/product-cad-tab";
 import { toast } from "sonner";
 import {
   HEAT_TREATMENT_PRESETS,
@@ -204,19 +209,39 @@ export function ProductForm({
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
 
-  // ── Wizard step state. 6 steps. Step 0..4 are sectional; Step 5 is
-  //    a summary + commercial + notes (final review then submit).
+  // ── Wizard step state.
+  //    Pre-save steps (0-5): Temel/Sınıf/Boyut/İmalat/Takım/Ticari+Özet
+  //    Post-save steps (6-8): Görseller/Teknik Resim/CAD-CAM
+  //
+  //    For NEW products, post-save steps are gated on `savedId` being set
+  //    (storage uploads need a product id). Step 5's "Oluştur" submit
+  //    creates the product, fills savedId, advances to step 6.
+  //
+  //    For EDIT mode, the user came from /products/[id] — they already
+  //    have all those upload tabs there, so we keep the wizard at 6 steps
+  //    and let "Kaydet" act like before (redirect-or-stay).
   const [step, setStep] = useState<number>(0);
-  const STEPS: { key: string; label: string; icon: typeof FileText }[] = [
+  const [savedId, setSavedId] = useState<string | null>(product?.id ?? null);
+  const PRE_SAVE_STEPS = [
     { key: "temel", label: "Temel Bilgi", icon: FileText },
     { key: "sinif", label: "Sınıf & Malzeme", icon: Tag },
     { key: "boyut", label: "Boyutlar", icon: Box },
     { key: "imalat", label: "İmalat", icon: Cog },
     { key: "takim", label: "Takım", icon: Wrench },
     { key: "ozet", label: "Ticari & Özet", icon: CircleDollarSign },
-  ];
+  ] as const;
+  const POST_SAVE_STEPS = [
+    { key: "gorseller", label: "Görseller", icon: ImageIcon },
+    { key: "teknik_resim", label: "Teknik Resim", icon: FileText },
+    { key: "cad_cam", label: "CAD/CAM", icon: HardDrive },
+  ] as const;
+  const STEPS: { key: string; label: string; icon: typeof FileText }[] = isEdit
+    ? [...PRE_SAVE_STEPS]
+    : [...PRE_SAVE_STEPS, ...POST_SAVE_STEPS];
   const isLastStep = step === STEPS.length - 1;
   const isFirstStep = step === 0;
+  const PRE_SAVE_LAST = PRE_SAVE_STEPS.length - 1; // = 5 → "Ticari & Özet"
+  const isPostSaveStep = step > PRE_SAVE_LAST;
 
   const usedToolIds = useMemo(
     () => new Set(rows.map((r) => r.tool_id)),
@@ -334,10 +359,19 @@ export function ProductForm({
         return;
       }
       const newId = "id" in r ? r.id : null;
-      toast.success(isEdit ? "Ürün güncellendi" : "Ürün oluşturuldu");
-      if (!isEdit && newId) {
-        router.push(`/products/${newId}`);
-      } else {
+      if (isEdit) {
+        toast.success("Ürün güncellendi");
+        router.refresh();
+        return;
+      }
+      // NEW product: don't redirect — advance to post-save upload steps
+      // (Görseller / Teknik Resim / CAD-CAM) so the user can upload media
+      // in the same flow. The wizard footer's "Bitir" on the last step
+      // performs the redirect to /products/[id].
+      if (newId) {
+        toast.success("Ürün oluşturuldu — şimdi görselleri ekleyebilirsin");
+        setSavedId(newId);
+        setStep(PRE_SAVE_LAST + 1); // → Görseller step
         router.refresh();
       }
     });
@@ -892,6 +926,39 @@ export function ProductForm({
         />
       )}
 
+      {/* ── Step 6: Görseller (post-save, needs savedId) ── */}
+      {step === 6 && savedId && (
+        <PostSaveStep
+          icon={ImageIcon}
+          title="Ürün Görselleri"
+          description="Müşteri kataloğu, atölye referansı veya operatör tanıma için ürünün resimleri. İstersen bu adımı atla — sonradan da eklenebilir."
+        >
+          <ProductImageGallery productId={savedId} images={[]} />
+        </PostSaveStep>
+      )}
+
+      {/* ── Step 7: Teknik Resim (post-save) ── */}
+      {step === 7 && savedId && (
+        <PostSaveStep
+          icon={FileText}
+          title="Teknik Resimler"
+          description="PDF veya görsel dosyalar — operatör imalat öncesi bakar. Fabric.js ile balon/açıklama eklenebilir."
+        >
+          <ProductDrawingsTab productId={savedId} items={[]} />
+        </PostSaveStep>
+      )}
+
+      {/* ── Step 8: CAD/CAM (post-save) ── */}
+      {step === 8 && savedId && (
+        <PostSaveStep
+          icon={HardDrive}
+          title="CAD / CAM Programları"
+          description="NC, G-code, STEP, STL, DXF, PDF formatları kabul edilir. Makine bağlama opsiyonel — sonra da yapılır."
+        >
+          <ProductCadTab productId={savedId} items={[]} machines={machines} />
+        </PostSaveStep>
+      )}
+
       {/* ── Wizard navigation footer ── */}
       <div className="sticky bottom-0 z-10 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 bg-background/95 backdrop-blur border-t flex items-center gap-2">
         <Button
@@ -906,12 +973,62 @@ export function ProductForm({
             type="button"
             variant="outline"
             onClick={() => setStep((s) => Math.max(0, s - 1))}
-            disabled={isFirstStep}
+            disabled={isFirstStep || (isPostSaveStep && step === PRE_SAVE_LAST + 1)}
             className="h-11 px-4 gap-1.5"
+            title={
+              isPostSaveStep && step === PRE_SAVE_LAST + 1
+                ? "Kaydedilmiş ürüne dönülemez — kapat ve detay sayfasından düzenle"
+                : undefined
+            }
           >
             <ChevronLeft className="size-4" /> Geri
           </Button>
-          {!isLastStep ? (
+
+          {/* Step 5 (PRE_SAVE_LAST): submit form to save */}
+          {step === PRE_SAVE_LAST ? (
+            <Button type="submit" disabled={pending} className="h-11 px-5 gap-1.5">
+              {pending && <Loader2 className="size-4 animate-spin" />}
+              <Check className="size-4" />
+              {isEdit ? "Kaydet" : "Oluştur"}
+              {!isEdit && <ChevronRight className="size-4" />}
+            </Button>
+          ) : isPostSaveStep && !isLastStep ? (
+            // Steps 6, 7: skip / next (no save needed — uploads are
+            // committed on each file action)
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  setStep((s) => Math.min(STEPS.length - 1, s + 1))
+                }
+                className="h-11 px-3"
+              >
+                Atla
+              </Button>
+              <Button
+                type="button"
+                onClick={() =>
+                  setStep((s) => Math.min(STEPS.length - 1, s + 1))
+                }
+                className="h-11 px-5 gap-1.5"
+              >
+                Sonraki <ChevronRight className="size-4" />
+              </Button>
+            </>
+          ) : isLastStep && isPostSaveStep ? (
+            // Step 8 (last in NEW flow): finish wizard → detail page
+            <Button
+              type="button"
+              onClick={() => {
+                if (savedId) router.push(`/products/${savedId}`);
+              }}
+              className="h-11 px-5 gap-1.5"
+            >
+              <Check className="size-4" /> Bitir
+            </Button>
+          ) : (
+            // Pre-save steps 0-4 (and step 5 in edit mode is handled above)
             <Button
               type="button"
               onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
@@ -919,16 +1036,40 @@ export function ProductForm({
             >
               İleri <ChevronRight className="size-4" />
             </Button>
-          ) : (
-            <Button type="submit" disabled={pending} className="h-11 px-5 gap-1.5">
-              {pending && <Loader2 className="size-4 animate-spin" />}
-              <Check className="size-4" />
-              {isEdit ? "Kaydet" : "Oluştur"}
-            </Button>
           )}
         </div>
       </div>
     </form>
+  );
+}
+
+/* ── PostSaveStep — uniform wrapper for upload steps shown after the
+   product is saved. Adds a header with icon + description so the user
+   knows what's expected. ─────────────────────────────────────────── */
+function PostSaveStep({
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border bg-card overflow-hidden">
+      <div className="px-5 py-4 border-b bg-primary/5 flex items-start gap-3">
+        <div className="size-10 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
+          <Icon className="size-5" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-lg font-semibold">{title}</div>
+          <div className="text-sm text-muted-foreground mt-0.5">{description}</div>
+        </div>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
   );
 }
 

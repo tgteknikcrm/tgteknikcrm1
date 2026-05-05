@@ -166,6 +166,34 @@ export async function saveProduct(input: SaveProductInput) {
 export async function deleteProduct(id: string) {
   const { supabase, error } = await requireUser();
   if (error) return { error };
+
+  // Cascade quality cleanup BEFORE deleting the product.
+  // jobs.product_id is ON DELETE SET NULL — the jobs themselves persist,
+  // but we want to wipe their quality data because the user's intent
+  // was "this product is gone, its measurements should go too".
+  const { data: jobIdsRows } = await supabase
+    .from("jobs")
+    .select("id")
+    .eq("product_id", id);
+  const jobIds = (jobIdsRows ?? []).map((r) => r.id as string);
+  let removedSpecs = 0;
+  let removedMeas = 0;
+  if (jobIds.length > 0) {
+    const { data: spec } = await supabase
+      .from("quality_specs")
+      .delete()
+      .in("job_id", jobIds)
+      .select("id");
+    removedSpecs = (spec ?? []).length;
+    const { data: meas } = await supabase
+      .from("quality_measurements")
+      .delete()
+      .in("job_id", jobIds)
+      .select("id");
+    removedMeas = (meas ?? []).length;
+    await supabase.from("quality_reviews").delete().in("job_id", jobIds);
+  }
+
   // Best-effort: clean up product images (storage objects) before row delete.
   const { data: imgs } = await supabase
     .from("product_images")
@@ -186,13 +214,32 @@ export async function deleteProduct(id: string) {
     void supabase.storage.from("product-images").remove(paths);
   }
   revalidatePath("/products");
-  return { success: true };
+  revalidatePath("/quality");
+  return {
+    success: true,
+    affectedJobs: jobIds.length,
+    removedSpecs,
+    removedMeasurements: removedMeas,
+  };
 }
 
 export async function bulkDeleteProducts(ids: string[]) {
   if (!ids || ids.length === 0) return { error: "Seçili ürün yok" };
   const { supabase, error } = await requireUser();
   if (error) return { error };
+
+  // Cascade quality cleanup for all jobs tied to these products.
+  const { data: jobIdsRows } = await supabase
+    .from("jobs")
+    .select("id")
+    .in("product_id", ids);
+  const jobIds = (jobIdsRows ?? []).map((r) => r.id as string);
+  if (jobIds.length > 0) {
+    await supabase.from("quality_specs").delete().in("job_id", jobIds);
+    await supabase.from("quality_measurements").delete().in("job_id", jobIds);
+    await supabase.from("quality_reviews").delete().in("job_id", jobIds);
+  }
+
   const { data: imgs } = await supabase
     .from("product_images")
     .select("image_path")
@@ -206,6 +253,7 @@ export async function bulkDeleteProducts(ids: string[]) {
     void supabase.storage.from("product-images").remove(paths);
   }
   revalidatePath("/products");
+  revalidatePath("/quality");
   return { success: true };
 }
 

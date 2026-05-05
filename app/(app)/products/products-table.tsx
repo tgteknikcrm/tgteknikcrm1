@@ -196,7 +196,16 @@ export function ProductsTable({
                     </Button>
                     <DeleteButton
                       action={() => deleteProduct(p.id)}
-                      confirmText={`'${p.code}' ürünü silinsin mi?`}
+                      confirmText={`'${p.code}' ürünü silinsin mi? Bağlı işlerin kalite verisi (spec + ölçüm) de temizlenir, işler kendisi kalır.`}
+                      formatSuccess={(r) => {
+                        const jobs = (r.affectedJobs as number) ?? 0;
+                        const specs = (r.removedSpecs as number) ?? 0;
+                        const meas = (r.removedMeasurements as number) ?? 0;
+                        if (jobs > 0) {
+                          return `Ürün silindi · ${jobs} iş için ${specs} spec + ${meas} ölçüm temizlendi`;
+                        }
+                        return "Ürün silindi";
+                      }}
                     />
                   </div>
                 </TableCell>

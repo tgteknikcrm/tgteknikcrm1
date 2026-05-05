@@ -215,7 +215,16 @@ export default async function ProductDetailPage({
                 "use server";
                 return deleteProduct(product.id);
               }}
-              confirmText={`'${product.code}' ürününü silmek istediğine emin misin?`}
+              confirmText={`'${product.code}' ürününü silmek istediğine emin misin? Bağlı işlerin kalite verisi (spec + ölçüm) de temizlenir, işler kalır.`}
+              formatSuccess={(r) => {
+                const jobs = (r.affectedJobs as number) ?? 0;
+                const specs = (r.removedSpecs as number) ?? 0;
+                const meas = (r.removedMeasurements as number) ?? 0;
+                if (jobs > 0) {
+                  return `Ürün silindi · ${jobs} iş için ${specs} spec + ${meas} ölçüm temizlendi`;
+                }
+                return "Ürün silindi";
+              }}
             />
           </div>
 
