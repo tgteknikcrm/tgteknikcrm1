@@ -188,25 +188,30 @@ export function jobStepIndex(status: JobStatus): number {
 export function calcJobTimeline(input: {
   quantity: number;
   produced: number;
+  /** Cycle PER PIECE (dk). Operator divides controller elapsed by the
+   *  parts in the batch. e.g. twin-spindle 5:30 cycle for 2 parts → write 2:45. */
   cycleMinutes: number | null | undefined;
+  /** Swap PER BATCH (dk). Tezgah swap için duruyor mu? Duruyorsa 1 dk; paralel yükleme yapılan
+   *  twin-spindle / pallet-changer makinelerde 0 yaz. */
   cleanupMinutes?: number | null | undefined;
+  /** Setup ONCE per job (dk). Tek seferlik — iş başında. */
   setupMinutes: number | null | undefined;
+  /** Aynı bağlamada parça sayısı (1/2/4...). Swap sıklığını belirler. */
   partsPerSetup: number | null | undefined;
   /**
-   * Average actual setup minutes recorded so far for THIS job (across
-   * all production_entries). When > 0, takes precedence over the
-   * product's planned setupMinutes — the user's mental model:
-   * "ayar 20 dk planladım ama gerçek 5 dk sürüyor; sonraki bağlamalar
-   * için planlı 20 değil benim ölçtüğüm 5 dk kullanılsın."
+   * Average actual setup minutes recorded so far for THIS job. When >0,
+   * takes precedence over the product's planned setupMinutes.
    */
   actualAvgSetupMinutes?: number | null | undefined;
+  /** True if "Üretime Başla" tıklandı, ayar bitti. setup_remaining = 0
+   *  bu durumda. Default: produced > 0 ise setup yapılmış sayar. */
+  setupDone?: boolean;
 }): {
   remaining: number;
+  /** Hâlâ yapılması gereken setup sayısı. Yeni modelde 0 veya 1. */
   setupsLeft: number;
   effectiveCycle: number;
-  /** The setup minutes value actually used (planned or actual). */
   effectiveSetupMinutes: number;
-  /** True if effectiveSetupMinutes came from real measurements. */
   setupFromActual: boolean;
   remainingSetupMinutes: number;
   remainingProductionMinutes: number;
@@ -218,35 +223,54 @@ export function calcJobTimeline(input: {
 } {
   const quantity = Math.max(0, input.quantity ?? 0);
   const produced = Math.max(0, Math.min(input.produced ?? 0, quantity));
-  const cycle = Math.max(0, input.cycleMinutes ?? 0);
-  const cleanup = Math.max(0, input.cleanupMinutes ?? 0);
+  const cyclePerPiece = Math.max(0, input.cycleMinutes ?? 0);
+  const swapPerBatch = Math.max(0, input.cleanupMinutes ?? 0);
   const plannedSetup = Math.max(0, input.setupMinutes ?? 0);
   const actualSetup = Math.max(0, input.actualAvgSetupMinutes ?? 0);
-  // Prefer actual measurements when available — the operator already
-  // proved how long a setup really takes for THIS job/machine combo.
   const setupFromActual = actualSetup > 0;
   const setup = setupFromActual ? actualSetup : plannedSetup;
   const pps =
     input.partsPerSetup && input.partsPerSetup > 0 ? input.partsPerSetup : 1;
 
-  // BATCH-BASED MATH (user's mental model):
-  //   "10 parça aynı bağlamada 1 dakikada işleniyor" — the cycle and
-  //   cleanup minutes are per FIXTURE LOAD (batch), not per piece.
-  //   Formula: batches × (setup + cycle + cleanup), where each batch
-  //   produces `pps` pieces.
-  const effectiveCycle = cycle + cleanup; // dk per BATCH
+  // PER-PIECE MATH (operator's mental model — confirmed 2026-05-05):
+  //   Setup happens ONCE per job (operator calls "Ayara Başla" → "Üretime Başla").
+  //   Cycle is per piece (operator divides controller elapsed by part count
+  //   in the batch — handles twin-spindle/parallel naturally).
+  //   Swap is per batch — only if tezgah duruyor; paralel yükleme tezgahlarında 0.
+  //
+  //   Formula:
+  //     total = setup_once + qty × cycle + ⌈qty/pps⌉ × swap
+  //
+  //   Twin-spindle: cycle=2.5, swap=0, pps=2 → avg 2.5/parça (faster)
+  //   Tek mengene:  cycle=5,   swap=1, pps=1 → avg 6/parça
+  //
+  //   "effectiveCycle" is kept for callers that show "per-batch summary";
+  //   re-defined here as the average per-piece time INCLUDING the
+  //   amortized swap fraction (cycle + swap/pps), which is what UI
+  //   actually wants to display now.
+  const effectiveCycle = cyclePerPiece + swapPerBatch / pps;
 
   const remaining = Math.max(0, quantity - produced);
-  const setupsLeft = remaining > 0 ? Math.ceil(remaining / pps) : 0;
-  const totalSetups = quantity > 0 ? Math.ceil(quantity / pps) : 0;
+
+  // Setup-once: only count if not yet performed. setupDone wins when
+  // explicitly provided; otherwise fall back to "produced > 0 means setup
+  // was done" (because no parts can come off without setup completing).
+  const setupAlreadyDone =
+    input.setupDone !== undefined ? input.setupDone : produced > 0;
+  const setupsLeft = setupAlreadyDone ? 0 : 1;
+
+  const totalBatches = quantity > 0 ? Math.ceil(quantity / pps) : 0;
+  const remainingBatches = remaining > 0 ? Math.ceil(remaining / pps) : 0;
 
   const remainingSetupMinutes = setupsLeft * setup;
-  const remainingProductionMinutes = setupsLeft * effectiveCycle;
+  const remainingProductionMinutes =
+    remaining * cyclePerPiece + remainingBatches * swapPerBatch;
   const remainingTotalMinutes =
     remainingSetupMinutes + remainingProductionMinutes;
 
-  const totalSetupMinutes = totalSetups * setup;
-  const totalProductionMinutes = totalSetups * effectiveCycle;
+  const totalSetupMinutes = setup; // tek sefer
+  const totalProductionMinutes =
+    quantity * cyclePerPiece + totalBatches * swapPerBatch;
   const totalMinutes = totalSetupMinutes + totalProductionMinutes;
 
   const progressPct = quantity > 0 ? (produced / quantity) * 100 : 0;
@@ -291,9 +315,11 @@ export function calcLiveProduced(input: {
   setupCompletedAt: string | null | undefined;
   jobStatus: JobStatus;
   machineStatus?: MachineStatus | null;
+  /** Cycle PER PIECE (dk). */
   cycleMinutes: number | null | undefined;
+  /** Swap PER BATCH (dk). 0 for parallel-load tezgahlar. */
   cleanupMinutes: number | null | undefined;
-  /** Pieces per fixture load — drives batch-based piece counting. */
+  /** Bağlanan adet (parts per fixture load). */
   partsPerSetup?: number | null | undefined;
   alreadyProduced: number;
   quantity: number;
@@ -317,15 +343,17 @@ export function calcLiveProduced(input: {
   effectiveCycleMin: number;
   liveActive: boolean;
   stoppedReason: MachineStatus | null;
-  /** True when liveProduced has hit the requested quantity. Drives
-   *  the auto-completion countdown on the JobCard. */
   reachedTarget: boolean;
 } {
-  const cycle = Math.max(0, input.cycleMinutes ?? 0);
-  const cleanup = Math.max(0, input.cleanupMinutes ?? 0);
+  const cyclePerPiece = Math.max(0, input.cycleMinutes ?? 0);
+  const swapPerBatch = Math.max(0, input.cleanupMinutes ?? 0);
   const pps =
     input.partsPerSetup && input.partsPerSetup > 0 ? input.partsPerSetup : 1;
-  const effectiveCycleMin = cycle + cleanup; // dk per BATCH
+  // PER-PIECE math: amortize swap into per-piece time. Each piece "owns"
+  // its own cycle plus a slice of the per-batch swap (since swap fires
+  // every pps pieces). Twin-spindle scenarios where swap=0 just reduce
+  // to cyclePerPiece.
+  const effectiveCycleMin = cyclePerPiece + swapPerBatch / pps;
   const remaining = Math.max(
     0,
     input.quantity - Math.max(0, input.alreadyProduced),
@@ -353,9 +381,6 @@ export function calcLiveProduced(input: {
   }
 
   const now = input.now ?? new Date();
-  // Anchor the "current" timestamp at the moment downtime started, so
-  // the live ticker freezes the second the operator flips the machine
-  // away from aktif (no need to wait for the page to refresh).
   const ceilingMs =
     isMachineDown && input.openDowntimeStartedAt
       ? Math.min(
@@ -371,17 +396,14 @@ export function calcLiveProduced(input: {
   const credited = Math.max(0, input.creditedDowntimeMinutes ?? 0);
   const effectiveMin = Math.max(0, grossElapsedMin - credited);
 
-  // BATCH-BASED: each completed batch yields `pps` pieces. A 1 dk
-  // cycle on a fixture holding 10 parts → 10 parts produced per minute.
-  const wholeBatches = Math.floor(effectiveMin / effectiveCycleMin);
-  const remainderMin = effectiveMin - wholeBatches * effectiveCycleMin;
-  const piecesFromBatches = wholeBatches * pps;
-  const cappedPieces = Math.min(piecesFromBatches, remaining);
+  // PER-PIECE: a piece falls off every `effectiveCycleMin` (cycle +
+  // amortized swap fraction). Twin-spindle/pallet machines naturally
+  // get faster output because their swap is 0 → effective ≈ cycle.
+  const wholePieces = Math.floor(effectiveMin / effectiveCycleMin);
+  const remainderMin = effectiveMin - wholePieces * effectiveCycleMin;
+  const cappedPieces = Math.min(wholePieces, remaining);
   const liveProduced = input.alreadyProduced + cappedPieces;
-  const reachedTarget = cappedPieces >= remaining; // hit quantity
-  // Once we've hit the target piece count, freeze the per-piece progress
-  // bar at 100% — there's no "next batch" anymore. Otherwise show the
-  // partial progress toward the next batch cycle.
+  const reachedTarget = cappedPieces >= remaining;
   const pieceProgressPct = reachedTarget
     ? 100
     : Math.min(100, (remainderMin / effectiveCycleMin) * 100);
@@ -1784,6 +1806,92 @@ export function readableTextOn(hex: string | null | undefined): string {
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return lum > 0.6 ? "#0f172a" : "white";
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Per-Machine Cycle Override (migration 0035)
+// ─────────────────────────────────────────────────────────────────────
+export interface ProductMachineCycle {
+  product_id: string;
+  machine_id: string;
+  cycle_seconds: number | null;
+  swap_seconds: number | null;
+  setup_seconds: number | null;
+  parts_per_setup: number | null;
+  notes: string | null;
+  updated_at: string;
+}
+
+/**
+ * Resolves the effective cycle/swap/setup/pps for a (product, machine)
+ * pair. Uses the per-machine override row when fields are non-null,
+ * else falls back to the product's defaults.
+ *
+ * Returns minutes (decimal). Operator stores seconds in the override
+ * table; product's defaults are stored as decimal minutes already.
+ */
+export function resolveTimingsForMachine(
+  product: {
+    cycle_time_minutes?: number | null;
+    cleanup_time_minutes?: number | null;
+    setup_time_minutes?: number | null;
+    parts_per_setup?: number | null;
+  },
+  override: Pick<
+    ProductMachineCycle,
+    "cycle_seconds" | "swap_seconds" | "setup_seconds" | "parts_per_setup"
+  > | null | undefined,
+): {
+  cycleMinutes: number;
+  cleanupMinutes: number;
+  setupMinutes: number;
+  partsPerSetup: number;
+  hasOverride: boolean;
+} {
+  const cycleOv =
+    override?.cycle_seconds != null ? override.cycle_seconds / 60 : null;
+  const swapOv =
+    override?.swap_seconds != null ? override.swap_seconds / 60 : null;
+  const setupOv =
+    override?.setup_seconds != null ? override.setup_seconds / 60 : null;
+  const ppsOv = override?.parts_per_setup ?? null;
+  const hasOverride =
+    cycleOv != null || swapOv != null || setupOv != null || ppsOv != null;
+  return {
+    cycleMinutes: cycleOv ?? product.cycle_time_minutes ?? 0,
+    cleanupMinutes: swapOv ?? product.cleanup_time_minutes ?? 0,
+    setupMinutes: setupOv ?? product.setup_time_minutes ?? 0,
+    partsPerSetup: ppsOv ?? product.parts_per_setup ?? 1,
+    hasOverride,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Setup Overrun (migration 0035)
+// ─────────────────────────────────────────────────────────────────────
+export type SetupOverrunCategory =
+  | "program_hatasi"
+  | "mengene_fixture"
+  | "sifirlama_uzadi"
+  | "ilk_parca_kontrolu"
+  | "takim_eksik_degisti"
+  | "ariza_durus"
+  | "numune_takim_yoktu"
+  | "diger";
+
+export const SETUP_OVERRUN_CATEGORY_LABEL: Record<SetupOverrunCategory, string> = {
+  program_hatasi: "Program hatası, yeniden yazıldı",
+  mengene_fixture: "Mengene / fixture değişimi",
+  sifirlama_uzadi: "Sıfırlama uzadı",
+  ilk_parca_kontrolu: "İlk parça kontrolünde sapma — ayar tekrar",
+  takim_eksik_degisti: "Takım eksik / değişti",
+  ariza_durus: "Acil arıza / duruş",
+  numune_takim_yoktu: "Numune takım yoktu",
+  diger: "Diğer",
+};
+
+// Threshold: when actual setup minutes exceed planned + this many
+// minutes, prompt for an overrun reason. Tunable from one place.
+export const SETUP_OVERRUN_THRESHOLD_MIN = 5;
 
 // ─────────────────────────────────────────────────────────────────────
 // Machine Inspections (Temizlik / Yağ Kontrol — migration 0033)

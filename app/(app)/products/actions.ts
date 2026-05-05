@@ -62,6 +62,16 @@ export interface SaveProductInput {
   notes?: string | null;
   // Default tool list (replace strategy)
   tools?: Array<{ tool_id: string; quantity_used: number; notes?: string | null }>;
+  // Per-machine timing overrides (replace strategy — only rows with at
+  // least one non-null field are kept; previous overrides for machines
+  // not in the array are deleted).
+  machine_cycles?: Array<{
+    machine_id: string;
+    cycle_seconds: number | null;
+    swap_seconds: number | null;
+    setup_seconds: number | null;
+    parts_per_setup: number | null;
+  }>;
 }
 
 function nullableNumber(n: number | null | undefined): number | null {
@@ -154,6 +164,29 @@ export async function saveProduct(input: SaveProductInput) {
         })),
       );
       if (tErr) return { error: tErr.message };
+    }
+  }
+
+  // Sync per-machine cycle overrides (replace strategy).
+  if (input.machine_cycles !== undefined) {
+    await supabase
+      .from("product_machine_cycles")
+      .delete()
+      .eq("product_id", productId);
+    if (input.machine_cycles.length > 0) {
+      const { error: mcErr } = await supabase
+        .from("product_machine_cycles")
+        .insert(
+          input.machine_cycles.map((c) => ({
+            product_id: productId!,
+            machine_id: c.machine_id,
+            cycle_seconds: c.cycle_seconds,
+            swap_seconds: c.swap_seconds,
+            setup_seconds: c.setup_seconds,
+            parts_per_setup: c.parts_per_setup,
+          })),
+        );
+      if (mcErr) return { error: mcErr.message };
     }
   }
 

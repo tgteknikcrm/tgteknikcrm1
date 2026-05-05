@@ -116,6 +116,8 @@ export async function addSetupMinutesToToday(args: {
   job_id: string;
   operator_id?: string | null;
   setup_minutes: number;
+  /** Optional: record the planned setup as a snapshot for variance reporting. */
+  setup_planned_minutes?: number | null;
 }) {
   if (!(args.setup_minutes > 0)) return { success: true };
   const supabase = await createClient();
@@ -127,16 +129,65 @@ export async function addSetupMinutesToToday(args: {
   if ("error" in ensured) return ensured;
   const { data: cur } = await supabase
     .from("production_entries")
-    .select("setup_minutes")
+    .select("setup_minutes, setup_planned_minutes")
     .eq("id", ensured.id)
     .single();
+  const updates: Record<string, unknown> = {
+    setup_minutes:
+      (cur?.setup_minutes ?? 0) + Math.max(0, args.setup_minutes),
+  };
+  // Only stamp the planned value once — first ayar→üretim transition.
+  if (
+    args.setup_planned_minutes != null &&
+    args.setup_planned_minutes > 0 &&
+    (cur?.setup_planned_minutes == null || cur.setup_planned_minutes === 0)
+  ) {
+    updates.setup_planned_minutes = args.setup_planned_minutes;
+  }
   await supabase
     .from("production_entries")
-    .update({
-      setup_minutes:
-        (cur?.setup_minutes ?? 0) + Math.max(0, args.setup_minutes),
-    })
+    .update(updates)
     .eq("id", ensured.id);
+  revalidatePath("/production");
+  revalidatePath("/jobs");
+  return { success: true, entry_id: ensured.id };
+}
+
+export async function recordSetupOverrunReason(args: {
+  machine_id: string;
+  job_id: string;
+  category:
+    | "program_hatasi"
+    | "mengene_fixture"
+    | "sifirlama_uzadi"
+    | "ilk_parca_kontrolu"
+    | "takim_eksik_degisti"
+    | "ariza_durus"
+    | "numune_takim_yoktu"
+    | "diger";
+  reason: string;
+}) {
+  const supabase = await createClient();
+  const today = new Date().toISOString().slice(0, 10);
+  // Find today's open entry for this (machine, job).
+  const { data: rows } = await supabase
+    .from("production_entries")
+    .select("id, setup_minutes, setup_planned_minutes")
+    .eq("machine_id", args.machine_id)
+    .eq("job_id", args.job_id)
+    .eq("entry_date", today)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const entry = rows?.[0];
+  if (!entry) return { error: "Bugünkü üretim kaydı bulunamadı" };
+  const { error } = await supabase
+    .from("production_entries")
+    .update({
+      setup_overrun_category: args.category,
+      setup_overrun_reason: args.reason.trim() || null,
+    })
+    .eq("id", entry.id);
+  if (error) return { error: error.message };
   revalidatePath("/production");
   revalidatePath("/jobs");
   return { success: true };

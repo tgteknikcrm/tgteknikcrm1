@@ -53,7 +53,7 @@ export default async function ProductDetailPage({
   const { id } = await params;
   const supabase = await createClient();
 
-  const [pRes, ptRes, piRes, tRes, mRes, dRes, cRes, jRes] = await Promise.all([
+  const [pRes, ptRes, piRes, tRes, mRes, dRes, cRes, jRes, mcRes] = await Promise.all([
     supabase.from("products").select("*").eq("id", id).maybeSingle(),
     supabase.from("product_tools").select("*").eq("product_id", id),
     supabase
@@ -86,12 +86,17 @@ export default async function ProductDetailPage({
       .eq("product_id", id)
       .order("created_at", { ascending: false })
       .limit(50),
+    supabase
+      .from("product_machine_cycles")
+      .select("*")
+      .eq("product_id", id),
   ]);
 
   const product = pRes.data as Product | null;
   if (!product) notFound();
 
   const productTools = (ptRes.data ?? []) as ProductTool[];
+  const machineCycles = (mcRes.data ?? []) as import("@/lib/supabase/types").ProductMachineCycle[];
   const productImages = (piRes.data ?? []) as ProductImage[];
   const tools = (tRes.data ?? []) as Tool[];
   const machines = (mRes.data ?? []) as Pick<Machine, "id" | "name">[];
@@ -444,6 +449,7 @@ export default async function ProductDetailPage({
             <ProductForm
               product={product}
               existingTools={productTools}
+              existingMachineCycles={machineCycles}
               tools={tools}
               machines={machines}
             />

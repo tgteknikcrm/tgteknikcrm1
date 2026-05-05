@@ -51,6 +51,7 @@ import {
   type Machine,
   type Product,
   type ProductCurrency,
+  type ProductMachineCycle,
   type ProductProcess,
   type ProductStatus,
   type ProductTool,
@@ -63,8 +64,21 @@ interface Props {
   // Both create + edit; null/undefined = create flow.
   product?: Product | null;
   existingTools?: ProductTool[];
+  /** Per-machine timing override rows already saved for this product. */
+  existingMachineCycles?: ProductMachineCycle[];
   tools: Tool[];
   machines: Pick<Machine, "id" | "name">[];
+}
+
+// In-memory shape for the per-machine matrix. Strings so empty fields
+// stay empty (vs. forcing 0). Empty → null on save → fallback to product
+// default at runtime.
+interface MachineCycleRow {
+  machine_id: string;
+  cycle_seconds: string;
+  swap_seconds: string;
+  setup_seconds: string;
+  parts_per_setup: string;
 }
 
 interface ToolRow {
@@ -94,6 +108,7 @@ const CURRENCIES: ProductCurrency[] = ["TRY", "USD", "EUR"];
 export function ProductForm({
   product,
   existingTools = [],
+  existingMachineCycles = [],
   tools,
   machines,
 }: Props) {
@@ -208,6 +223,30 @@ export function ProductForm({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
+
+  // Per-machine timing matrix. One row per existing machine; values
+  // empty by default (= "use product default"). On save we serialize
+  // only rows that have at least one non-empty field.
+  const initialCyclesMap = new Map<string, ProductMachineCycle>();
+  for (const c of existingMachineCycles ?? []) {
+    initialCyclesMap.set(c.machine_id, c);
+  }
+  const [machineCycles, setMachineCycles] = useState<MachineCycleRow[]>(() =>
+    machines.map((m) => {
+      const ex = initialCyclesMap.get(m.id);
+      return {
+        machine_id: m.id,
+        cycle_seconds:
+          ex?.cycle_seconds != null ? String(ex.cycle_seconds) : "",
+        swap_seconds:
+          ex?.swap_seconds != null ? String(ex.swap_seconds) : "",
+        setup_seconds:
+          ex?.setup_seconds != null ? String(ex.setup_seconds) : "",
+        parts_per_setup:
+          ex?.parts_per_setup != null ? String(ex.parts_per_setup) : "",
+      };
+    }),
+  );
 
   // ── Wizard step state.
   //    Pre-save steps (0-5): Temel/Sınıf/Boyut/İmalat/Takım/Ticari+Özet
@@ -350,6 +389,38 @@ export function ProductForm({
         tool_id: r.tool_id,
         quantity_used: r.quantity_used,
       })),
+      // Per-machine timing override rows. Send only rows that have at
+      // least one non-empty field; the action upserts (machine_id ∈ rows)
+      // and deletes (machine_id ∉ rows but exists in DB) accordingly.
+      machine_cycles: machineCycles
+        .map((r) => {
+          const cycle = r.cycle_seconds.trim() === "" ? null : Number(r.cycle_seconds);
+          const swap = r.swap_seconds.trim() === "" ? null : Number(r.swap_seconds);
+          const setup = r.setup_seconds.trim() === "" ? null : Number(r.setup_seconds);
+          const pps = r.parts_per_setup.trim() === "" ? null : Number(r.parts_per_setup);
+          const hasAny =
+            cycle != null || swap != null || setup != null || pps != null;
+          return hasAny
+            ? {
+                machine_id: r.machine_id,
+                cycle_seconds: cycle,
+                swap_seconds: swap,
+                setup_seconds: setup,
+                parts_per_setup: pps,
+              }
+            : null;
+        })
+        .filter(
+          (
+            x,
+          ): x is {
+            machine_id: string;
+            cycle_seconds: number | null;
+            swap_seconds: number | null;
+            setup_seconds: number | null;
+            parts_per_setup: number | null;
+          } => x !== null,
+        ),
     };
 
     startTransition(async () => {
@@ -616,45 +687,72 @@ export function ProductForm({
             label="Ayar Süresi"
             value={setupTime}
             onChange={setSetupTime}
-            hint="bir bağlama"
+            hint="iş başında 1 kerelik"
           />
           <MinSecField
-            label="İşleme Süresi"
+            label="Cycle / Tek Parça"
             value={cycleTime}
             onChange={setCycleTime}
-            hint="bir bağlama (cycle)"
+            hint="ekran elapsed ÷ parça"
           />
           <MinSecField
-            label="Temizlik"
+            label="Temizlik / Swap"
             value={cleanupTime}
             onChange={setCleanupTime}
-            hint="bağlama başı swap"
+            hint="kapı açılışı · paralelse 0"
           />
           <NumberField
             label="Bağlanan Adet"
             value={partsPerSetup}
             onChange={setPartsPerSetup}
-            hint="aynı anda"
+            hint="bağlamada parça"
           />
         </div>
-        <div className="rounded-lg bg-muted/40 border border-dashed p-3 text-[11px] text-muted-foreground space-y-1">
-          <div>
-            <span className="font-semibold text-foreground">
-              Etkin İşleme:
-            </span>{" "}
-            işleme + temizlik (parça başı net süre — kapı açma + parça koy/al
-            dahil)
+        <div className="rounded-lg bg-muted/40 border border-dashed p-4 text-[12px] text-muted-foreground space-y-2">
+          <div className="font-semibold text-foreground text-sm">
+            Yeni model — kullanıcı mantığı:
           </div>
-          <div>
-            <span className="font-semibold text-foreground">Toplam:</span>{" "}
-            ⌈adet / bağlama⌉ × ayar + adet × etkin_işleme. ETA hesabı{" "}
-            <strong>çalışma çizelgesini</strong> bilir (yemek, hafta sonu).
+          <ul className="list-disc list-inside space-y-1">
+            <li>
+              <strong>Cycle</strong>: Tek parça için. 2 parça paralel işleniyorsa
+              → ekrandaki süreyi 2&apos;ye böl.
+              <br />
+              <span className="opacity-70">
+                Örn: Twin-spindle 5:30 / 2 parça → cycle = 2:45/parça
+              </span>
+            </li>
+            <li>
+              <strong>Swap</strong>: Bağlama değişiminde tezgah duruyor mu?
+              <br />
+              <span className="opacity-70">
+                Tek/çift mengene seri = 1 dk · Twin-spindle veya pallet changer
+                (paralel yükleme) = <strong>0</strong>
+              </span>
+            </li>
+            <li>
+              <strong>Setup</strong>: 1 KEZ iş başında. Tahminden farklı
+              sürerse sistem otomatik kaydeder, ekstra süre için sebep sorar.
+            </li>
+          </ul>
+          <div className="pt-1 border-t font-semibold text-foreground text-sm">
+            Toplam = setup + qty × cycle + ⌈qty/bağlanan⌉ × swap
           </div>
-          <div className="text-[10px] opacity-70">
-            Ayar süresi tahminidir — gerçek ayar bittiğinde sistem ölçtüğü
-            süreyi kaydeder ve sonraki bağlamalar için ETA bunu kullanır.
+          <div className="text-[11px] opacity-80">
+            Örn 50 parça: tek mengene (cycle 5, swap 1, pps 1) →{" "}
+            <strong>320 dk</strong>. Twin-spindle (cycle 2:45, swap 0, pps 2) →{" "}
+            <strong>145 dk</strong>. ETA çalışma çizelgesini bilir (yemek,
+            hafta sonu) ve makine arıza/bakım durumunda durur.
           </div>
         </div>
+
+        {/* Per-machine timing override matrix */}
+        {machines.length > 0 && (
+          <MachineCyclesMatrix
+            machines={machines}
+            value={machineCycles}
+            onChange={setMachineCycles}
+          />
+        )}
       </Section>
       )}
 
@@ -1022,6 +1120,123 @@ export function ProductForm({
         </div>
       </div>
     </form>
+  );
+}
+
+/* ── MachineCyclesMatrix ──────────────────────────────────────────
+   Per-makine override matrix. One row per machine; values empty by
+   default (= "use product default"). UI exposes:
+     Cycle  ·  Swap  ·  Bağlanan  ·  Setup
+   Stored as seconds (Cycle/Swap/Setup) + integer (parts_per_setup).
+   Empty inputs are saved as NULL so the runtime resolver falls back
+   to the product's default values.
+   ──────────────────────────────────────────────────────────────── */
+function MachineCyclesMatrix({
+  machines,
+  value,
+  onChange,
+}: {
+  machines: Pick<Machine, "id" | "name">[];
+  value: MachineCycleRow[];
+  onChange: (next: MachineCycleRow[]) => void;
+}) {
+  function patch(machineId: string, patch: Partial<MachineCycleRow>) {
+    onChange(
+      value.map((r) => (r.machine_id === machineId ? { ...r, ...patch } : r)),
+    );
+  }
+  const machineMap = new Map(machines.map((m) => [m.id, m.name]));
+
+  return (
+    <div className="rounded-xl border bg-card overflow-hidden">
+      <div className="px-4 py-3 border-b bg-muted/30">
+        <div className="text-sm font-bold">Makine Bazlı Süreler</div>
+        <div className="text-xs text-muted-foreground mt-0.5">
+          Aynı ürün farklı tezgahta farklı sürebilir. Boş alanlar yukarıdaki
+          varsayılan değeri kullanır.
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 text-left font-semibold">Makine</th>
+              <th className="px-3 py-2 text-right font-semibold">Cycle (sn)</th>
+              <th className="px-3 py-2 text-right font-semibold">Swap (sn)</th>
+              <th className="px-3 py-2 text-right font-semibold">Bağlanan</th>
+              <th className="px-3 py-2 text-right font-semibold">Setup (sn)</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {value.map((row) => (
+              <tr key={row.machine_id} className="hover:bg-muted/20 transition">
+                <td className="px-3 py-2 font-medium">
+                  {machineMap.get(row.machine_id) ?? "—"}
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={row.cycle_seconds}
+                    onChange={(e) =>
+                      patch(row.machine_id, { cycle_seconds: e.target.value })
+                    }
+                    placeholder="varsay."
+                    className="w-24 h-9 px-2 rounded border bg-background text-right tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={row.swap_seconds}
+                    onChange={(e) =>
+                      patch(row.machine_id, { swap_seconds: e.target.value })
+                    }
+                    placeholder="varsay."
+                    className="w-24 h-9 px-2 rounded border bg-background text-right tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    value={row.parts_per_setup}
+                    onChange={(e) =>
+                      patch(row.machine_id, {
+                        parts_per_setup: e.target.value,
+                      })
+                    }
+                    placeholder="varsay."
+                    className="w-20 h-9 px-2 rounded border bg-background text-right tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                </td>
+                <td className="px-2 py-1.5 text-right">
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={row.setup_seconds}
+                    onChange={(e) =>
+                      patch(row.machine_id, { setup_seconds: e.target.value })
+                    }
+                    placeholder="varsay."
+                    className="w-24 h-9 px-2 rounded border bg-background text-right tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-4 py-2 bg-muted/20 border-t text-[11px] text-muted-foreground">
+        Twin-spindle: Cycle/parça (paralel parça başına) yaz, Swap = 0
+        bırak. Pallet changer: Swap = 0 (operatör paralel takıyor).
+      </div>
+    </div>
   );
 }
 

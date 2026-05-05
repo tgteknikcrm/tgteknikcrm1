@@ -55,6 +55,8 @@ import {
   type WorkSchedule,
 } from "@/lib/supabase/types";
 import { deleteJob, setJobStep } from "./actions";
+import { SetupOverrunDialog } from "./setup-overrun-dialog";
+import { SETUP_OVERRUN_THRESHOLD_MIN } from "@/lib/supabase/types";
 import { completeJob } from "../production/actions";
 import { JobDialog } from "./job-dialog";
 import { cn } from "@/lib/utils";
@@ -111,6 +113,10 @@ export function JobCard({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [completionOpen, setCompletionOpen] = useState(false);
+  const [overrunPopup, setOverrunPopup] = useState<{
+    plannedMin: number;
+    actualMin: number;
+  } | null>(null);
   const { job, product, operator, produced } = data;
 
   // Re-render every 1 s while in uretimde so the live ticker + cycle
@@ -256,6 +262,22 @@ export function JobCard({
         return;
       }
       toast.success(`İş ${JOB_STATUS_LABEL[next]}`);
+      // After ayar→üretim transition, check for setup overrun: if the
+      // measured setup minutes exceed the planned (from product) by
+      // more than the threshold, pop a reason dialog. Operator can
+      // skip if it wasn't unusual.
+      if (
+        next === "uretimde" &&
+        "setupTransition" in r &&
+        r.setupTransition &&
+        product
+      ) {
+        const planned = Number(product.setup_time_minutes ?? 0);
+        const actual = Number(r.setupElapsedMin ?? 0);
+        if (planned > 0 && actual > planned + SETUP_OVERRUN_THRESHOLD_MIN) {
+          setOverrunPopup({ plannedMin: planned, actualMin: actual });
+        }
+      }
       router.refresh();
     });
   }
@@ -918,6 +940,18 @@ export function JobCard({
           router.refresh();
         }}
       />
+
+      {overrunPopup && job.machine_id && (
+        <SetupOverrunDialog
+          open={!!overrunPopup}
+          onOpenChange={(v) => !v && setOverrunPopup(null)}
+          jobId={job.id}
+          jobLabel={`${job.customer} – ${job.part_name}`}
+          machineId={job.machine_id}
+          plannedMin={overrunPopup.plannedMin}
+          actualMin={overrunPopup.actualMin}
+        />
+      )}
     </div>
   );
 }

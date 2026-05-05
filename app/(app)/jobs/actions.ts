@@ -209,9 +209,10 @@ export async function setJobStep(jobId: string, step: JobStatus) {
 
   // Read job context up-front — needed for both timing stamps and
   // auto-creating today's production entry.
+  // product_id is used to look up planned setup so we can flag overruns.
   const { data: job } = await supabase
     .from("jobs")
-    .select("started_at, setup_completed_at, machine_id, operator_id")
+    .select("started_at, setup_completed_at, machine_id, operator_id, product_id")
     .eq("id", jobId)
     .single();
 
@@ -328,12 +329,43 @@ export async function setJobStep(jobId: string, step: JobStatus) {
       // Record the auto-tracked setup minutes the moment the operator
       // says "ayar bitti, üretime geçiyorum". This is the bug the user
       // hit — clicking Üretime Başla didn't increment anything.
+      // Also snapshot the PLANNED minutes (resolved per-machine if
+      // override exists) so the production entry knows what was
+      // expected vs what actually happened — used by the overrun popup.
       if (step === "uretimde" && setupElapsedMin > 0) {
+        let plannedMin: number | null = null;
+        if (job.product_id) {
+          const [productRes, overrideRes] = await Promise.all([
+            supabase
+              .from("products")
+              .select("setup_time_minutes")
+              .eq("id", job.product_id)
+              .maybeSingle(),
+            supabase
+              .from("product_machine_cycles")
+              .select("setup_seconds")
+              .eq("product_id", job.product_id)
+              .eq("machine_id", job.machine_id)
+              .maybeSingle(),
+          ]);
+          if (
+            overrideRes.data?.setup_seconds != null &&
+            overrideRes.data.setup_seconds > 0
+          ) {
+            plannedMin = overrideRes.data.setup_seconds / 60;
+          } else if (
+            productRes.data?.setup_time_minutes != null &&
+            productRes.data.setup_time_minutes > 0
+          ) {
+            plannedMin = Number(productRes.data.setup_time_minutes);
+          }
+        }
         await addSetupMinutesToToday({
           machine_id: job.machine_id,
           job_id: jobId,
           operator_id: job.operator_id ?? null,
           setup_minutes: setupElapsedMin,
+          setup_planned_minutes: plannedMin,
         });
       }
     } catch (e) {
@@ -355,6 +387,17 @@ export async function setJobStep(jobId: string, step: JobStatus) {
   revalidatePath("/dashboard");
   revalidatePath("/machines");
   revalidatePath("/production");
+  // Surface setup-overrun details to the caller so the UI can pop a
+  // reason dialog when the operator's actual setup blew past the plan.
+  // Pure data — no DB write here; the popup calls
+  // recordSetupOverrunReason after the operator picks a category.
+  if (step === "uretimde" && setupElapsedMin > 0) {
+    return {
+      success: true,
+      setupElapsedMin,
+      setupTransition: true as const,
+    };
+  }
   return { success: true };
 }
 
