@@ -1866,6 +1866,58 @@ export function resolveTimingsForMachine(
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Downtime Reason (migration 0036)
+// ─────────────────────────────────────────────────────────────────────
+export type DowntimeReasonCategory =
+  | "mola"
+  | "operator_yok"
+  | "malzeme_bekliyor"
+  | "ayar_program"
+  | "vardiya_degisimi"
+  | "bakim_planli"
+  | "bakim_plansiz"
+  | "ariza_mekanik"
+  | "ariza_elektrik"
+  | "ariza_yazilim"
+  | "kalite_sorunu"
+  | "diger";
+
+export const DOWNTIME_REASON_LABEL: Record<DowntimeReasonCategory, string> = {
+  mola: "Mola / Yemek",
+  operator_yok: "Operatör yok / değişimi",
+  malzeme_bekliyor: "Malzeme bekliyor",
+  ayar_program: "Program / takım ayarı",
+  vardiya_degisimi: "Vardiya değişimi",
+  bakim_planli: "Planlı bakım",
+  bakim_plansiz: "Plansız bakım",
+  ariza_mekanik: "Arıza — Mekanik",
+  ariza_elektrik: "Arıza — Elektrik / Kumanda",
+  ariza_yazilim: "Arıza — Yazılım / CNC",
+  kalite_sorunu: "Kalite sorunu — durdu",
+  diger: "Diğer",
+};
+
+// Smart suggestions: which reason categories make sense for which
+// machine status. UI renders the matching subset first; "Diğer" always
+// available as fallback.
+export const DOWNTIME_REASONS_BY_STATUS: Record<
+  "durus" | "bakim" | "ariza",
+  DowntimeReasonCategory[]
+> = {
+  durus: [
+    "mola",
+    "operator_yok",
+    "malzeme_bekliyor",
+    "ayar_program",
+    "vardiya_degisimi",
+    "kalite_sorunu",
+    "diger",
+  ],
+  bakim: ["bakim_planli", "bakim_plansiz", "diger"],
+  ariza: ["ariza_mekanik", "ariza_elektrik", "ariza_yazilim", "diger"],
+};
+
+// ─────────────────────────────────────────────────────────────────────
 // Setup Overrun (migration 0035)
 // ─────────────────────────────────────────────────────────────────────
 export type SetupOverrunCategory =

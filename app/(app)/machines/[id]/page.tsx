@@ -80,7 +80,11 @@ export default async function MachineDetailPage({
 
   const supabase = await createClient();
   const today = new Date().toISOString().slice(0, 10);
+  // Fetch 365-day window so we can compute week/month/year locally
+  // without needing extra queries. Per-machine row volume stays small.
+  const yearAgo = new Date(Date.now() - 364 * 864e5).toISOString().slice(0, 10);
   const weekAgo = new Date(Date.now() - 6 * 864e5).toISOString().slice(0, 10);
+  const monthAgo = new Date(Date.now() - 29 * 864e5).toISOString().slice(0, 10);
 
   const machineRes = await supabase
     .from("machines")
@@ -117,7 +121,8 @@ export default async function MachineDetailPage({
       .from("production_entries")
       .select("entry_date, produced_qty, scrap_qty, downtime_minutes")
       .eq("machine_id", id)
-      .gte("entry_date", weekAgo),
+      .gte("entry_date", yearAgo)
+      .order("entry_date", { ascending: true }),
     supabase
       .from("production_entries")
       .select("produced_qty, scrap_qty, downtime_minutes")
@@ -134,7 +139,7 @@ export default async function MachineDetailPage({
     supabase
       .from("machine_downtime_sessions")
       .select(
-        `id, status, started_at, ended_at, notes,
+        `id, status, started_at, ended_at, notes, reason_category,
          job:jobs(id, part_name)`,
       )
       .eq("machine_id", id)
@@ -177,12 +182,15 @@ export default async function MachineDetailPage({
   ]);
 
   const entries = (entriesRes.data ?? []) as EntryWithJoins[];
-  const weekEntries = (weekRes.data ?? []) as Array<{
+  // 365-day window. Slice for week/month aggregates below.
+  const yearEntries = (weekRes.data ?? []) as Array<{
     entry_date: string;
     produced_qty: number;
     scrap_qty: number;
     downtime_minutes: number;
   }>;
+  const weekEntries = yearEntries.filter((e) => e.entry_date >= weekAgo);
+  const monthEntries = yearEntries.filter((e) => e.entry_date >= monthAgo);
   const todayEntries = (todayStatsRes.data ?? []) as Array<{
     produced_qty: number;
     scrap_qty: number;
@@ -197,6 +205,9 @@ export default async function MachineDetailPage({
     started_at: string;
     ended_at: string | null;
     notes: string | null;
+    reason_category:
+      | import("@/lib/supabase/types").DowntimeReasonCategory
+      | null;
     job: { id: string; part_name: string } | null;
   };
   const downtimes: DowntimeRow[] = (
@@ -212,6 +223,7 @@ export default async function MachineDetailPage({
       elapsed_minutes: Math.max(0, Math.floor((end - start) / 60000)),
       job_part_name: d.job?.part_name ?? null,
       notes: d.notes,
+      reason_category: d.reason_category,
     };
   });
 
@@ -243,6 +255,9 @@ export default async function MachineDetailPage({
   );
 
   // ── Structured machine inspections (migration 0033) ──────────
+  // DEFENSIVE: if the table doesn't exist (migration not applied yet),
+  // inspectionsRes.data will be null and we skip rendering. The page
+  // stays usable; once the migration is applied this lights up.
   type InspectionRowRaw = {
     id: string;
     machine_id: string;
@@ -256,7 +271,9 @@ export default async function MachineDetailPage({
     created_at: string;
     performer: { full_name: string | null } | null;
   };
-  const allInspections = (inspectionsRes.data ?? []) as InspectionRowRaw[];
+  const allInspections = (
+    inspectionsRes.error ? [] : inspectionsRes.data ?? []
+  ) as InspectionRowRaw[];
   const temizlikInspections = allInspections.filter((i) => i.type === "temizlik");
   const yagKontrolInspections = allInspections.filter(
     (i) => i.type === "yag_kontrol",
@@ -393,12 +410,40 @@ export default async function MachineDetailPage({
   const weekScrap = weekEntries.reduce((s, e) => s + (e.scrap_qty ?? 0), 0);
   const weekDown = weekEntries.reduce((s, e) => s + (e.downtime_minutes ?? 0), 0);
 
+  const monthTotal = monthEntries.reduce((s, e) => s + (e.produced_qty ?? 0), 0);
+  const monthScrap = monthEntries.reduce((s, e) => s + (e.scrap_qty ?? 0), 0);
+  const monthDown = monthEntries.reduce((s, e) => s + (e.downtime_minutes ?? 0), 0);
+
+  const yearTotal = yearEntries.reduce((s, e) => s + (e.produced_qty ?? 0), 0);
+  const yearScrap = yearEntries.reduce((s, e) => s + (e.scrap_qty ?? 0), 0);
+  const yearDown = yearEntries.reduce((s, e) => s + (e.downtime_minutes ?? 0), 0);
+
   const scrapPct =
     weekTotal + weekScrap > 0 ? (weekScrap / (weekTotal + weekScrap)) * 100 : 0;
 
   const shiftMinutes = weekEntries.length * 480;
   const uptimePct =
     shiftMinutes > 0 ? Math.max(0, 1 - weekDown / shiftMinutes) * 100 : 100;
+
+  // Daily breakdown — last 30 days, sum produced/scrap/down per date.
+  const dailyMap = new Map<
+    string,
+    { produced: number; scrap: number; downtime: number }
+  >();
+  for (const e of monthEntries) {
+    const cur = dailyMap.get(e.entry_date) ?? {
+      produced: 0,
+      scrap: 0,
+      downtime: 0,
+    };
+    cur.produced += e.produced_qty ?? 0;
+    cur.scrap += e.scrap_qty ?? 0;
+    cur.downtime += e.downtime_minutes ?? 0;
+    dailyMap.set(e.entry_date, cur);
+  }
+  const dailyBreakdown = Array.from(dailyMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, v]) => ({ date, ...v }));
 
   const tone = MACHINE_STATUS_TONE[machine.status];
 
@@ -458,8 +503,15 @@ export default async function MachineDetailPage({
     weekTotal,
     weekScrap,
     weekDown,
+    monthTotal,
+    monthScrap,
+    monthDown,
+    yearTotal,
+    yearScrap,
+    yearDown,
     scrapPct,
     uptimePct,
+    dailyBreakdown,
   };
 
   return (
@@ -548,7 +600,11 @@ export default async function MachineDetailPage({
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <StatusButton machineId={machine.id} current={machine.status} />
+          <StatusButton
+            machineId={machine.id}
+            machineName={machine.name}
+            current={machine.status}
+          />
           <MachineDialog
             machine={machine}
             trigger={

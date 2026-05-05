@@ -80,6 +80,19 @@ function nullableNumber(n: number | null | undefined): number | null {
   return n;
 }
 
+/** Detect "table doesn't exist" / "schema cache miss" so we can degrade
+ *  gracefully when a migration hasn't been applied yet. */
+function isMissingTableError(err: { message?: string; code?: string }): boolean {
+  if (err.code === "42P01" || err.code === "PGRST205") return true;
+  const m = err.message?.toLowerCase() ?? "";
+  return (
+    m.includes("could not find the table") ||
+    m.includes("schema cache") ||
+    m.includes("does not exist") ||
+    m.includes("relation") && m.includes("does not exist")
+  );
+}
+
 export async function saveProduct(input: SaveProductInput) {
   const { supabase, user, error } = await requireUser();
   if (error) return { error };
@@ -168,25 +181,46 @@ export async function saveProduct(input: SaveProductInput) {
   }
 
   // Sync per-machine cycle overrides (replace strategy).
+  // DEFENSIVE: tolerate the table not existing (migration 0035 not yet
+  // applied on this Supabase instance). If the schema is missing we just
+  // skip — operator can still save the product. PostgREST signals
+  // "schema cache" / 42P01 (undefined_table) for this case.
   if (input.machine_cycles !== undefined) {
-    await supabase
-      .from("product_machine_cycles")
-      .delete()
-      .eq("product_id", productId);
-    if (input.machine_cycles.length > 0) {
-      const { error: mcErr } = await supabase
+    try {
+      const delRes = await supabase
         .from("product_machine_cycles")
-        .insert(
-          input.machine_cycles.map((c) => ({
-            product_id: productId!,
-            machine_id: c.machine_id,
-            cycle_seconds: c.cycle_seconds,
-            swap_seconds: c.swap_seconds,
-            setup_seconds: c.setup_seconds,
-            parts_per_setup: c.parts_per_setup,
-          })),
-        );
-      if (mcErr) return { error: mcErr.message };
+        .delete()
+        .eq("product_id", productId);
+      if (delRes.error && !isMissingTableError(delRes.error)) {
+        return { error: delRes.error.message };
+      }
+      if (
+        !delRes.error || // delete succeeded
+        !isMissingTableError(delRes.error)
+      ) {
+        if (input.machine_cycles.length > 0 && !delRes.error) {
+          const { error: mcErr } = await supabase
+            .from("product_machine_cycles")
+            .insert(
+              input.machine_cycles.map((c) => ({
+                product_id: productId!,
+                machine_id: c.machine_id,
+                cycle_seconds: c.cycle_seconds,
+                swap_seconds: c.swap_seconds,
+                setup_seconds: c.setup_seconds,
+                parts_per_setup: c.parts_per_setup,
+              })),
+            );
+          if (mcErr && !isMissingTableError(mcErr)) {
+            return { error: mcErr.message };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[saveProduct] product_machine_cycles sync skipped:",
+        e instanceof Error ? e.message : e,
+      );
     }
   }
 

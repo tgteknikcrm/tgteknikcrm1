@@ -100,7 +100,28 @@ function humanizeDeleteError(raw: string, entity: string): string {
   return raw; // unknown — surface the raw message
 }
 
-export async function updateMachineStatus(id: string, status: MachineStatus) {
+export async function updateMachineStatus(
+  id: string,
+  status: MachineStatus,
+  opts?: {
+    /** Sebep kategorisi (durus/bakim/ariza için zorunlu sayılır UI'da). */
+    reasonCategory?:
+      | "mola"
+      | "operator_yok"
+      | "malzeme_bekliyor"
+      | "ayar_program"
+      | "vardiya_degisimi"
+      | "bakim_planli"
+      | "bakim_plansiz"
+      | "ariza_mekanik"
+      | "ariza_elektrik"
+      | "ariza_yazilim"
+      | "kalite_sorunu"
+      | "diger";
+    /** Serbest açıklama — Pareto'da kategori, detay'da bu metin. */
+    reasonText?: string;
+  },
+) {
   const supabase = await createClient();
   const { data: existing } = await supabase
     .from("machines")
@@ -108,11 +129,7 @@ export async function updateMachineStatus(id: string, status: MachineStatus) {
     .eq("id", id)
     .single();
 
-  // Guard: 'aktif' requires an actual job to work on. Without that the
-  // live ticker has nothing to count and the operator just turned a
-  // dormant machine "on" for no reason. The job-side flow auto-flips
-  // via direct UPDATE (bypasses this action), so only manual toggles
-  // hit this check.
+  // Guard: 'aktif' requires an actual job to work on.
   if (status === "aktif" && existing?.status !== "aktif") {
     const { data: activeJobs, count } = await supabase
       .from("jobs")
@@ -132,6 +149,55 @@ export async function updateMachineStatus(id: string, status: MachineStatus) {
     .update({ status })
     .eq("id", id);
   if (error) return { error: error.message };
+
+  // After status flip the 0030 trigger opens a downtime session if going
+  // non-aktif. Patch its reason_category + notes if provided.
+  // DEFENSIVE: reason_category column comes from migration 0036; if not
+  // applied yet we just skip (notes still fits in older schema).
+  if (
+    status !== "aktif" &&
+    existing?.status === "aktif" &&
+    (opts?.reasonCategory || opts?.reasonText)
+  ) {
+    try {
+      const { data: session } = await supabase
+        .from("machine_downtime_sessions")
+        .select("id")
+        .eq("machine_id", id)
+        .is("ended_at", null)
+        .order("started_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (session) {
+        const updatePayload: Record<string, unknown> = {
+          notes: opts?.reasonText?.trim() || null,
+        };
+        if (opts?.reasonCategory) {
+          updatePayload.reason_category = opts.reasonCategory;
+        }
+        const { error: upErr } = await supabase
+          .from("machine_downtime_sessions")
+          .update(updatePayload)
+          .eq("id", session.id);
+        // If reason_category column is missing, retry with notes only.
+        if (
+          upErr &&
+          (upErr.code === "PGRST204" ||
+            upErr.message?.toLowerCase().includes("column"))
+        ) {
+          await supabase
+            .from("machine_downtime_sessions")
+            .update({ notes: opts?.reasonText?.trim() || null })
+            .eq("id", session.id);
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "[updateMachineStatus] reason patch skipped:",
+        e instanceof Error ? e.message : e,
+      );
+    }
+  }
   await recordEvent({
     type: "machine.status_changed",
     entity_type: "machine",

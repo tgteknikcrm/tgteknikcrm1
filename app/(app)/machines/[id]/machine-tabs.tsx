@@ -32,7 +32,10 @@ import {
 } from "@/lib/supabase/types";
 import { LiveTelemetry } from "./live-telemetry";
 import { InspectionList } from "./inspections/inspection-list";
-import type { MachineInspection } from "@/lib/supabase/types";
+import {
+  DOWNTIME_REASON_LABEL,
+  type MachineInspection,
+} from "@/lib/supabase/types";
 
 /* ── Types echoed from the server page ────────────────────────────── */
 
@@ -91,6 +94,7 @@ export interface DowntimeRow {
   elapsed_minutes: number;
   job_part_name: string | null;
   notes: string | null;
+  reason_category: import("@/lib/supabase/types").DowntimeReasonCategory | null;
 }
 
 export interface TimelineEntryRow {
@@ -128,8 +132,23 @@ export interface KpiData {
   weekTotal: number;
   weekScrap: number;
   weekDown: number;
+  monthTotal: number;
+  monthScrap: number;
+  monthDown: number;
+  yearTotal: number;
+  yearScrap: number;
+  yearDown: number;
+  /** 7-day scrap %. */
   scrapPct: number;
+  /** 7-day uptime %. */
   uptimePct: number;
+  /** Daily breakdown for the last 30 days (chart data). */
+  dailyBreakdown: Array<{
+    date: string; // YYYY-MM-DD
+    produced: number;
+    scrap: number;
+    downtime: number;
+  }>;
 }
 
 interface Props {
@@ -565,38 +584,195 @@ function CurrentJobHero({
 /* ── İSTATİSTİK ─────────────────────────────────────────────────── */
 
 function IstatistikTab({ kpis }: { kpis: KpiData }) {
+  const [period, setPeriod] = useState<"day" | "week" | "month" | "year">(
+    "week",
+  );
+
+  // Period-aware totals
+  const data =
+    period === "day"
+      ? {
+          total: kpis.todayTotal,
+          scrap: kpis.todayScrap,
+          down: kpis.todayDown,
+          label: "Bugün",
+        }
+      : period === "week"
+        ? {
+            total: kpis.weekTotal,
+            scrap: kpis.weekScrap,
+            down: kpis.weekDown,
+            label: "Son 7 Gün",
+          }
+        : period === "month"
+          ? {
+              total: kpis.monthTotal,
+              scrap: kpis.monthScrap,
+              down: kpis.monthDown,
+              label: "Son 30 Gün",
+            }
+          : {
+              total: kpis.yearTotal,
+              scrap: kpis.yearScrap,
+              down: kpis.yearDown,
+              label: "Son 365 Gün",
+            };
+
+  const totalWithScrap = data.total + data.scrap;
+  const scrapPct =
+    totalWithScrap > 0 ? (data.scrap / totalWithScrap) * 100 : 0;
+  const okPct = 100 - scrapPct;
+
+  // Daily chart — only render when period covers >1 day
+  const chartDays =
+    period === "day"
+      ? []
+      : period === "week"
+        ? kpis.dailyBreakdown.slice(-7)
+        : kpis.dailyBreakdown.slice(-30); // month + year both → last 30 sample
+  const chartMax = Math.max(1, ...chartDays.map((d) => d.produced));
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-      <KpiTile
-        icon={TrendingUp}
-        label="Bugün Üretilen"
-        value={kpis.todayTotal}
-        unit="adet"
-        tone="emerald"
-      />
-      <KpiTile
-        icon={Package}
-        label="7 Gün Toplam"
-        value={kpis.weekTotal}
-        unit="adet"
-        tone="blue"
-        sub={`fire ${kpis.weekScrap}`}
-      />
-      <KpiTile
-        icon={AlertTriangle}
-        label="Fire Oranı (7g)"
-        value={`%${kpis.scrapPct.toFixed(1)}`}
-        unit=""
-        tone={kpis.scrapPct > 5 ? "rose" : "amber"}
-      />
-      <KpiTile
-        icon={Cog}
-        label="Çalışma Verimi (7g)"
-        value={`%${kpis.uptimePct.toFixed(0)}`}
-        unit=""
-        tone={kpis.uptimePct < 80 ? "amber" : "emerald"}
-        sub={`duruş ${kpis.weekDown}dk`}
-      />
+    <div className="space-y-4">
+      {/* Period selector */}
+      <div className="inline-flex rounded-lg border bg-card p-0.5 shadow-sm">
+        {(
+          [
+            { key: "day", label: "Günlük" },
+            { key: "week", label: "Haftalık" },
+            { key: "month", label: "Aylık" },
+            { key: "year", label: "Yıllık" },
+          ] as const
+        ).map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            onClick={() => setPeriod(p.key)}
+            className={cn(
+              "px-3 py-1.5 rounded-md text-sm font-medium transition",
+              period === p.key
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-muted",
+            )}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {/* KPI tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KpiTile
+          icon={TrendingUp}
+          label={`${data.label} Üretim`}
+          value={data.total}
+          unit="adet"
+          tone="emerald"
+        />
+        <KpiTile
+          icon={AlertTriangle}
+          label={`${data.label} Fire`}
+          value={data.scrap}
+          unit="adet"
+          tone={data.scrap > 0 ? "rose" : "zinc"}
+          sub={totalWithScrap > 0 ? `%${scrapPct.toFixed(1)}` : undefined}
+        />
+        <KpiTile
+          icon={Pause}
+          label={`${data.label} Duruş`}
+          value={formatMinutes(data.down)}
+          unit=""
+          tone="amber"
+        />
+        <KpiTile
+          icon={Cog}
+          label="OK Oranı"
+          value={`%${okPct.toFixed(1)}`}
+          unit=""
+          tone={okPct < 95 ? "amber" : "emerald"}
+        />
+      </div>
+
+      {/* Secondary KPIs — variance vs other periods */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SecondaryStat label="Bugün" value={kpis.todayTotal} suffix="adet" />
+        <SecondaryStat label="Son 7g" value={kpis.weekTotal} suffix="adet" />
+        <SecondaryStat label="Son 30g" value={kpis.monthTotal} suffix="adet" />
+        <SecondaryStat label="Son 365g" value={kpis.yearTotal} suffix="adet" />
+      </div>
+
+      {/* Daily breakdown chart */}
+      {chartDays.length > 0 && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <div className="text-sm font-bold">Günlük Üretim Dağılımı</div>
+                <div className="text-xs text-muted-foreground">
+                  {period === "week" ? "Son 7 gün" : "Son 30 gün"} · adet/gün
+                </div>
+              </div>
+              <Badge variant="outline" className="text-[10px]">
+                Maks {chartMax}
+              </Badge>
+            </div>
+            <div className="flex items-end gap-1 h-32">
+              {chartDays.map((d) => {
+                const heightPct = (d.produced / chartMax) * 100;
+                const date = new Date(d.date);
+                return (
+                  <div
+                    key={d.date}
+                    className="flex-1 flex flex-col items-center gap-1 group/bar"
+                    title={`${d.date}: ${d.produced} adet · fire ${d.scrap} · duruş ${d.downtime}dk`}
+                  >
+                    <div className="flex-1 w-full flex items-end">
+                      <div
+                        className={cn(
+                          "w-full rounded-t-sm transition",
+                          d.produced > 0
+                            ? "bg-emerald-500 group-hover/bar:bg-emerald-600"
+                            : "bg-muted",
+                        )}
+                        style={{ height: `${Math.max(2, heightPct)}%` }}
+                      />
+                    </div>
+                    <div className="text-[9px] tabular-nums text-muted-foreground rotate-[-30deg] origin-top-left translate-x-2 sm:rotate-0 sm:translate-x-0">
+                      {date.getDate()}/{date.getMonth() + 1}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function SecondaryStat({
+  label,
+  value,
+  suffix,
+}: {
+  label: string;
+  value: number;
+  suffix?: string;
+}) {
+  return (
+    <div className="rounded-lg border bg-muted/20 p-2.5">
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+        {label}
+      </div>
+      <div className="text-lg font-bold tabular-nums leading-tight">
+        {value.toLocaleString("tr-TR")}
+        {suffix && (
+          <span className="text-xs text-muted-foreground font-normal ml-1">
+            {suffix}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -757,8 +933,18 @@ function DuruslarTab({ rows }: { rows: DowntimeRow[] }) {
                     {formatMinutes(r.elapsed_minutes)}
                   </span>
                 </div>
-                {(r.job_part_name || r.notes) && (
+                {(r.job_part_name || r.notes || r.reason_category) && (
                   <div className="text-xs text-muted-foreground space-y-0.5">
+                    {r.reason_category && (
+                      <div className="flex items-center gap-1.5">
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] py-0 h-4 font-medium"
+                        >
+                          {DOWNTIME_REASON_LABEL[r.reason_category]}
+                        </Badge>
+                      </div>
+                    )}
                     {r.job_part_name && (
                       <div>
                         <span className="font-semibold text-foreground/70">
@@ -770,7 +956,7 @@ function DuruslarTab({ rows }: { rows: DowntimeRow[] }) {
                     {r.notes && (
                       <div>
                         <span className="font-semibold text-foreground/70">
-                          Sebep:
+                          Açıklama:
                         </span>{" "}
                         {r.notes}
                       </div>
