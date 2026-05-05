@@ -31,6 +31,8 @@ import {
   type MachineStatus,
 } from "@/lib/supabase/types";
 import { LiveTelemetry } from "./live-telemetry";
+import { InspectionList } from "./inspections/inspection-list";
+import type { MachineInspection } from "@/lib/supabase/types";
 
 /* ── Types echoed from the server page ────────────────────────────── */
 
@@ -142,6 +144,12 @@ interface Props {
   arizaEntries: TimelineEntryRow[];
   temizlikEntries: TimelineEntryRow[];
   yagKontrolEntries: TimelineEntryRow[];
+  temizlikInspections: (MachineInspection & {
+    performer: { full_name: string | null } | null;
+  })[];
+  yagKontrolInspections: (MachineInspection & {
+    performer: { full_name: string | null } | null;
+  })[];
   productionLog: ProductionEntryRow[];
   kpis: KpiData;
 }
@@ -240,12 +248,17 @@ export function MachineTabs(props: Props) {
         <TimelineList rows={props.arizaEntries} emptyText="Arıza kaydı yok" />
       )}
       {tab === "temizlik" && (
-        <TimelineList rows={props.temizlikEntries} emptyText="Temizlik kaydı yok" />
+        <InspectionList
+          machineId={props.machineId}
+          type="temizlik"
+          inspections={props.temizlikInspections}
+        />
       )}
       {tab === "yag_kontrol" && (
-        <TimelineList
-          rows={props.yagKontrolEntries}
-          emptyText="Yağ kontrol kaydı yok"
+        <InspectionList
+          machineId={props.machineId}
+          type="yag_kontrol"
+          inspections={props.yagKontrolInspections}
         />
       )}
     </>
@@ -263,9 +276,9 @@ function countForTab(k: TabKey, p: Props): number | null {
     case "ariza":
       return p.arizaEntries.length;
     case "temizlik":
-      return p.temizlikEntries.length;
+      return p.temizlikInspections.length;
     case "yag_kontrol":
-      return p.yagKontrolEntries.length;
+      return p.yagKontrolInspections.length;
     default:
       return null;
   }

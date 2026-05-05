@@ -6,7 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PageHeader } from "@/components/app/page-header";
+import { BulkActionsBar } from "@/components/app/bulk-actions-bar";
+import { useBulkSelection } from "@/lib/use-bulk-selection";
 import { TaskDialog } from "./task-dialog";
 import {
   TASK_STATUS_LABEL,
@@ -22,7 +25,7 @@ import {
   type TaskStatus,
 } from "@/lib/supabase/types";
 import { createClient } from "@/lib/supabase/client";
-import { setTaskStatus } from "./actions";
+import { setTaskStatus, deleteTask, bulkDeleteTasks } from "./actions";
 import { toast } from "sonner";
 import {
   Plus,
@@ -32,6 +35,8 @@ import {
   CalendarDays,
   CheckCircle2,
   AlertTriangle,
+  CheckSquare,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -86,6 +91,7 @@ export function TasksShell({
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [bulkMode, setBulkMode] = useState(false);
   // Card ids whose status mutation is in flight — drives a subtle
   // pulsing border on the card so the user knows their change is
   // saving. Doesn't block further drags.
@@ -266,6 +272,32 @@ export function TasksShell({
     return m;
   }, [filtered]);
 
+  // Bulk selection — only counts non-temp ids (temp rows are not yet
+  // server-persisted, so they can't be bulk-deleted).
+  const visibleIds = useMemo(
+    () => filtered.filter((t) => !t.id.startsWith("temp-")).map((t) => t.id),
+    [filtered],
+  );
+  const sel = useBulkSelection(visibleIds);
+
+  // Exit bulk mode → clear selection.
+  function exitBulkMode() {
+    setBulkMode(false);
+    sel.clear();
+  }
+
+  // Single-card quick delete (small trash on hover, always available).
+  async function handleSingleDelete(t: Task) {
+    if (!confirm(`'${t.title}' silinsin mi?`)) return;
+    const r = await deleteTask(t.id);
+    if (r.error) {
+      toast.error(r.error);
+      return;
+    }
+    toast.success("Görev silindi");
+    router.refresh();
+  }
+
   const checklistByTask = useMemo(() => {
     const m = new Map<string, TaskChecklistItem[]>();
     for (const c of checklist) {
@@ -374,6 +406,20 @@ export function TasksShell({
       <div className="flex items-center gap-2 flex-wrap mb-4">
         <ViewSwitch view={view} onChange={setView} />
         <ScopeSwitch scope={scope} onChange={setScope} />
+        <Button
+          type="button"
+          variant={bulkMode ? "default" : "outline"}
+          size="sm"
+          onClick={() => {
+            if (bulkMode) exitBulkMode();
+            else setBulkMode(true);
+          }}
+          className="h-9 gap-1.5"
+          title="Toplu seçim modu"
+        >
+          <CheckSquare className="size-4" />
+          {bulkMode ? "Çıkış" : "Toplu Seç"}
+        </Button>
         <div className="relative flex-1 max-w-xs ml-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
           <Input
@@ -384,6 +430,24 @@ export function TasksShell({
           />
         </div>
       </div>
+
+      {/* Bulk actions bar — appears when items are selected */}
+      <BulkActionsBar
+        count={sel.size}
+        total={visibleIds.length}
+        onSelectAll={sel.selectAll}
+        onClear={() => {
+          sel.clear();
+          setBulkMode(false);
+        }}
+        ids={sel.ids}
+        itemLabel="görev"
+        onDelete={async (ids) => {
+          const r = await bulkDeleteTasks(ids);
+          if (!r.error) router.refresh();
+          return r;
+        }}
+      />
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
@@ -460,6 +524,7 @@ export function TasksShell({
                   ) : (
                     items.map((t) => {
                       const isTempRow = t.id.startsWith("temp-");
+                      const inBulk = bulkMode && !isTempRow;
                       return (
                         <TaskCard
                           key={t.id}
@@ -469,18 +534,30 @@ export function TasksShell({
                           commentsCount={
                             commentsByTask.get(t.id)?.length ?? 0
                           }
-                          // Temp rows can't be opened (no server record yet)
-                          // and can't be dragged (would orphan the optimistic
-                          // entry). Once the server confirms, the real row
-                          // takes over and supports both.
+                          // In bulk mode click toggles selection; otherwise
+                          // it opens the dialog. Temp rows are inert.
                           onClick={
-                            isTempRow ? () => undefined : () => setEditTask(t)
+                            isTempRow
+                              ? () => undefined
+                              : inBulk
+                                ? (e) => {
+                                    if (e.shiftKey) sel.toggleRange(t.id);
+                                    else sel.toggle(t.id);
+                                  }
+                                : () => setEditTask(t)
                           }
                           onDragStart={
-                            isTempRow ? () => undefined : (e) => onDragStart(t.id, e)
+                            isTempRow || inBulk
+                              ? () => undefined
+                              : (e) => onDragStart(t.id, e)
+                          }
+                          onDelete={
+                            isTempRow ? undefined : () => handleSingleDelete(t)
                           }
                           isPending={isTempRow || pendingIds.has(t.id)}
-                          draggable={!isTempRow}
+                          draggable={!isTempRow && !inBulk}
+                          bulkMode={inBulk}
+                          selected={sel.has(t.id)}
                         />
                       );
                     })
@@ -639,17 +716,23 @@ function TaskCard({
   commentsCount,
   onClick,
   onDragStart,
+  onDelete,
   isPending = false,
   draggable = true,
+  bulkMode = false,
+  selected = false,
 }: {
   task: Task;
   people: Map<string, Pick<Profile, "id" | "full_name" | "phone">>;
   checklist: TaskChecklistItem[];
   commentsCount: number;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onDragStart: (e: React.DragEvent) => void;
+  onDelete?: () => void;
   isPending?: boolean;
   draggable?: boolean;
+  bulkMode?: boolean;
+  selected?: boolean;
 }) {
   const today = todayISO();
   const overdue =
@@ -662,22 +745,61 @@ function TaskCard({
   const doneCount = checklist.filter((c) => c.done).length;
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick(e as unknown as React.MouseEvent);
+        }
+      }}
       draggable={draggable}
       onDragStart={onDragStart}
       className={cn(
-        "group/card w-full text-left rounded-lg border bg-background p-2.5",
+        "group/card relative w-full text-left rounded-lg border bg-background p-2.5",
         "hover:shadow-md transition animate-tg-fade-in",
         draggable
           ? "hover:scale-[1.01] cursor-grab active:cursor-grabbing"
-          : "cursor-default",
+          : "cursor-pointer",
         overdue && "border-red-500/40",
         isPending &&
           "ring-2 ring-primary/40 ring-offset-1 ring-offset-background",
+        bulkMode && selected && "ring-2 ring-primary bg-primary/5",
       )}
     >
+      {/* Bulk-mode checkbox (top-left, takes priority over content) */}
+      {bulkMode && (
+        <div className="absolute top-1.5 left-1.5 z-10">
+          <Checkbox
+            checked={selected}
+            onCheckedChange={() => undefined}
+            className="bg-background shadow-sm border-2"
+            aria-label={`'${task.title}' seç`}
+          />
+        </div>
+      )}
+      {/* Hover-only delete button (top-right) — works outside bulk mode */}
+      {!bulkMode && onDelete && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className={cn(
+            "absolute top-1 right-1 size-6 rounded-md flex items-center justify-center",
+            "opacity-0 group-hover/card:opacity-100 transition",
+            "bg-background/80 hover:bg-red-500/15 text-muted-foreground hover:text-red-700",
+            "border border-transparent hover:border-red-500/40",
+          )}
+          title="Sil"
+          aria-label={`'${task.title}' sil`}
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      )}
       <div className="flex items-start gap-2 mb-1.5">
         <span
           className={cn(
@@ -750,7 +872,7 @@ function TaskCard({
           </Avatar>
         )}
       </div>
-    </button>
+    </div>
   );
 }
 

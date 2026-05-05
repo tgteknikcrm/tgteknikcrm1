@@ -90,10 +90,36 @@ export async function setTaskStatus(id: string, status: TaskStatus) {
 export async function deleteTask(id: string) {
   const { supabase, error } = await requireUser();
   if (error) return { error };
-  const { error: e } = await supabase.from("tasks").delete().eq("id", id);
+  // Defensive .select().maybeSingle() — Supabase JS doesn't raise on
+  // RLS-blocked / missing-row deletes, it returns success with 0 rows.
+  // Without this guard the UI would toast "silindi" while the row sits
+  // in DB. Same pattern used in setTaskStatus.
+  const { data, error: e } = await supabase
+    .from("tasks")
+    .delete()
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
   if (e) return { error: e.message };
+  if (!data) return { error: "Görev silinemedi (yetki yok ya da zaten silinmiş)" };
   revalidatePath("/tasks");
   return { success: true };
+}
+
+export async function bulkDeleteTasks(ids: string[]) {
+  if (!ids || ids.length === 0) return { error: "Seçili görev yok" };
+  const { supabase, error } = await requireUser();
+  if (error) return { error };
+  const { data, error: e } = await supabase
+    .from("tasks")
+    .delete()
+    .in("id", ids)
+    .select("id");
+  if (e) return { error: e.message };
+  const deleted = (data ?? []).length;
+  if (deleted === 0) return { error: "Hiçbir görev silinemedi (yetki yok)" };
+  revalidatePath("/tasks");
+  return { success: true, deleted };
 }
 
 // ── Checklist ───────────────────────────────────────────────────

@@ -18,7 +18,9 @@ import {
 import {
   Box,
   Briefcase,
+  Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleDollarSign,
   Cog,
@@ -202,6 +204,20 @@ export function ProductForm({
   const [pickerSearch, setPickerSearch] = useState("");
   const [pickerSelected, setPickerSelected] = useState<Set<string>>(new Set());
 
+  // ── Wizard step state. 6 steps. Step 0..4 are sectional; Step 5 is
+  //    a summary + commercial + notes (final review then submit).
+  const [step, setStep] = useState<number>(0);
+  const STEPS: { key: string; label: string; icon: typeof FileText }[] = [
+    { key: "temel", label: "Temel Bilgi", icon: FileText },
+    { key: "sinif", label: "Sınıf & Malzeme", icon: Tag },
+    { key: "boyut", label: "Boyutlar", icon: Box },
+    { key: "imalat", label: "İmalat", icon: Cog },
+    { key: "takim", label: "Takım", icon: Wrench },
+    { key: "ozet", label: "Ticari & Özet", icon: CircleDollarSign },
+  ];
+  const isLastStep = step === STEPS.length - 1;
+  const isFirstStep = step === 0;
+
   const usedToolIds = useMemo(
     () => new Set(rows.map((r) => r.tool_id)),
     [rows],
@@ -328,8 +344,12 @@ export function ProductForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      {/* ── Identification ── */}
+    <form onSubmit={onSubmit} className="space-y-5">
+      {/* ── Stepper indicator ── */}
+      <Stepper steps={STEPS} current={step} onJump={setStep} />
+
+      {/* ── Step 0: Identification ── */}
+      {step === 0 && (
       <Section
         icon={FileText}
         title="Tanımlama"
@@ -385,8 +405,10 @@ export function ProductForm({
           />
         </Field>
       </Section>
+      )}
 
-      {/* ── Classification ── */}
+      {/* ── Step 1: Classification + Material ── */}
+      {step === 1 && (
       <Section
         icon={Tag}
         title="Sınıflandırma & Durum"
@@ -443,8 +465,9 @@ export function ProductForm({
           </Field>
         </div>
       </Section>
+      )}
 
-      {/* ── Material / Surface / Heat ── */}
+      {step === 1 && (
       <Section
         icon={Sparkles}
         title="Malzeme & Yüzey"
@@ -485,8 +508,10 @@ export function ProductForm({
           </Field>
         </div>
       </Section>
+      )}
 
-      {/* ── Dimensions ── */}
+      {/* ── Step 2: Dimensions ── */}
+      {step === 2 && (
       <Section
         icon={Box}
         title="Boyutlar & Toleranslar"
@@ -522,8 +547,10 @@ export function ProductForm({
           />
         </div>
       </Section>
+      )}
 
-      {/* ── Manufacturing ── */}
+      {/* ── Step 3: Manufacturing ── */}
+      {step === 3 && (
       <Section
         icon={Cog}
         title="İmalat"
@@ -613,8 +640,10 @@ export function ProductForm({
           </div>
         </div>
       </Section>
+      )}
 
-      {/* ── Commercial ── */}
+      {/* ── Step 5: Commercial ── */}
+      {step === 5 && (
       <Section
         icon={CircleDollarSign}
         title="Ticari"
@@ -657,8 +686,10 @@ export function ProductForm({
           </Field>
         </div>
       </Section>
+      )}
 
-      {/* ── Default tool list ── */}
+      {/* ── Step 4: Tools ── */}
+      {step === 4 && (
       <Section
         icon={Wrench}
         title="Varsayılan Takım Listesi"
@@ -800,8 +831,10 @@ export function ProductForm({
           )}
         </div>
       </Section>
+      )}
 
-      {/* ── Notes ── */}
+      {/* ── Step 4 (continued): Tools done. Step 5 = Notlar + final summary ── */}
+      {step === 5 && (
       <Section
         icon={Briefcase}
         title="Notlar"
@@ -813,24 +846,189 @@ export function ProductForm({
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
           placeholder="Operatör için notlar, kritik uyarılar"
+          className="text-base"
         />
       </Section>
+      )}
 
-      {/* Sticky footer */}
-      <div className="sticky bottom-0 z-10 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 bg-background/95 backdrop-blur border-t flex items-center justify-end gap-2">
+      {/* ── Step 5: Final summary card (read-only review) ── */}
+      {step === 5 && (
+        <ReviewSummary
+          fields={[
+            { label: "Ürün Kodu", value: code },
+            { label: "Ürün Adı", value: name },
+            { label: "Müşteri", value: customer },
+            { label: "Kategori", value: category },
+            { label: "Malzeme", value: material },
+            { label: "Sertlik", value: hardness },
+            {
+              label: "Boyut",
+              value: [
+                lengthMm && `${lengthMm}×${widthMm}×${heightMm}mm`,
+                diameterMm && `Ø${diameterMm}mm`,
+                weightKg && `${weightKg}kg`,
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            },
+            { label: "Proses", value: processType ? PRODUCT_PROCESS_LABEL[processType as ProductProcess] : "" },
+            {
+              label: "Süreler",
+              value: [
+                cycleTime && `cycle ${cycleTime} dk`,
+                setupTime && `ayar ${setupTime} dk`,
+                cleanupTime && `temizlik ${cleanupTime} dk`,
+              ]
+                .filter(Boolean)
+                .join(" · "),
+            },
+            { label: "Bağlama Adedi", value: partsPerSetup },
+            { label: "Takım Sayısı", value: rows.length > 0 ? `${rows.length} adet` : "" },
+            {
+              label: "Fiyat",
+              value: unitPrice ? `${unitPrice} ${currency}` : "",
+            },
+          ]}
+        />
+      )}
+
+      {/* ── Wizard navigation footer ── */}
+      <div className="sticky bottom-0 z-10 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-3 bg-background/95 backdrop-blur border-t flex items-center gap-2">
         <Button
           type="button"
-          variant="outline"
+          variant="ghost"
           onClick={() => router.push("/products")}
         >
           İptal
         </Button>
-        <Button type="submit" disabled={pending}>
-          {pending && <Loader2 className="size-4 animate-spin" />}
-          {isEdit ? "Kaydet" : "Oluştur"}
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setStep((s) => Math.max(0, s - 1))}
+            disabled={isFirstStep}
+            className="h-11 px-4 gap-1.5"
+          >
+            <ChevronLeft className="size-4" /> Geri
+          </Button>
+          {!isLastStep ? (
+            <Button
+              type="button"
+              onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
+              className="h-11 px-5 gap-1.5"
+            >
+              İleri <ChevronRight className="size-4" />
+            </Button>
+          ) : (
+            <Button type="submit" disabled={pending} className="h-11 px-5 gap-1.5">
+              {pending && <Loader2 className="size-4 animate-spin" />}
+              <Check className="size-4" />
+              {isEdit ? "Kaydet" : "Oluştur"}
+            </Button>
+          )}
+        </div>
       </div>
     </form>
+  );
+}
+
+/* ── Stepper indicator (numbered circles + connecting line) ── */
+function Stepper({
+  steps,
+  current,
+  onJump,
+}: {
+  steps: { key: string; label: string; icon: React.ComponentType<{ className?: string }> }[];
+  current: number;
+  onJump: (n: number) => void;
+}) {
+  return (
+    <nav aria-label="Wizard adımları" className="overflow-x-auto -mx-2 px-2 pb-1">
+      <ol className="flex items-stretch min-w-max gap-1">
+        {steps.map((s, i) => {
+          const done = i < current;
+          const active = i === current;
+          const Icon = s.icon;
+          return (
+            <li key={s.key} className="flex items-center">
+              <button
+                type="button"
+                onClick={() => done && onJump(i)}
+                disabled={!done}
+                className={cn(
+                  "flex items-center gap-2 px-3 py-2 rounded-lg border transition",
+                  done && "cursor-pointer hover:bg-emerald-500/15",
+                  active && "bg-primary/10 border-primary text-primary font-semibold",
+                  !active && !done &&
+                    "bg-muted/30 border-muted text-muted-foreground",
+                  done && "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300",
+                )}
+              >
+                <span
+                  className={cn(
+                    "size-7 rounded-full flex items-center justify-center text-sm font-bold tabular-nums shrink-0",
+                    active && "bg-primary text-primary-foreground",
+                    done && "bg-emerald-500 text-white",
+                    !active && !done && "bg-muted",
+                  )}
+                >
+                  {done ? <Check className="size-4" /> : i + 1}
+                </span>
+                <span className="hidden sm:inline-flex items-center gap-1.5 text-sm whitespace-nowrap">
+                  <Icon className="size-3.5" />
+                  {s.label}
+                </span>
+              </button>
+              {i < steps.length - 1 && (
+                <div
+                  className={cn(
+                    "w-4 sm:w-6 h-px mx-1",
+                    done ? "bg-emerald-500/60" : "bg-muted",
+                  )}
+                />
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+/* ── ReviewSummary (final step) — read-only key/value list ── */
+function ReviewSummary({
+  fields,
+}: {
+  fields: { label: string; value: string | number | null | undefined }[];
+}) {
+  return (
+    <div className="rounded-xl border bg-card overflow-hidden">
+      <div className="px-4 py-3 border-b bg-primary/5">
+        <div className="text-base font-semibold flex items-center gap-2">
+          <Check className="size-4 text-primary" /> Son Kontrol
+        </div>
+        <div className="text-sm text-muted-foreground mt-0.5">
+          Aşağıdaki bilgiler kaydedilecek. Geri tuşuyla düzenleyebilirsin.
+        </div>
+      </div>
+      <dl className="divide-y">
+        {fields.map((f) => (
+          <div
+            key={f.label}
+            className="flex items-baseline gap-3 px-4 py-2.5"
+          >
+            <dt className="text-sm font-medium text-muted-foreground w-44 shrink-0">
+              {f.label}
+            </dt>
+            <dd className="text-base font-medium flex-1 truncate">
+              {f.value || (
+                <span className="text-muted-foreground/60 italic">—</span>
+              )}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
   );
 }
 
@@ -860,26 +1058,26 @@ function Section({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "w-full flex items-center gap-3 px-4 py-3 text-left transition",
+          "w-full flex items-center gap-3 px-5 py-4 text-left transition",
           "hover:bg-muted/40",
         )}
       >
-        <div className="size-9 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
-          <Icon className="size-4" />
+        <div className="size-10 rounded-lg bg-primary/15 text-primary flex items-center justify-center shrink-0">
+          <Icon className="size-5" />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-sm font-semibold">{title}</div>
+          <div className="text-lg font-semibold">{title}</div>
           {description && (
-            <div className="text-xs text-muted-foreground">{description}</div>
+            <div className="text-sm text-muted-foreground mt-0.5">{description}</div>
           )}
         </div>
         {open ? (
-          <ChevronDown className="size-4 text-muted-foreground shrink-0" />
+          <ChevronDown className="size-5 text-muted-foreground shrink-0" />
         ) : (
-          <ChevronRight className="size-4 text-muted-foreground shrink-0" />
+          <ChevronRight className="size-5 text-muted-foreground shrink-0" />
         )}
       </button>
-      {open && <div className="border-t p-4 space-y-3">{children}</div>}
+      {open && <div className="border-t p-5 space-y-4">{children}</div>}
     </div>
   );
 }
@@ -889,17 +1087,19 @@ function Field({
   label,
   hint,
   children,
+  className,
 }: {
   label: string;
   hint?: string;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs font-medium">
+    <div className={cn("space-y-2 [&_input]:h-11 [&_input]:text-base [&_textarea]:text-base [&_button[role=combobox]]:h-11 [&_button[role=combobox]]:text-base", className)}>
+      <Label className="text-base font-medium">
         {label}
         {hint && (
-          <span className="text-muted-foreground font-normal ml-1">
+          <span className="text-sm text-muted-foreground font-normal ml-1.5">
             ({hint})
           </span>
         )}

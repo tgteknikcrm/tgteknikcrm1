@@ -491,3 +491,83 @@ export async function deleteQualityDrawing(drawingId: string, jobId: string) {
   revalidatePath(`/quality/${jobId}`);
   return { success: true, removedSpecs: specsDeleted?.length ?? 0 };
 }
+
+// ──────────────────────────────────────────────────────────────────
+// Cleanup helpers — when operators want to wipe quality data for a
+// job (e.g. cancelled/test job) without deleting the job itself.
+// Spec → measurement is CASCADE so deleting specs also clears
+// measurements. We also clear stand-alone reviews.
+// ──────────────────────────────────────────────────────────────────
+
+export async function clearQualityForJob(jobId: string) {
+  const supabase = await createClient();
+
+  // Wipe specs (cascade kills measurements). Then sweep any
+  // measurements not bound to a spec (defensive — shouldn't exist).
+  const { data: specs, error: sErr } = await supabase
+    .from("quality_specs")
+    .delete()
+    .eq("job_id", jobId)
+    .select("id");
+  if (sErr) return { error: sErr.message };
+
+  const { data: meas, error: mErr } = await supabase
+    .from("quality_measurements")
+    .delete()
+    .eq("job_id", jobId)
+    .select("id");
+  if (mErr) return { error: mErr.message };
+
+  const { error: rErr } = await supabase
+    .from("quality_reviews")
+    .delete()
+    .eq("job_id", jobId);
+  if (rErr) return { error: rErr.message };
+
+  await recordEvent({
+    type: "spec.deleted",
+    entity_type: "job",
+    entity_id: jobId,
+    metadata: {
+      bulk_clear: true,
+      removed_specs: specs?.length ?? 0,
+      removed_measurements: meas?.length ?? 0,
+    },
+  });
+
+  revalidatePath("/quality");
+  revalidatePath(`/quality/${jobId}`);
+  return {
+    success: true,
+    removedSpecs: specs?.length ?? 0,
+    removedMeasurements: meas?.length ?? 0,
+  };
+}
+
+export async function bulkClearQualityForJobs(jobIds: string[]) {
+  if (!jobIds || jobIds.length === 0) return { error: "Seçili iş yok" };
+  const supabase = await createClient();
+
+  const { data: specs, error: sErr } = await supabase
+    .from("quality_specs")
+    .delete()
+    .in("job_id", jobIds)
+    .select("id");
+  if (sErr) return { error: sErr.message };
+
+  const { data: meas, error: mErr } = await supabase
+    .from("quality_measurements")
+    .delete()
+    .in("job_id", jobIds)
+    .select("id");
+  if (mErr) return { error: mErr.message };
+
+  await supabase.from("quality_reviews").delete().in("job_id", jobIds);
+
+  revalidatePath("/quality");
+  return {
+    success: true,
+    removedSpecs: specs?.length ?? 0,
+    removedMeasurements: meas?.length ?? 0,
+  };
+}

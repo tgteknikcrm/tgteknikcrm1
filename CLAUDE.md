@@ -290,6 +290,7 @@ tgteknikcrm/
 
 - Bucket: **`drawings`** (private) · signed URL 10 dk · path `${user_id}/${ts}_${file}`
 - Bucket: **`tool-images`** (public) · direkt URL · path `${user_id}/${tool_id}/${ts}_${file}` · helper `toolImagePublicUrl(path)`
+- Bucket: **`machine-inspections`** (private) · signed URL 1 saat · path `${user_id}/${machine_id}/${ts}_${file}` · helper `getInspectionPhotoUrls(paths)`
 
 ---
 
@@ -329,6 +330,8 @@ tgteknikcrm/
 | 0030 | machine_downtime_sync.sql | machine_downtime_sessions tablosu + `_close_open_downtime_session` + `_active_job_entry_for_machine` helpers + AFTER UPDATE OF status ON machines trigger — makine `aktif → durus/bakim/ariza` olunca session açar, `aktif`'e dönünce kapatır + elapsed dk'ı active job'ın production_entry.downtime_minutes'ına credit eder. v_machine_active_downtime view (security_invoker). |
 | 0031 | complete_job_rpc.sql | İki SECURITY DEFINER RPC: `soft_delete_message(uuid)` — RLS read-after-update sessiz 0-row trap'i bypass + spesifik errcodes (auth_required / not_your_message / message_not_found). `complete_job_rpc(uuid, int)` — atomik jobs.UPDATE + production_entries INSERT/UPDATE + setup backfill (started_at→setup_completed_at delta) + scrap validation. Her ikisi de authenticated grant. |
 | 0032 | messaging_rls_recursion_fix.sql | `is_conversation_participant` + yeni `is_conversation_admin` SECURITY DEFINER fonksiyonlarına `set row_security = off` eklendi → "infinite recursion detected in policy for relation conversation_participants" hatası bitti. Calendar 0021'de yapılan recursion fix'in messaging eşdeğeri. Eski "delete participants" + "insert participants" policy'leri inline subquery yerine helper kullanır. |
+| 0033 | machine_inspections.sql | Yapılandırılmış temizlik + yağ kontrol kayıtları. `machine_inspections` tablosu (machine_id, type='temizlik'\|'yag_kontrol', items jsonb checklist, photo_paths text[], shift, performer) + private `machine-inspections` storage bucket. Operator vardiya başında/sonunda kontrol yapar — checklist + 1-3 fotoğraf + not. Eski `machine_timeline_entries (kind='temizlik')` plain-text yöntemini değiştirir. |
+| 0034 | kesim_module.sql | Kesim/Stok prep modülü. `raw_materials` (kod, malzeme grade, şekil, çap/en/boy/kalınlık, bar_length, quantity, lokasyon) + `cut_pieces` (raw_material_id FK, product_id FK opsiyonel, cut_length_mm, quantity_cut, quantity_remaining, lot_no, location). Kesim akışı: hammadde stoğundan boy düşer, cut_pieces stoğuna parça eklenir. raw_material_shape enum ile şekil kategorisi. |
 
 **Workflow:** Yeni migration:
 1. `supabase/migrations/00NN_name.sql` dosyasına yaz
@@ -971,6 +974,11 @@ Bilinçli karar: her job zaten `product_id`'ye bağlı. Multi-entry dialog'unda 
 - [x] ~~Search FAB sonuçlarında takım küçük thumb'ı gösterimi~~ — ✅ 2026-05-05
 - [x] ~~Dark mode toggle~~ — ✅ 2026-05-05 (topbar'da Sun/Moon/Monitor 3-state, localStorage `tg.theme`, FOUC-safe pre-paint script)
 - [ ] Test suite (vitest + playwright)
+- [x] ~~Görevler bulk silme + per-card hover trash~~ — ✅ 2026-05-05 (bulkDeleteTasks RPC + bulk mode toggle + checkbox UI + kart hover trash)
+- [x] ~~Kalite orphan ölçüm/spec temizleme akışı~~ — ✅ 2026-05-05 (`clearQualityForJob` + `bulkClearQualityForJobs` + per-card trash + detay sayfası "Hepsini Temizle" çift-tık onayı)
+- [x] ~~Ürün ekleme step-by-step wizard + büyük font~~ — ✅ 2026-05-05 (6 step: Temel/Sınıf+Malzeme/Boyut/İmalat/Takım/Ticari+Özet · stepper indicator · h-11 input · text-base label · son adımda ReviewSummary)
+- [x] ~~Temizlik + Yağ Kontrol inspection sistemi~~ — ✅ 2026-05-05 (migration 0033 · machine_inspections + photo bucket · checklist + kamera + not formu · makine detayında list view)
+- [x] ~~Kesim modülü~~ — ✅ 2026-05-05 (migration 0034 · raw_materials + cut_pieces · `/kesim` stok kart grid · `/kesim/hammadde` envanter · `/kesim/yeni` form (boy düşer + parça artar) · sidebar grup)
 
 ---
 

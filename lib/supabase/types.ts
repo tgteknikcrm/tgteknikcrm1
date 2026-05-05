@@ -1784,3 +1784,123 @@ export function readableTextOn(hex: string | null | undefined): string {
   const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return lum > 0.6 ? "#0f172a" : "white";
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Machine Inspections (Temizlik / Yağ Kontrol — migration 0033)
+// ─────────────────────────────────────────────────────────────────────
+export type InspectionType = "temizlik" | "yag_kontrol";
+
+export const INSPECTION_TYPE_LABEL: Record<InspectionType, string> = {
+  temizlik: "Temizlik",
+  yag_kontrol: "Yağ Kontrol",
+};
+
+export interface InspectionItem {
+  key: string;
+  label: string;
+  ok: boolean;
+  na?: boolean;
+}
+
+export interface MachineInspection {
+  id: string;
+  machine_id: string;
+  type: InspectionType;
+  performed_by: string | null;
+  performed_at: string;
+  shift: Shift | null;
+  items: InspectionItem[];
+  photo_paths: string[];
+  notes: string | null;
+  created_at: string;
+}
+
+// Standard checklist templates per inspection type. Operators can tap
+// "Hepsi OK" to accept all at once, then tweak individual items if any
+// were not normal. Items are stored verbatim per record so updating
+// the template doesn't retroactively change historical inspections.
+export const INSPECTION_TEMPLATES: Record<InspectionType, InspectionItem[]> = {
+  temizlik: [
+    { key: "talas_haznesi", label: "Talaş haznesi boşaltıldı", ok: false },
+    { key: "govde", label: "Gövde / panel temiz", ok: false },
+    { key: "koruma_cami", label: "Koruma camı / kapı temiz", ok: false },
+    { key: "sogutma_havuzu", label: "Soğutma havuzu temiz", ok: false },
+    { key: "etraf", label: "Makine etrafı / yer temiz", ok: false },
+    { key: "araclar", label: "Aletler yerine kondu", ok: false },
+  ],
+  yag_kontrol: [
+    { key: "hidrolik_seviye", label: "Hidrolik yağ seviyesi normal", ok: false },
+    { key: "yag_rengi", label: "Yağ rengi/durumu normal", ok: false },
+    { key: "kacak", label: "Yağ kaçağı yok", ok: false },
+    { key: "yaglayici", label: "Yağlayıcı seviye normal", ok: false },
+    { key: "sogutma_sivisi", label: "Soğutma sıvısı seviye/durum normal", ok: false },
+    { key: "filtre", label: "Yağ filtresi temiz", ok: false },
+  ],
+};
+
+// Public URL helper for inspection photos. Bucket is private — use
+// signed URL via server action / route handler for actual viewing.
+// This helper is only for the path → relative URL convention.
+export function inspectionPhotoSignedKey(path: string): string {
+  return `machine-inspections/${path}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Cutting / Stock Prep (Kesim — migration 0034)
+// ─────────────────────────────────────────────────────────────────────
+export type RawMaterialShape = "round" | "square" | "rectangular" | "plate" | "tube" | "diger";
+
+export const RAW_MATERIAL_SHAPE_LABEL: Record<RawMaterialShape, string> = {
+  round: "Yuvarlak",
+  square: "Kare",
+  rectangular: "Dikdörtgen",
+  plate: "Plaka",
+  tube: "Boru",
+  diger: "Diğer",
+};
+
+export interface RawMaterial {
+  id: string;
+  code: string;
+  name: string;
+  material_grade: string | null;
+  shape: RawMaterialShape;
+  diameter_mm: number | null;
+  width_mm: number | null;
+  height_mm: number | null;
+  thickness_mm: number | null;
+  bar_length_mm: number | null;
+  quantity: number;
+  unit: string;
+  supplier: string | null;
+  location: string | null;
+  notes: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CutPiece {
+  id: string;
+  raw_material_id: string;
+  product_id: string | null;
+  cut_length_mm: number;
+  quantity_cut: number;
+  quantity_remaining: number;
+  cut_at: string;
+  cut_by: string | null;
+  lot_no: string | null;
+  location: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+// Convenience: includes joined raw_material + product info commonly
+// needed by the cut-pieces list UI.
+export interface CutPieceWithRefs extends CutPiece {
+  raw_material?: Pick<
+    RawMaterial,
+    "id" | "code" | "name" | "shape" | "diameter_mm" | "material_grade"
+  > | null;
+  product?: { id: string; code: string; name: string } | null;
+}

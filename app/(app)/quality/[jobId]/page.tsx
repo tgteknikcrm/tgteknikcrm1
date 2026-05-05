@@ -49,6 +49,7 @@ import { ReviewDialog } from "../review-dialog";
 import { ResultBadge } from "../result-badge";
 import { QcImageBoard } from "../image-board";
 import { SpecScroll } from "./spec-scroll";
+import { ClearAllButton } from "./clear-all-button";
 import { DeleteButton } from "../../operators/delete-button";
 import { deleteSpec, deleteMeasurement, deleteQualityReview } from "../actions";
 import { formatDateTime } from "@/lib/utils";
@@ -193,6 +194,12 @@ export default async function QualityJobPage({
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
+          <ClearAllButton
+            jobId={jobId}
+            partName={job.part_name}
+            specCount={specs.length}
+            measurementCount={measurements.length}
+          />
           <Button asChild variant="outline">
             <Link href={`/quality/${jobId}/report`}>
               <FileDown className="size-4" /> Kalite Raporu

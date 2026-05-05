@@ -10,6 +10,7 @@ import {
   BarChart3,
   CalendarRange,
   Cog,
+  Scissors,
   type LucideIcon,
 } from "lucide-react";
 
@@ -65,6 +66,16 @@ export const navItems: NavEntry[] = [
       { href: "/jobs", label: "İşler" },
       { href: "/production", label: "Üretim Formları" },
       { href: "/products", label: "Ürünler" },
+    ],
+  },
+  {
+    kind: "group",
+    label: "Kesim",
+    icon: Scissors,
+    children: [
+      { href: "/kesim", label: "Kesim Stoğu" },
+      { href: "/kesim/hammadde", label: "Hammadde" },
+      { href: "/kesim/yeni", label: "Yeni Kesim" },
     ],
   },
   {

@@ -101,6 +101,7 @@ export default async function MachineDetailPage({
     downtimesRes,
     timelineRes,
     productLogRes,
+    inspectionsRes,
   ] = await Promise.all([
     supabase
       .from("production_entries")
@@ -165,6 +166,14 @@ export default async function MachineDetailPage({
       .eq("machine_id", id)
       .order("entry_date", { ascending: false })
       .limit(500),
+    supabase
+      .from("machine_inspections")
+      .select(
+        `*, performer:profiles!machine_inspections_performed_by_fkey(full_name)`,
+      )
+      .eq("machine_id", id)
+      .order("performed_at", { ascending: false })
+      .limit(60),
   ]);
 
   const entries = (entriesRes.data ?? []) as EntryWithJoins[];
@@ -231,6 +240,26 @@ export default async function MachineDetailPage({
   );
   const yagKontrolEntries: TimelineEntryRow[] = allTimeline.filter(
     (e) => e.kind === "yag_kontrol",
+  );
+
+  // ── Structured machine inspections (migration 0033) ──────────
+  type InspectionRowRaw = {
+    id: string;
+    machine_id: string;
+    type: "temizlik" | "yag_kontrol";
+    performed_by: string | null;
+    performed_at: string;
+    shift: Shift | null;
+    items: { key: string; label: string; ok: boolean; na?: boolean }[];
+    photo_paths: string[];
+    notes: string | null;
+    created_at: string;
+    performer: { full_name: string | null } | null;
+  };
+  const allInspections = (inspectionsRes.data ?? []) as InspectionRowRaw[];
+  const temizlikInspections = allInspections.filter((i) => i.type === "temizlik");
+  const yagKontrolInspections = allInspections.filter(
+    (i) => i.type === "yag_kontrol",
   );
 
   // ── Products produced on this machine (aggregated) ──────────
@@ -547,6 +576,8 @@ export default async function MachineDetailPage({
         arizaEntries={arizaEntries}
         temizlikEntries={temizlikEntries}
         yagKontrolEntries={yagKontrolEntries}
+        temizlikInspections={temizlikInspections}
+        yagKontrolInspections={yagKontrolInspections}
         productionLog={productionLog}
         kpis={kpis}
       />
