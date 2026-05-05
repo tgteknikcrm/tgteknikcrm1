@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import {
   Dialog,
   DialogContent,
@@ -21,14 +21,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { saveTool } from "./actions";
+import { saveTool, setToolImage } from "./actions";
 import { ToolImageUpload } from "./image-upload";
 import {
   TOOL_CONDITION_LABEL,
   type Tool,
   type ToolCondition,
 } from "@/lib/supabase/types";
-import { Loader2, Camera } from "lucide-react";
+import { Loader2, Camera, Upload, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface Props {
   tool?: Tool;
@@ -54,6 +55,46 @@ export function ToolDialog({ tool, trigger }: Props) {
   const [price, setPrice] = useState<string>(tool?.price?.toString() ?? "");
   const [notes, setNotes] = useState(tool?.notes ?? "");
 
+  // Staged image (only used for new tools — uploaded after saveTool returns id)
+  const [stagedFile, setStagedFile] = useState<File | null>(null);
+  const [stagedPreview, setStagedPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Build/cleanup object URL for the staged preview.
+  useEffect(() => {
+    if (!stagedFile) {
+      setStagedPreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(stagedFile);
+    setStagedPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [stagedFile]);
+
+  function pickFile() {
+    fileInputRef.current?.click();
+  }
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Sadece görsel dosyası seçilebilir.");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("Dosya en fazla 8 MB olabilir.");
+      return;
+    }
+    setStagedFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function clearStaged() {
+    setStagedFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     startTransition(async () => {
@@ -72,11 +113,25 @@ export function ToolDialog({ tool, trigger }: Props) {
         price: price ? Number(price) : null,
         notes,
       });
-      if (result.error) toast.error(result.error);
-      else {
-        toast.success(tool ? "Takım güncellendi" : "Takım eklendi");
-        setOpen(false);
+      if (result.error) {
+        toast.error(result.error);
+        return;
       }
+
+      // If we staged an image during create, upload it now using the new id.
+      if (!tool && stagedFile && result.id) {
+        const fd = new FormData();
+        fd.append("file", stagedFile);
+        const up = await setToolImage(result.id, fd);
+        if (up.error) {
+          toast.error("Takım eklendi ama resim yüklenemedi: " + up.error);
+        } else {
+          toast.success("Takım ve resim kaydedildi");
+        }
+      } else {
+        toast.success(tool ? "Takım güncellendi" : "Takım eklendi");
+      }
+      setOpen(false);
     });
   }
 
@@ -88,7 +143,7 @@ export function ToolDialog({ tool, trigger }: Props) {
           <DialogTitle>{tool ? "Takım Düzenle" : "Yeni Takım"}</DialogTitle>
         </DialogHeader>
 
-        {/* Image section — only for existing tools (server actions need an id) */}
+        {/* Image section — for existing tools use live upload; for new tools, stage a file */}
         <div className="space-y-1.5">
           <Label className="flex items-center gap-1.5">
             <Camera className="size-3.5" /> Resim
@@ -96,9 +151,69 @@ export function ToolDialog({ tool, trigger }: Props) {
           {tool ? (
             <ToolImageUpload toolId={tool.id} initialPath={tool.image_path} />
           ) : (
-            <div className="rounded-lg border-2 border-dashed p-4 text-xs text-muted-foreground text-center">
-              Önce takımı kaydet, sonra düzenleyerek resim ekleyebilirsin.
-            </div>
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={onFileChange}
+              />
+              {stagedPreview ? (
+                <div className="relative group rounded-lg overflow-hidden border bg-muted/30">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={stagedPreview}
+                    alt="Önizleme"
+                    className="w-full max-h-56 object-contain"
+                  />
+                  <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={pickFile}
+                      disabled={pending}
+                      className="h-8 shadow"
+                    >
+                      <Upload className="size-3.5" /> Değiştir
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={clearStaged}
+                      disabled={pending}
+                      className="h-8 shadow"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                  <div className="absolute bottom-2 left-2 rounded bg-background/80 backdrop-blur px-2 py-1 text-xs">
+                    Kaydedince yüklenecek
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={pickFile}
+                  disabled={pending}
+                  className={cn(
+                    "w-full rounded-lg border-2 border-dashed p-6 flex flex-col items-center justify-center gap-2 text-muted-foreground transition",
+                    "hover:border-primary/50 hover:bg-muted/30 hover:text-foreground",
+                    pending && "opacity-60 cursor-wait",
+                  )}
+                >
+                  <Camera className="size-7" />
+                  <div className="text-center">
+                    <p className="text-sm font-medium">Resim ekle (opsiyonel)</p>
+                    <p className="text-xs text-muted-foreground">
+                      JPG / PNG / WebP · maks 8 MB
+                    </p>
+                  </div>
+                </button>
+              )}
+            </>
           )}
         </div>
 

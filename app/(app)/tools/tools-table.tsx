@@ -14,19 +14,27 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { AlertTriangle, Wrench } from "lucide-react";
+import { AlertTriangle, ShoppingCart, Wrench } from "lucide-react";
 import {
   TOOL_CONDITION_LABEL,
   toolImagePublicUrl,
+  type Supplier,
   type Tool,
 } from "@/lib/supabase/types";
 import { ToolDialog } from "./tool-dialog";
+import { OrderDialog } from "../orders/order-dialog";
 import { DeleteButton } from "../operators/delete-button";
 import { bulkDeleteTools, deleteTool } from "./actions";
 import { useBulkSelection } from "@/lib/use-bulk-selection";
 import { BulkActionsBar } from "@/components/app/bulk-actions-bar";
 
-export function ToolsTable({ tools }: { tools: Tool[] }) {
+export function ToolsTable({
+  tools,
+  suppliers,
+}: {
+  tools: Tool[];
+  suppliers: Pick<Supplier, "id" | "name">[];
+}) {
   const router = useRouter();
   const ids = useMemo(() => tools.map((t) => t.id), [tools]);
   const sel = useBulkSelection(ids);
@@ -140,6 +148,23 @@ export function ToolsTable({ tools }: { tools: Tool[] }) {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex gap-1 justify-end">
+                    <OrderDialog
+                      suppliers={suppliers}
+                      defaultCategory="takim"
+                      defaultDescription={
+                        t.code ? `${t.code} — ${t.name}` : t.name
+                      }
+                      trigger={
+                        <Button
+                          variant={low ? "default" : "ghost"}
+                          size="sm"
+                          title="Bu takım için sipariş oluştur"
+                        >
+                          <ShoppingCart className="size-4" />
+                          {low && <span className="ml-1">Sipariş</span>}
+                        </Button>
+                      }
+                    />
                     <ToolDialog
                       tool={t}
                       trigger={

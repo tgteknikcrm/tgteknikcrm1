@@ -87,7 +87,7 @@ export default async function ToolsPage({
               description={q ? "Arama terimini değiştirin." : "İlk takımı ekleyerek envanterini oluştur."}
             />
           ) : (
-            <ToolsTable tools={tools} />
+            <ToolsTable tools={tools} suppliers={suppliers} />
           )}
         </CardContent>
       </Card>

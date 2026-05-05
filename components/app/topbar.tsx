@@ -24,6 +24,7 @@ import { formatPhoneForDisplay } from "@/lib/phone";
 import { NotificationBell } from "./notification-bell";
 import { MessagesButton } from "./messages-button";
 import { MessageNotifier } from "./message-notifier";
+import { ThemeToggle } from "./theme-toggle";
 
 interface TopbarProps {
   isAdmin: boolean;
@@ -91,6 +92,9 @@ export function Topbar({ isAdmin, profile }: TopbarProps) {
 
         {/* Browser notification toggle (sound + desktop notif when tab hidden) */}
         <MessageNotifier />
+
+        {/* Theme: light / dark / system */}
+        <ThemeToggle />
 
         {/* Notifications */}
         <NotificationBell variant="icon" />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import * as fabric from "fabric";
 import {
   Dialog,
@@ -164,6 +165,7 @@ function ImageViewer({
   const fabricRef = useRef<fabric.Canvas | null>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -201,10 +203,45 @@ function ImageViewer({
         if (drawing.annotations) {
           await canvas.loadFromJSON(drawing.annotations as object);
           canvas.backgroundImage = img;
-          // Lock all objects in viewer mode
+          // Lock most objects in viewer mode — but make number bubbles
+          // clickable so the user can jump to the matching quality spec.
           canvas.getObjects().forEach((o) => {
-            o.set({ selectable: false, evented: false });
+            const meta = (
+              o as fabric.Object & {
+                data?: { kind?: string; n?: number };
+              }
+            ).data;
+            const isBubble =
+              meta?.kind === "number" &&
+              typeof meta.n === "number" &&
+              !!drawing.job_id;
+            o.set({
+              selectable: false,
+              evented: isBubble,
+              hoverCursor: isBubble ? "pointer" : "default",
+            });
           });
+
+          // Click handler: navigate to /quality/<job>?bubble=<n>#spec-<n>
+          if (drawing.job_id) {
+            canvas.on("mouse:up", (opt) => {
+              const t = opt.target as
+                | (fabric.Object & {
+                    data?: { kind?: string; n?: number };
+                  })
+                | undefined;
+              if (
+                t?.data?.kind === "number" &&
+                typeof t.data.n === "number"
+              ) {
+                const n = t.data.n;
+                onClose();
+                router.push(
+                  `/quality/${drawing.job_id}?bubble=${n}#spec-${n}`,
+                );
+              }
+            });
+          }
         }
         canvas.renderAll();
         setReady(true);
@@ -219,7 +256,7 @@ function ImageViewer({
       canvas.dispose();
       fabricRef.current = null;
     };
-  }, [url, drawing.annotations]);
+  }, [url, drawing.annotations, drawing.job_id, router, onClose]);
 
   const baseName = drawing.title.replace(/\.[^.]+$/, "") || "resim";
 

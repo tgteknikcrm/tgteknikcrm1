@@ -957,19 +957,19 @@ Bilinçli karar: her job zaten `product_id`'ye bağlı. Multi-entry dialog'unda 
 ## Bekleyen / Geliştirilebilir
 
 - [x] ~~Vercel deploy~~ — ✅ canlı (2026-04-28): https://tgteknikcrm1.vercel.app
-- [ ] Vercel'e `SUPABASE_SERVICE_ROLE_KEY` env eklenmeli (admin Ayarlar sayfası için)
-- [ ] Supabase Auth → URL Configuration: Site URL + Redirect URLs (Vercel domain'i tanıt)
-- [ ] Supabase Dashboard → Leaked Password Protection açma
-- [ ] Tools sayfasında bir takıma tıklayıp → direkt o takım için sipariş oluşturma akışı (şu an defaultCategory=takim ile boş dialog açılıyor)
+- [x] ~~Vercel'e `SUPABASE_SERVICE_ROLE_KEY` env eklenmeli~~ — ✅ tüm ortamlarda kurulu (2026-05-05)
+- [ ] Supabase Auth → URL Configuration: Site URL + Redirect URLs (Vercel domain'i tanıt) — **kullanıcı dashboard'dan yapacak**
+- [ ] Supabase Dashboard → Leaked Password Protection açma — **kullanıcı dashboard'dan yapacak**
+- [x] ~~Tools sayfasında bir takıma tıklayıp → direkt o takım için sipariş oluşturma akışı~~ — ✅ 2026-05-05 (her satırda Sipariş ikonu, takım koduyla pre-fill)
 - [ ] Dashboard makine kartları henüz `machine_shift_assignments`'tan okumuyor — production_entries'teki operatöre bakıyor. İstenirse shift assignment da gösterilebilir
 - [ ] PDF annotation (pdf.js) — user istemişti ama öncelik vermedi
-- [ ] Dashboard "Eksik Takım" ve "Vardiya Özeti" kartları modern redesign'a çekilmedi
-- [ ] Dashboard'a "Kalite" mini widget (bugün ölçülen, NOK oranı, son NOK)
-- [ ] Drawings annotation balon numaralarını → quality_specs.bubble_no ile bağla (tıklayınca spec'e atla)
+- [x] ~~Dashboard "Eksik Takım" ve "Vardiya Özeti" kartları modern redesign~~ — ✅ 2026-05-05 (3-col widget grid: Kalite + Eksik Takım + Vardiya Özeti)
+- [x] ~~Dashboard'a "Kalite" mini widget~~ — ✅ 2026-05-05 (bugün ölçülen, OK%/NOK, son NOK link'leri)
+- [x] ~~Drawings annotation balon numaralarını → quality_specs.bubble_no ile bağla~~ — ✅ 2026-05-05 (viewer'da bubble click → /quality/[jobId]?bubble=N#spec-N + scroll/highlight)
 - [ ] Cp/Cpk istatistiksel proses yeteneği (kalite raporunda)
-- [ ] Yeni takım eklerken aynı dialog'da resim yükleme (şu an önce kaydetmek gerekiyor)
-- [ ] Search FAB sonuçlarında takım küçük thumb'ı gösterimi
-- [ ] Dark mode toggle (sistem teması destekleniyor ama manuel toggle yok)
+- [x] ~~Yeni takım eklerken aynı dialog'da resim yükleme~~ — ✅ 2026-05-05 (staged file → saveTool sonrası setToolImage tetiklenir)
+- [x] ~~Search FAB sonuçlarında takım küçük thumb'ı gösterimi~~ — ✅ 2026-05-05
+- [x] ~~Dark mode toggle~~ — ✅ 2026-05-05 (topbar'da Sun/Moon/Monitor 3-state, localStorage `tg.theme`, FOUC-safe pre-paint script)
 - [ ] Test suite (vitest + playwright)
 
 ---

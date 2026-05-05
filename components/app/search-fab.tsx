@@ -26,13 +26,20 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { toolImagePublicUrl } from "@/lib/supabase/types";
 import { cn } from "@/lib/utils";
 
 type Group = {
   key: string;
   label: string;
   icon: LucideIcon;
-  items: { id: string; title: string; subtitle?: string; href: string }[];
+  items: {
+    id: string;
+    title: string;
+    subtitle?: string;
+    href: string;
+    thumb?: string | null;
+  }[];
 };
 
 export function SearchFab() {
@@ -87,7 +94,7 @@ export function SearchFab() {
           .limit(5),
         supabase
           .from("tools")
-          .select("id, code, name, type, location")
+          .select("id, code, name, type, location, image_path")
           .or(
             `name.ilike.${like},code.ilike.${like},type.ilike.${like},location.ilike.${like}`,
           )
@@ -164,6 +171,7 @@ export function SearchFab() {
           title: t.name,
           subtitle: [t.code, t.type, t.location].filter(Boolean).join(" · ") || undefined,
           href: `/tools?q=${encodeURIComponent(t.name)}`,
+          thumb: toolImagePublicUrl(t.image_path),
         })),
       },
       {
@@ -329,8 +337,17 @@ export function SearchFab() {
                         }}
                         className="flex items-start gap-3 px-4 py-2 hover:bg-accent transition-colors"
                       >
-                        <div className="size-8 rounded-md bg-muted flex items-center justify-center shrink-0 mt-0.5">
-                          <g.icon className="size-4 text-muted-foreground" />
+                        <div className="size-8 rounded-md bg-muted flex items-center justify-center shrink-0 mt-0.5 overflow-hidden">
+                          {it.thumb ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={it.thumb}
+                              alt=""
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <g.icon className="size-4 text-muted-foreground" />
+                          )}
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="text-sm font-medium truncate">

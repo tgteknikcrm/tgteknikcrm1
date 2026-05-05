@@ -58,6 +58,15 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="tr" suppressHydrationWarning>
+      <head>
+        {/* Pre-paint theme: read tg.theme from localStorage, fall back to system
+            preference. Runs synchronously before first paint to avoid FOUC. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var m=localStorage.getItem('tg.theme');var d=m==='dark'||(!m&&window.matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.documentElement.classList.add('dark');}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className={`${googleSans.variable} font-sans antialiased min-h-screen bg-background text-foreground`}>
         {children}
         <Toaster position="top-right" richColors />

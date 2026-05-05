@@ -48,6 +48,7 @@ import { BulkMeasurementDialog } from "../bulk-measurement-dialog";
 import { ReviewDialog } from "../review-dialog";
 import { ResultBadge } from "../result-badge";
 import { QcImageBoard } from "../image-board";
+import { SpecScroll } from "./spec-scroll";
 import { DeleteButton } from "../../operators/delete-button";
 import { deleteSpec, deleteMeasurement, deleteQualityReview } from "../actions";
 import { formatDateTime } from "@/lib/utils";
@@ -73,10 +74,16 @@ type MeasRow = QualityMeasurement & {
 
 export default async function QualityJobPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ jobId: string }>;
+  searchParams: Promise<{ bubble?: string }>;
 }) {
   const { jobId } = await params;
+  const sp = await searchParams;
+  const bubbleParam = sp.bubble ? Number(sp.bubble) : null;
+  const focusedBubble =
+    bubbleParam !== null && Number.isFinite(bubbleParam) ? bubbleParam : null;
 
   const supabase = await createClient();
 
@@ -339,7 +346,16 @@ export default async function QualityJobPage({
       </div>
 
       {/* Tabs */}
-      <Tabs defaultValue={drawingsForBoard.length > 0 ? "image" : "specs"}>
+      <SpecScroll bubble={focusedBubble} />
+      <Tabs
+        defaultValue={
+          focusedBubble !== null
+            ? "specs"
+            : drawingsForBoard.length > 0
+              ? "image"
+              : "specs"
+        }
+      >
         <TabsList>
           <TabsTrigger value="image">
             <ImageIcon className="size-4" /> Resim Üzerinden
@@ -398,7 +414,20 @@ export default async function QualityJobPage({
                   </TableHeader>
                   <TableBody>
                     {specs.map((s) => (
-                      <TableRow key={s.id}>
+                      <TableRow
+                        key={s.id}
+                        id={
+                          s.bubble_no !== null
+                            ? `spec-${s.bubble_no}`
+                            : undefined
+                        }
+                        className={
+                          focusedBubble !== null &&
+                          s.bubble_no === focusedBubble
+                            ? "bg-primary/5"
+                            : undefined
+                        }
+                      >
                         <TableCell className="text-center font-mono font-bold tabular-nums text-muted-foreground">
                           {s.bubble_no ?? "—"}
                         </TableCell>
