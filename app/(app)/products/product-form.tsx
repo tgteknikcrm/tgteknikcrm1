@@ -588,10 +588,10 @@ export function ProductForm({
       <Section
         icon={Cog}
         title="İmalat"
-        description="Proses, makine, ayar süresi, parça başı süre, bağlama adedi"
+        description="Proses tipi, ayar süresi, işleme süresi, temizlik ve bağlanan adet"
         defaultOpen
       >
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <Field label="Proses Tipi">
             <Select
               value={processType || "none"}
@@ -607,24 +607,6 @@ export function ProductForm({
                 {PROCESSES.map((p) => (
                   <SelectItem key={p} value={p}>
                     {PRODUCT_PROCESS_LABEL[p]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Varsayılan Makine">
-            <Select
-              value={defaultMachineId}
-              onValueChange={setDefaultMachineId}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="—" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">— Yok —</SelectItem>
-                {machines.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.name}
                   </SelectItem>
                 ))}
               </SelectContent>
