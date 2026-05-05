@@ -8,6 +8,8 @@ import { ClipboardCheck, Plus } from "lucide-react";
 import { EmptyState } from "@/components/app/empty-state";
 import { SearchInput } from "@/components/app/search-input";
 import { QualityList } from "./quality-list";
+import { OrphanCleanupBanner } from "./orphan-cleanup-banner";
+import { countOrphanQualityJobs } from "./actions";
 
 export const metadata = { title: "Kalite Kontrol" };
 
@@ -21,6 +23,7 @@ export default async function QualityListPage({
   const { q, filter = "all" } = await searchParams;
 
   let summaries: QualitySummary[] = [];
+  let orphanInfo = { count: 0, hasData: false };
 
   try {
     const supabase = await createClient();
@@ -36,8 +39,12 @@ export default async function QualityListPage({
       );
     }
 
-    const res = await qbuilder;
+    const [res, orphan] = await Promise.all([
+      qbuilder,
+      countOrphanQualityJobs(),
+    ]);
     summaries = (res.data ?? []) as QualitySummary[];
+    orphanInfo = orphan;
   } catch {
     /* not configured */
   }
@@ -72,6 +79,10 @@ export default async function QualityListPage({
         description="İş bazında kalite spec'leri ve ölçüm kayıtları."
         actions={<SearchInput placeholder="İş no, müşteri, parça..." />}
       />
+
+      {orphanInfo.hasData && (
+        <OrphanCleanupBanner initialCount={orphanInfo.count} />
+      )}
 
       <div className="flex gap-2 mb-4 flex-wrap">
         <FilterLink

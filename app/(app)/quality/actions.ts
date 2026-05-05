@@ -571,3 +571,108 @@ export async function bulkClearQualityForJobs(jobIds: string[]) {
     removedMeasurements: meas?.length ?? 0,
   };
 }
+
+/**
+ * One-shot orphan cleanup — finds every job whose product_id is NULL
+ * AND deletes its quality data (specs + measurements + reviews).
+ *
+ * Use case: products were deleted before the cascade landed in code,
+ * leaving orphan jobs with stale quality records cluttering /quality.
+ *
+ * Jobs themselves are NOT touched (they may have production history).
+ * Only quality data is wiped.
+ */
+export async function cleanOrphanQualityData() {
+  const supabase = await createClient();
+
+  // Find jobs with no product attachment.
+  const { data: orphanJobs, error: jErr } = await supabase
+    .from("jobs")
+    .select("id")
+    .is("product_id", null);
+  if (jErr) return { error: jErr.message };
+
+  const jobIds = (orphanJobs ?? []).map((j) => j.id as string);
+  if (jobIds.length === 0) {
+    return {
+      success: true,
+      affectedJobs: 0,
+      removedSpecs: 0,
+      removedMeasurements: 0,
+    };
+  }
+
+  // Find which of those have quality data (so we can report accurately).
+  const [specsRes, measRes] = await Promise.all([
+    supabase
+      .from("quality_specs")
+      .delete()
+      .in("job_id", jobIds)
+      .select("id, job_id"),
+    supabase
+      .from("quality_measurements")
+      .delete()
+      .in("job_id", jobIds)
+      .select("id, job_id"),
+  ]);
+  if (specsRes.error) return { error: specsRes.error.message };
+  if (measRes.error) return { error: measRes.error.message };
+
+  await supabase.from("quality_reviews").delete().in("job_id", jobIds);
+
+  // Count distinct jobs actually affected (had at least one row removed).
+  const affectedJobIds = new Set<string>();
+  for (const r of specsRes.data ?? []) affectedJobIds.add(r.job_id as string);
+  for (const r of measRes.data ?? []) affectedJobIds.add(r.job_id as string);
+
+  await recordEvent({
+    type: "spec.deleted",
+    entity_type: "job",
+    entity_id: jobIds[0] ?? "",
+    metadata: {
+      orphan_cleanup: true,
+      affected_jobs: affectedJobIds.size,
+      removed_specs: specsRes.data?.length ?? 0,
+      removed_measurements: measRes.data?.length ?? 0,
+    },
+  });
+
+  revalidatePath("/quality");
+  return {
+    success: true,
+    affectedJobs: affectedJobIds.size,
+    removedSpecs: specsRes.data?.length ?? 0,
+    removedMeasurements: measRes.data?.length ?? 0,
+  };
+}
+
+/**
+ * Variance: how many "orphan" jobs (product_id null) currently have
+ * quality data attached. Used by the /quality page banner so we can
+ * show the cleanup CTA only when there's actually something to clean.
+ */
+export async function countOrphanQualityJobs(): Promise<{
+  count: number;
+  hasData: boolean;
+}> {
+  const supabase = await createClient();
+  const { data: orphanJobs } = await supabase
+    .from("jobs")
+    .select("id")
+    .is("product_id", null);
+  const ids = (orphanJobs ?? []).map((j) => j.id as string);
+  if (ids.length === 0) return { count: 0, hasData: false };
+
+  const [{ count: specCount }, { count: measCount }] = await Promise.all([
+    supabase
+      .from("quality_specs")
+      .select("id", { count: "exact", head: true })
+      .in("job_id", ids),
+    supabase
+      .from("quality_measurements")
+      .select("id", { count: "exact", head: true })
+      .in("job_id", ids),
+  ]);
+  const total = (specCount ?? 0) + (measCount ?? 0);
+  return { count: ids.length, hasData: total > 0 };
+}
